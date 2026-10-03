@@ -44,12 +44,18 @@ export const isUuid = (v: unknown): v is string => typeof v === 'string' && UUID
 export async function resolveLead(identity: LeadIdentity, repo: LeadRepo): Promise<ResolvedLead> {
   const validLid = isUuid(identity.lead_id) ? identity.lead_id : null;
 
-  // 1. lead_id válido (formato) e existente
+  // 1. lead_id válido (formato) e existente. O e-mail pesa mais que o cookie (D-06):
+  //    se o e-mail enviado contradiz o do lead, o evento não é anexado a ele.
+  let cookieLeadTaken = false;
+  let phoneTakenByRejectedLead = false;
   if (validLid) {
     const byId = await repo.findById(validLid);
     if (byId) {
-      await fillContact(byId, identity, repo);
-      return { lead_id: byId.id, created: false, matched_by: 'lead_id' };
+      if (await emailAgrees(byId, identity.email_norm, repo)) {
+        await fillContact(byId, identity, repo);
+        return { lead_id: byId.id, created: false, matched_by: 'lead_id' };
+      }
+      cookieLeadTaken = true;
     }
   }
 
@@ -65,7 +71,11 @@ export async function resolveLead(identity: LeadIdentity, repo: LeadRepo): Promi
   // 3. telefone
   if (identity.phone_e164) {
     const byPhone = await repo.findByPhone(identity.phone_e164);
-    if (byPhone) {
+    if (byPhone && cookieLeadTaken && byPhone.id === validLid) {
+      // O telefone é do lead do cookie, que o e-mail já excluiu. Não anexa, e o telefone
+      // (unique) não pode ir para o lead novo.
+      phoneTakenByRejectedLead = true;
+    } else if (byPhone) {
       await fillContact(byPhone, identity, repo);
       return { lead_id: byPhone.id, created: false, matched_by: 'phone' };
     }
@@ -73,9 +83,9 @@ export async function resolveLead(identity: LeadIdentity, repo: LeadRepo): Promi
 
   // 4. lead novo (reaproveita o UUID do cookie, para o navegador e o banco concordarem)
   const row = await repo.create({
-    ...(validLid ? { id: validLid } : {}),
+    ...(validLid && !cookieLeadTaken ? { id: validLid } : {}),
     email_norm: identity.email_norm,
-    phone_e164: identity.phone_e164,
+    phone_e164: phoneTakenByRejectedLead ? null : identity.phone_e164,
     nome: identity.nome ?? null,
     empresa: identity.empresa ?? null,
     porte: identity.porte ?? null,
@@ -83,6 +93,15 @@ export async function resolveLead(identity: LeadIdentity, repo: LeadRepo): Promi
     produto: identity.produto ?? null,
   });
   return { lead_id: row.id, created: true, matched_by: 'created' };
+}
+
+/** O lead do cookie só vale se o e-mail do evento não o contradiz. */
+async function emailAgrees(lead: LeadRow, eventEmail: string | null, repo: LeadRepo): Promise<boolean> {
+  if (!eventEmail) return true;
+  if (lead.email_norm) return lead.email_norm === eventEmail;
+  // Lead sem e-mail: vale, a menos que o e-mail enviado já pertença a outro lead.
+  const owner = await repo.findByEmail(eventEmail);
+  return !owner || owner.id === lead.id;
 }
 
 /** Preenche só o que falta no lead, sem sobrescrever e sem violar a unicidade de e-mail/telefone. */

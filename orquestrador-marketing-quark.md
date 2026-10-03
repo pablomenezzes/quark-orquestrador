@@ -40,31 +40,52 @@ Construir um sistema próprio, centralizado e versionado, que:
 4. **Regras são dados, não código.** Ficam em tabela, com prioridade e versão.
 5. **Eventos são imutáveis.** Nunca editar nem apagar registros de `orq_events`.
 6. **O caminho crítico (lead entra, regra decide, ação executa) nunca depende das tabelas de marketing.** Falha em sincronização de anúncios não pode impedir a entrada de leads.
-7. **Toda mudança passa primeiro pelo ambiente de testes.**
+7. **Toda mudança de banco segue as regras obrigatórias da seção 4** (backup antes, migration aditiva, SQL mostrado e aprovado, testes em transação com rollback). Não há ambiente de testes separado (ver decisão D-01 na seção 17).
 
 ## 4. Stack
 
 | Camada | Tecnologia |
 |---|---|
 | Banco de dados | Supabase (Postgres) |
-| Funções do orquestrador | Vercel (serverless functions) ou Supabase Edge Functions |
+| Funções do orquestrador | Vercel (serverless functions), região **São Paulo (`gru1`)**, junto do banco. Alternativa: Supabase Edge Functions |
 | Tarefas agendadas | Vercel Cron ou pg_cron |
 | Rastreamento web | Google Tag Manager (container web único) |
 | CRM | Pipedrive (API) |
 | Mensageria | Umbler (API) |
 | Código | GitHub, desenvolvido com Claude Code |
 
-### Ambientes
+### Ambiente
 
-- **Projeto Supabase 1: produção.**
-- **Projeto Supabase 2: testes**, mesma estrutura, dados falsos. Toda migration e regra nova roda aqui antes.
+- **Um único projeto Supabase**, região **South America (São Paulo)**, nome "Orquestrador CRM Quark". Não existe projeto de testes.
+- O schema `public` deste projeto está **vazio**. O dashboard do QuarkRH fica em outra conta do Supabase, sem relação com este banco. Mesmo assim, por organização, **o orquestrador nunca usa o `public`** (regra 1 abaixo).
+- Funções na Vercel rodam na região `gru1` (São Paulo), ao lado do banco.
+- Como o projeto é único e vai receber dados reais, a segurança vem das regras abaixo, não de um ambiente separado.
+
+### Regras obrigatórias do banco
+
+1. **Nunca criar, alterar ou apagar nada no schema `public`.** Só os schemas `core`, `orq`, `crm`, `mkt` e `analytics`.
+2. **Antes de todo `db push`, rodar um dump completo** do banco para a pasta `backups/` (ignorada pelo git). Sem dump, sem push.
+3. **Migrations somente aditivas** (`CREATE`, `ADD COLUMN`, `CREATE INDEX`, etc.). Qualquer `DROP`, `RENAME` ou alteração de tipo exige aprovação explícita do Pablo, com justificativa.
+4. **Sempre mostrar o SQL e pedir confirmação antes de rodar `db push`.**
+5. **Testes de integração rodam dentro de transação com `ROLLBACK`.** Nenhum dado de teste pode permanecer no banco: ao final, a contagem de linhas de cada tabela deve ser idêntica à do início (o banco passará a ter dados reais, então o critério é "nada a mais", não "tudo vazio").
+6. **Nunca alterar o banco manualmente** (painel, SQL Editor). Toda mudança é uma migration versionada.
 
 ### Atenção ao plano gratuito do Supabase
 
-- Sem backup automático. Fazer dump periódico até migrar para o plano pago.
+- Sem backup automático. Fazer dump periódico até migrar para o plano pago (e sempre antes de um `db push`, regra 2).
 - Armazenamento limitado. Dados de marketing entram **agregados por dia**, nunca eventos brutos.
 - Projetos podem ser pausados por inatividade.
-- **Migrar produção para o plano pago antes de desligar o Make.**
+- **Migrar o projeto para o plano pago antes de desligar o Make.**
+
+### Variáveis de ambiente (arquivo `.env.local`, nunca versionado)
+
+| Variável | Onde encontrar no painel do Supabase |
+|---|---|
+| `SUPABASE_URL` | Project Settings → API → Project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | Project Settings → API Keys → `service_role` (secreta, só no servidor) |
+| `SUPABASE_PROJECT_REF` | Project Settings → General → Reference ID (também na URL do painel) |
+| `SUPABASE_DB_URL` | Connect → Connection string → Session pooler (porta 5432), com a senha do banco. Usada pelos testes de integração e pelo dump |
+| `SHADOW_MODE` | Fixo em `true` até a Fase 6 |
 
 ## 5. Arquitetura
 
@@ -151,9 +172,14 @@ Todo adaptador entrega ao endpoint um objeto neste formato:
   "consent": {
     "marketing": true,
     "analytics": true
-  }
+  },
+  "first_touch": null,
+  "website_hp": ""
 }
 ```
+
+- `first_touch` (opcional): primeiro toque guardado pelo script no navegador. Mesmo formato dos campos de UTM e click id. Serve para não perder a origem quando a primeira visita não gerou formulário. O primeiro toque oficial continua sendo **calculado** a partir de `orq.touchpoints`.
+- `website_hp` (honeypot): campo escondido por CSS. Se vier preenchido, o endpoint descarta o envio e responde 200 sem gravar nada.
 
 ### Tipos de evento (`event_type`)
 
@@ -177,7 +203,15 @@ Novos tipos devem ser adicionados a esta lista antes de usados.
 
 ## 8. Modelo de dados
 
-Organizado em schemas por domínio dentro do mesmo banco.
+Organizado em schemas por domínio dentro do mesmo banco. O schema `public` não é usado (seção 4, regra 1).
+
+Acréscimos aprovados ao DDL abaixo (ver seção 17):
+
+- Triggers que **bloqueiam UPDATE e DELETE** em `orq.events` (princípio 5).
+- **RLS ativo** em todas as tabelas, sem política para `anon` e `authenticated`: só a service key acessa. O papel de leitura do dashboard nasce com o schema `analytics` (Fase 8).
+- Gatilho `updated_at` em `core.leads`.
+- Índices nas chaves estrangeiras.
+- A API do Supabase só enxerga um schema se ele estiver em *Exposed schemas* (Project Settings → API). Isso é configuração do painel, feita uma vez, e documentada em `supabase/README.md`.
 
 | Schema | Conteúdo |
 |---|---|
@@ -378,14 +412,23 @@ Ordem de avaliação (a primeira que bater define o canal):
 7. Outro referrer externo → `referral`
 8. Sem referrer e sem UTM → `direct`
 
-A tabela de regras de canal deve ficar em configuração, não espalhada no código.
+A tabela de regras de canal deve ficar em configuração, não espalhada no código (`config/channel-rules.ts`).
+
+Detalhes definidos na implementação:
+
+- **Passo 3, canal pago por `utm_source`:** `meta`, `facebook`, `fb`, `instagram`, `ig` → `paid_social_meta`; `google` → `paid_search_google`; qualquer outro → `paid_other`. A comparação ignora maiúsculas e espaços.
+- **Passos 5 e 6:** as listas de buscadores e redes sociais ficam em `config/channel-rules.ts`. O host precisa casar inteiro (`meugoogle.com` não é o Google).
+- **Referrer do próprio domínio** (`ownDomains`) é navegação interna e conta como ausente.
+- **UTM presente, sem referrer e sem regra que case** → canal `other` (e não `direct`, que é só para quem não traz sinal nenhum).
 
 ## 10. Identificação e deduplicação
 
-1. Se o evento traz `lead_id` válido, usar.
+1. Se o evento traz `lead_id` válido (UUID bem formado, existente no banco), usar. **Exceção: o e-mail pesa mais que o cookie.** Se o lead existe mas o e-mail enviado é diferente do e-mail desse lead, o evento **não** é anexado a ele (outra pessoa usando o mesmo navegador). Segue para o passo 2. Se o lead existe e não tem e-mail, ou o evento não traz e-mail, o `lead_id` vale.
 2. Senão, buscar por `email_norm`.
 3. Senão, buscar por `phone_e164`.
-4. Senão, criar lead novo.
+4. Senão, criar lead novo. Se o `lead_id` do cookie é um UUID válido **e não pertence a nenhum lead**, o lead novo nasce com esse id, para navegador e banco concordarem. Se o UUID do cookie pertence a outro lead (caso da exceção do passo 1), o lead novo recebe um UUID novo.
+
+Depois de achado, o lead é completado só onde falta (nome, telefone, empresa, etc.), sem sobrescrever e sem violar a unicidade de e-mail e telefone.
 
 Antes de criar deal, buscar no Pipedrive pessoa e deal aberto pelo e-mail e telefone. Se existir deal aberto, a ação vira `marcar_evento`.
 
@@ -454,7 +497,11 @@ Um único container web em Elementor, Vercel e Lovable.
 
 - Gera `lead_id` no primeiro acesso e guarda em cookie próprio
 - Captura UTMs, `gclid`, `gbraid`, `wbraid`, `fbclid` (convertido em `_fbc`), `_fbp` e `client_id` do GA4
-- Guarda primeiro e último toque em cookie
+- Guarda primeiro e último toque em cookie (`qk_lid` 400 dias, `qk_ft` 400 dias, `qk_lt` 90 dias). O último toque só muda com sinal novo (UTM, click id ou referrer externo); uma visita direta posterior **não** apaga o último toque pago
+- Se o `?lid=` da URL é um UUID válido, ele tem prioridade sobre o cookie (ciclo do diagnóstico)
+- Expõe `window.QuarkAttribution` (`get()`, `pushLead()`, `decorateUrl()`); `pushLead()` dispara o `generate_lead` no dataLayer e rotaciona o `event_id`
+- Consentimento desconhecido é tratado como **não concedido** (LGPD)
+- Detalhes de instalação por plataforma: `tracking/INSTALL.md`
 - Preenche campos ocultos dos formulários
 - Repassa os parâmetros para URLs do Fillout e do diagnóstico
 
@@ -514,31 +561,76 @@ GTM server-side. O orquestrador já cumpre o papel de servidor.
 
 ## 14. Plano de migração
 
+Não há ambiente de testes separado (seção 4). O "modo sombra" faz o papel de ambiente seguro: o orquestrador roda com dados reais, mas **só grava em `orq.decisions` e nunca executa ação** no Pipedrive, na Umbler, na Meta ou no Google.
+
 1. Subir o orquestrador em **modo sombra**: recebe, identifica e decide, mas não executa. O Make continua rodando.
 2. Comparar decisões do modo sombra com o que o Make fez por uma a duas semanas (view `saude_orquestrador`).
-3. Desligar o Make fonte por fonte, nesta ordem: Vercel, Lovable, Fillout, Elementor, Meta Lead Ads.
-4. Só desligar o último cenário depois de migrar produção para o plano pago do Supabase.
+3. Trocar uma fonte de `sombra` para `real` somente com aprovação explícita do Pablo. Antes de cada troca: dump do banco (seção 4, regra 2).
+4. Desligar o Make fonte por fonte, nesta ordem: Vercel, Lovable, Fillout, Elementor, Meta Lead Ads.
+5. Só desligar o último cenário depois de migrar o projeto para o plano pago do Supabase.
+
+Como os dados de teste não podem ficar no banco (regra 5), o período em sombra só contém eventos **reais** dos formulários.
 
 ## 15. Fases de entrega
 
-| Fase | Entrega |
-|---|---|
-| 0 | Convenção de UTMs aplicada em todos os anúncios |
-| 1 | Script de atribuição e dataLayer no GTM; GA4 e Pixel configurados |
-| 2 | Migrations dos schemas `core`, `orq` e `crm` no ambiente de testes |
-| 3 | Endpoint único, adaptadores de entrada, identificação e log em modo sombra |
-| 4 | Motor de regras em tabela + adaptadores Pipedrive e Umbler |
-| 5 | Diagnóstico como qualificador (ciclo com `lid`) |
-| 6 | Migração gradual do Make |
-| 7 | CAPI e conversões offline do Google Ads |
-| 8 | Sincronizações de `mkt` e views de `analytics` para o dashboard |
-| 9 | Canvas visual de regras |
+Status: `pendente`, `em andamento`, `concluída`. Atualizar a cada entrega.
+
+| Fase | Entrega | Status |
+|---|---|---|
+| 0 | Convenção de UTMs aplicada em todos os anúncios | pendente (fora do código) |
+| 1 | Script de atribuição e dataLayer no GTM; GA4 e Pixel configurados | em andamento: script e guia entregues (2026-10-02); falta validar no GTM e configurar GA4 e Pixel |
+| 2 | Migrations dos schemas `core`, `orq` e `crm` no projeto Supabase | em andamento: migrations escritas; `db push` aguardando aprovação |
+| 3 | Endpoint único, adaptadores de entrada (Vercel e Elementor), identificação e log em modo sombra | pendente |
+| 4 | Motor de regras em tabela + adaptadores Pipedrive e Umbler | pendente |
+| 5 | Diagnóstico como qualificador (ciclo com `lid`) | pendente |
+| 6 | Migração gradual do Make | pendente |
+| 7 | CAPI e conversões offline do Google Ads | pendente |
+| 8 | Sincronizações de `mkt` e views de `analytics` para o dashboard | pendente |
+| 9 | Canvas visual de regras | pendente |
 
 ## 16. Convenções de código
 
 - TypeScript em todas as funções
 - Um módulo por adaptador (`adapters/in/<fonte>.ts`, `adapters/out/<destino>.ts`)
-- Migrations versionadas no repositório; nunca alterar o banco manualmente
+- Migrations versionadas em `supabase/migrations/`; nunca alterar o banco manualmente
+- Migrations somente aditivas; `DROP`, `RENAME` ou mudança de tipo só com aprovação explícita (seção 4, regra 3)
+- Nada no schema `public` (seção 4, regra 1)
+- Antes de `db push`: dump em `backups/` e SQL mostrado ao Pablo para confirmação (seção 4, regras 2 e 4)
+- Testes de integração em transação com `ROLLBACK`, via `SUPABASE_DB_URL`; nenhum dado de teste permanece (seção 4, regra 5)
+- Funções da Vercel na região `gru1`
 - Toda função do caminho crítico registra a decisão em `orq.decisions`, inclusive em erro
 - Retentativa com backoff para chamadas ao Pipedrive e à Umbler
 - Testes para o motor de regras e para a derivação de canal antes de qualquer outra coisa
+
+## 17. Decisões e pendências
+
+Registro vivo. Atualizar a cada sessão.
+
+### Decisões tomadas
+
+| ID | Decisão | Data |
+|---|---|---|
+| D-01 | Um único projeto Supabase (São Paulo), sem projeto de testes; `public` vazio e intocado. Substitui o princípio 7 original | 2026-10-03 |
+| D-02 | Regras obrigatórias do banco (seção 4): dump antes do push, migrations aditivas, SQL aprovado, testes com rollback | 2026-10-03 |
+| D-03 | `orq.events` é a tabela de eventos (o princípio 5 dizia `orq_events`). Imutável por trigger | 2026-10-02 |
+| D-04 | Idempotência no `orq.touchpoints.event_id`. Evento repetido: HTTP 200 `{duplicate:true}`, nada é gravado | 2026-10-02 |
+| D-05 | Mapa `utm_source` → canal pago e canal `other` (seção 9) | 2026-10-02 |
+| D-06 | `lead_id` do cookie só vale se o e-mail enviado não contradiz o do lead; o e-mail pesa mais que o cookie (seção 10) | 2026-10-03 |
+| D-07 | Lead novo reaproveita o UUID do cookie quando ele não pertence a ninguém | 2026-10-02 |
+| D-08 | Consentimento desconhecido = não concedido | 2026-10-02 |
+| D-09 | RLS sem política para `anon` e `authenticated`; só a service key acessa | 2026-10-02 |
+| D-10 | Contrato ganha `first_touch` (opcional) e `website_hp` (honeypot) | 2026-10-02 |
+| D-11 | Funções na Vercel em `gru1` | 2026-10-03 |
+| D-12 | Arquivo de instruções mantém o nome `orquestrador-marketing-quark.md` | 2026-10-02 |
+
+### Pendências
+
+- [ ] Preencher `ownDomains` em `config/channel-rules.ts` com os domínios do site e das LPs.
+- [ ] Validar o script de atribuição num GTM e numa página reais (`tracking/INSTALL.md`, seção 5).
+- [ ] Configurar GA4 e Pixel (Fase 1).
+- [ ] Expor os schemas `core`, `orq` e `crm` em *Exposed schemas* no painel do Supabase (Entregável 3).
+- [ ] Limite de requisições por fonte (seção 13): adiado, sem Redis disponível.
+- [ ] IDs do Pipedrive (pipeline, estágios, campos personalizados) em `config/pipedrive.placeholders.ts`, usados só na Fase 4.
+- [ ] Adaptadores de entrada de Lovable, Fillout e Meta Lead Ads: sessões futuras.
+- [ ] Ferramenta de dump: nem `pg_dump` nem Docker estão instalados nesta máquina (necessário antes do primeiro `db push`).
+- [ ] Executar o `db push` das migrations 0001 e 0002 (aguarda aprovação do SQL e dump).

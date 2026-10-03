@@ -40,8 +40,53 @@ beforeEach(() => {
 
 describe('resolveLead (seção 10)', () => {
   it('1. usa lead_id válido que existe no banco', async () => {
-    const r = await resolveLead({ lead_id: UUID_A, email_norm: 'outro@x.com', phone_e164: null }, repo);
+    const r = await resolveLead({ lead_id: UUID_A, email_norm: 'a@x.com', phone_e164: null }, repo);
     expect(r).toMatchObject({ lead_id: UUID_A, created: false, matched_by: 'lead_id' });
+  });
+
+  describe('o e-mail pesa mais que o cookie (D-06)', () => {
+    it('lead_id existe mas o e-mail enviado é de outra pessoa: NÃO anexa ao lead do cookie', async () => {
+      // cookie aponta para A (a@x.com), mas quem enviou foi b@x.com
+      const r = await resolveLead({ lead_id: UUID_A, email_norm: 'b@x.com', phone_e164: null }, repo);
+      expect(r.lead_id).toBe(UUID_B);
+      expect(r.matched_by).toBe('email');
+      expect(repo.filled).toEqual([]);
+    });
+
+    it('e-mail novo + cookie de outro lead: cria lead novo com UUID NOVO, nunca com o UUID do cookie', async () => {
+      const r = await resolveLead({ lead_id: UUID_A, email_norm: 'novo@x.com', phone_e164: null }, repo);
+      expect(r.created).toBe(true);
+      expect(r.lead_id).not.toBe(UUID_A);
+      expect(repo.created[0]?.id).toBeUndefined();
+      expect(repo.rows.find((x) => x.id === UUID_A)?.email_norm).toBe('a@x.com');
+    });
+
+    it('e-mail diferente com telefone do lead do cookie: ainda não anexa (e-mail manda)', async () => {
+      const r = await resolveLead({ lead_id: UUID_A, email_norm: 'novo@x.com', phone_e164: '+5584999999999' }, repo);
+      expect(r.lead_id).not.toBe(UUID_A);
+      expect(r.created).toBe(true);
+      // o telefone é unique e continua com o lead A
+      expect(repo.created[0]?.phone_e164).toBeNull();
+      expect(repo.rows.find((x) => x.id === UUID_A)?.phone_e164).toBe('+5584999999999');
+    });
+
+    it('evento sem e-mail: o lead_id do cookie vale', async () => {
+      const r = await resolveLead({ lead_id: UUID_A, email_norm: null, phone_e164: null }, repo);
+      expect(r).toMatchObject({ lead_id: UUID_A, matched_by: 'lead_id', created: false });
+    });
+
+    it('lead do cookie sem e-mail, mas o e-mail enviado já é de outro lead: vai para o dono do e-mail', async () => {
+      repo.rows.push({ id: UUID_NEW, email_norm: null, phone_e164: null });
+      const r = await resolveLead({ lead_id: UUID_NEW, email_norm: 'b@x.com', phone_e164: null }, repo);
+      expect(r).toMatchObject({ lead_id: UUID_B, matched_by: 'email' });
+    });
+
+    it('lead do cookie sem e-mail: o lead_id vale e o e-mail é preenchido', async () => {
+      repo.rows.push({ id: UUID_NEW, email_norm: null, phone_e164: null });
+      const r = await resolveLead({ lead_id: UUID_NEW, email_norm: 'recem@x.com', phone_e164: null }, repo);
+      expect(r).toMatchObject({ lead_id: UUID_NEW, matched_by: 'lead_id', created: false });
+      expect(repo.filled).toEqual([{ id: UUID_NEW, patch: { email_norm: 'recem@x.com' } }]);
+    });
   });
 
   it('lead_id com formato inválido é ignorado e cai para o e-mail', async () => {
