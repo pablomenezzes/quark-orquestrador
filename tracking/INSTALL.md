@@ -54,9 +54,17 @@ No GTM, crie o acionador **Evento personalizado = `generate_lead`** para dispara
 2. No formulário, adicione **campos ocultos** com estes **IDs** (o Elementor monta `name="form_fields[<id>]"`, o script reconhece):
    `lead_id`, `event_id`, `utm_source`, `utm_medium`, `utm_campaign`, `utm_term`, `utm_content`,
    `gclid`, `gbraid`, `wbraid`, `fbclid`, `fbp`, `fbc`, `ga_client_id`, `ad_id`, `landing_url`, `referrer`,
-   `consent_marketing`, `consent_analytics`.
-3. Adicione a **Ação após o envio → Webhook** apontando para `POST /api/ingest`, com o header de token da fonte
-   (ver `samples/elementor.json` para os nomes de campo).
+   `user_agent`, `consent_marketing`, `consent_analytics`, `first_touch`, e mais dois com valor fixo:
+   `qk_form_id` (ex: `form-demo`) e `qk_lp_id` (ex: `lp-elementor-rh`).
+   Os nomes das perguntas do formulário que o orquestrador reconhece como contato são:
+   `name`, `email`, `phone`, `company`, `company_size`, `role` (aliases em português: `nome`, `telefone`, `empresa`, `porte`, `cargo`). O resto vira `answers`.
+3. Adicione a **Ação após o envio → Webhook** com a URL:
+   `https://SEU-PROJETO.vercel.app/api/ingest?source=SLUG_DA_FONTE&token=TOKEN_DA_FONTE`
+   O Elementor **não envia cabeçalhos personalizados**, por isso a fonte e o token vão na URL
+   (só as fontes `elementor` e `fillout` aceitam token na URL). Deixe "Advanced Data" desligado ou ligado: os dois formatos funcionam.
+   Veja `samples/elementor.json`. Adicione também um campo honeypot `website_hp` escondido por CSS.
+   **Limite conhecido:** nesse caminho o IP do request é do servidor do Elementor, então o IP do visitante não é gravado
+   (o `user_agent` vem do campo oculto).
 4. Elementor Pro dispara o evento `elementor_pro/forms/form_submitted`. Para o `generate_lead`, adicione na página (HTML ou tag GTM):
    ```js
    jQuery(document).on('submit_success', '.elementor-form', function () {

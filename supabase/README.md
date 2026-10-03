@@ -31,10 +31,9 @@ O linter `tests/migrations-lint.test.ts` roda em todo `npm test` e barra DROP, R
 
 Pré-requisitos: `.env.local` preenchido (ver `.env.example`) e `pg_dump` 17+ no PATH.
 
-## Configuração manual única no painel
+## Painel
 
-Project Settings → API → **Exposed schemas**: adicionar `core`, `orq` e `crm`
-(necessário para o `supabase-js` enxergar esses schemas). É configuração da API, não altera o banco.
+Nada a configurar no painel: o endpoint fala direto com o Postgres (decisão D-13), então não é preciso expor os schemas na API.
 
 ## Testes de integração
 

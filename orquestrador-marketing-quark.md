@@ -82,9 +82,9 @@ Construir um sistema próprio, centralizado e versionado, que:
 | Variável | Onde encontrar no painel do Supabase |
 |---|---|
 | `SUPABASE_URL` | Project Settings → API → Project URL |
-| `SUPABASE_SERVICE_ROLE_KEY` | Project Settings → API Keys → `service_role` (secreta, só no servidor) |
-| `SUPABASE_PROJECT_REF` | Project Settings → General → Reference ID (também na URL do painel) |
-| `SUPABASE_DB_URL` | Connect → Connection string → Session pooler (porta 5432), com a senha do banco. Usada pelos testes de integração e pelo dump |
+| `SUPABASE_PROJECT_REF` | Project Settings → General → Reference ID (também na URL do painel). Alimenta a trava de alvo (`src/db/guard.ts`) |
+| `SUPABASE_DB_URL` | Connect → Connection string → Session pooler (porta 5432), com a senha do banco. **Secreta.** Usada pelo endpoint, pelos testes de integração, pelo dump e pelo `db push` |
+| `SUPABASE_SERVICE_ROLE_KEY` | Project Settings → API Keys → `service_role`. Não é usada nesta fase (o endpoint fala direto com o Postgres); reservada para clientes REST futuros |
 | `SHADOW_MODE` | Fixo em `true` até a Fase 6 |
 
 ## 5. Arquitetura
@@ -551,7 +551,7 @@ GTM server-side. O orquestrador já cumpre o papel de servidor.
 
 ## 13. Segurança
 
-- Token próprio por fonte, enviado em header e comparado com `token_hash`
+- Token próprio por fonte, enviado em header (`x-quark-token`) e comparado com `token_hash` (SHA-256, comparação em tempo constante). Fontes que não conseguem enviar cabeçalho (Elementor, Fillout) usam `?token=` na URL. Fonte desconhecida, inativa ou token errado recebem a mesma resposta `401`
 - Validação da assinatura dos webhooks da Meta
 - Limite de requisições por fonte
 - Honeypot contra bots nos formulários públicos
@@ -579,8 +579,8 @@ Status: `pendente`, `em andamento`, `concluída`. Atualizar a cada entrega.
 |---|---|---|
 | 0 | Convenção de UTMs aplicada em todos os anúncios | pendente (fora do código) |
 | 1 | Script de atribuição e dataLayer no GTM; GA4 e Pixel configurados | em andamento: script e guia entregues (2026-10-02); falta validar no GTM e configurar GA4 e Pixel |
-| 2 | Migrations dos schemas `core`, `orq` e `crm` no projeto Supabase | em andamento: migrations escritas; `db push` aguardando aprovação |
-| 3 | Endpoint único, adaptadores de entrada (Vercel e Elementor), identificação e log em modo sombra | pendente |
+| 2 | Migrations dos schemas `core`, `orq` e `crm` no projeto Supabase | em andamento: migrations escritas (2026-10-03); `db push` aguardando dump e aprovação |
+| 3 | Endpoint único, adaptadores de entrada (Vercel e Elementor), identificação e log em modo sombra | em andamento: código e testes entregues (2026-10-03); falta o `db push`, o deploy na Vercel e o teste de ponta a ponta com o banco |
 | 4 | Motor de regras em tabela + adaptadores Pipedrive e Umbler | pendente |
 | 5 | Diagnóstico como qualificador (ciclo com `lid`) | pendente |
 | 6 | Migração gradual do Make | pendente |
@@ -622,14 +622,25 @@ Registro vivo. Atualizar a cada sessão.
 | D-10 | Contrato ganha `first_touch` (opcional) e `website_hp` (honeypot) | 2026-10-02 |
 | D-11 | Funções na Vercel em `gru1` | 2026-10-03 |
 | D-12 | Arquivo de instruções mantém o nome `orquestrador-marketing-quark.md` | 2026-10-02 |
+| D-13 | O endpoint fala direto com o Postgres (`pg`), numa transação por evento: lead, touchpoint, evento e decisão são atômicos. Sem `supabase-js` e sem "Exposed schemas" | 2026-10-03 |
+| D-14 | Fontes públicas só enviam `form_submit`, `diagnostico_iniciado` e `diagnostico_concluido`. Os `deal_*` e `lead_validado` vêm de dentro (fases futuras) | 2026-10-03 |
+| D-15 | Elementor e Fillout não enviam cabeçalho: fonte em `?source=` e token em `?token=`. Só esses tipos aceitam token na URL | 2026-10-03 |
+| D-16 | Falha após a validação: 500 para a fonte retentar, nada parcial gravado, e um evento bruto sem lead + decisão `erro` ficam registrados. A retentativa não é tratada como duplicada | 2026-10-03 |
+| D-17 | Decisão em modo sombra grava `acao = 'pendente_motor_regras'` até o motor de regras existir (Fase 4) | 2026-10-03 |
+| D-18 | IP e user agent: Vercel/Lovable usam os do request (é o visitante); Elementor usa só o `user_agent` do campo oculto e não grava IP (o request é do servidor do Elementor) | 2026-10-03 |
+| D-19 | `event_id` exige no mínimo 8 caracteres; corpo máximo de 100 KB; `occurred_at` ausente, inválido ou mais de 10 min no futuro vira o horário de recebimento | 2026-10-03 |
 
 ### Pendências
 
 - [ ] Preencher `ownDomains` em `config/channel-rules.ts` com os domínios do site e das LPs.
 - [ ] Validar o script de atribuição num GTM e numa página reais (`tracking/INSTALL.md`, seção 5).
 - [ ] Configurar GA4 e Pixel (Fase 1).
-- [ ] Expor os schemas `core`, `orq` e `crm` em *Exposed schemas* no painel do Supabase (Entregável 3).
 - [ ] Limite de requisições por fonte (seção 13): adiado, sem Redis disponível.
+- [ ] **LGPD x imutabilidade:** `orq.events` é imutável e guarda o `payload_bruto` com dados pessoais. Definir a política de eliminação/anonimização a pedido do titular antes de ir para o ar (exigirá aprovação por mexer na regra de imutabilidade).
+- [ ] Papel de banco com privilégio mínimo para o endpoint (hoje usa o usuário `postgres` via pooler).
+- [ ] CORS reflete qualquer origem (o token identifica a fonte). Restringir às origens de `orq.sources.url` quando as URLs forem cadastradas.
+- [ ] Registrar as fontes reais com `scripts/register-source.ts` (token aparece uma vez).
+- [ ] Deploy do projeto na Vercel (região `gru1`) com as variáveis de ambiente.
 - [ ] IDs do Pipedrive (pipeline, estágios, campos personalizados) em `config/pipedrive.placeholders.ts`, usados só na Fase 4.
 - [ ] Adaptadores de entrada de Lovable, Fillout e Meta Lead Ads: sessões futuras.
 - [ ] Ferramenta de dump: nem `pg_dump` nem Docker estão instalados nesta máquina (necessário antes do primeiro `db push`).

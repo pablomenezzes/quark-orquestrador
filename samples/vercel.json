@@ -1,0 +1,38 @@
+{
+  "source_slug": "lp-vercel-rh-teste",
+  "form_id": "form-demo",
+  "lp_id": "lp-vercel-rh-teste",
+  "event_id": "11111111-aaaa-4bbb-8ccc-000000000001",
+  "lead_id": null,
+  "event_type": "form_submit",
+  "occurred_at": "2026-10-03T14:32:00Z",
+  "contact": {
+    "name": "Maria Exemplo",
+    "email": "Maria.Exemplo@exemplo.invalid",
+    "phone": "(84) 99999-0001",
+    "company": "Empresa Exemplo Ltda",
+    "company_size": 15,
+    "role": "Gestora de RH"
+  },
+  "answers": { "interesse": "demonstracao" },
+  "attribution": {
+    "utm_source": "meta",
+    "utm_medium": "paid_social",
+    "utm_campaign": "120000000000001",
+    "utm_term": "120000000000002",
+    "utm_content": "120000000000003",
+    "gclid": "",
+    "gbraid": "",
+    "wbraid": "",
+    "fbclid": "IwAR-exemplo",
+    "fbp": "fb.1.1700000000000.1234567890",
+    "fbc": "fb.1.1700000000000.IwAR-exemplo",
+    "ga_client_id": "1234567890.1700000000",
+    "ad_id": "120000000000003",
+    "landing_url": "https://lp.exemplo.invalid/rh/?utm_source=meta#topo",
+    "referrer": ""
+  },
+  "consent": { "marketing": true, "analytics": true },
+  "first_touch": { "utm_source": "google", "utm_medium": "cpc", "gclid": "G-exemplo", "ts": 1700000000000 },
+  "website_hp": ""
+}
