@@ -14,7 +14,11 @@ foreach ($line in Get-Content .env.local) {
 }
 if (-not $env:SUPABASE_DB_URL -or -not $env:SUPABASE_PROJECT_REF) { throw 'Defina SUPABASE_DB_URL e SUPABASE_PROJECT_REF no .env.local.' }
 if (-not $env:SUPABASE_DB_URL.Contains($env:SUPABASE_PROJECT_REF)) { throw 'SUPABASE_DB_URL nao contem SUPABASE_PROJECT_REF: recusando.' }
-if (-not (Get-Command pg_dump -ErrorAction SilentlyContinue)) { throw 'pg_dump nao encontrado no PATH. Instale o cliente PostgreSQL 17+.' }
+if (-not (Get-Command pg_dump -ErrorAction SilentlyContinue)) {
+  $fallback = 'C:\PostgreSQL17\bin'
+  if (Test-Path "$fallback\pg_dump.exe") { $env:Path += ";$fallback" }
+  else { throw 'pg_dump nao encontrado. Instale o cliente PostgreSQL 17+ (winget install PostgreSQL.PostgreSQL.17).' }
+}
 
 New-Item -ItemType Directory -Force backups | Out-Null
 $file = Join-Path backups ("dump-{0}.sql" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))

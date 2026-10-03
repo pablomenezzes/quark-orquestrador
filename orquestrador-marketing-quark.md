@@ -1,4 +1,4 @@
-# Orquestrador de Marketing Quark
+﻿# Orquestrador de Marketing Quark
 
 Instruções do projeto para desenvolvimento com o Claude Code.
 
@@ -643,5 +643,5 @@ Registro vivo. Atualizar a cada sessão.
 - [ ] Deploy do projeto na Vercel (região `gru1`) com as variáveis de ambiente.
 - [ ] IDs do Pipedrive (pipeline, estágios, campos personalizados) em `config/pipedrive.placeholders.ts`, usados só na Fase 4.
 - [ ] Adaptadores de entrada de Lovable, Fillout e Meta Lead Ads: sessões futuras.
-- [ ] Ferramenta de dump: nem `pg_dump` nem Docker estão instalados nesta máquina (necessário antes do primeiro `db push`).
+- [x] Ferramenta de dump: `pg_dump` 17.11 instalado em `C:\PostgreSQL17\bin` (2026-10-03); `scripts/dump.ps1` o localiza.
 - [ ] Executar o `db push` das migrations 0001 e 0002 (aguarda aprovação do SQL e dump).
