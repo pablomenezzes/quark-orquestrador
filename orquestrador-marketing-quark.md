@@ -616,7 +616,7 @@ Status: `pendente`, `em andamento`, `concluída`. Atualizar a cada entrega.
 
 | # | Item | Tipo | Status |
 |---|---|---|---|
-| 1 | **Studio congelado.** Rodar sozinho no PowerShell com `npm run studio`; ao subir, checar `.env.local`, conexão com o banco e porta livre, explicando em português o que falta. Documentar em `studio/README.md`. Nenhuma funcionalidade nova | código mínimo | pendente |
+| 1 | **Studio congelado.** Rodar sozinho no PowerShell com `npm run studio`; ao subir, checar `.env.local`, conexão com o banco e porta livre, explicando em português o que falta. Documentar em `studio/README.md`. Nenhuma funcionalidade nova | código mínimo | **feito (2026-10-04), aguardando confirmação do Pablo** |
 | 2 | **Backup do código.** Repositório privado no GitHub e `push` (o Pablo faz a autenticação). Antes: confirmar `.env.local` e `backups/` no `.gitignore` | guia | pendente |
 | 3 | **P-01, só análise.** Verificar o nível de Deployment Protection ativo. Comparar as opções (a), (b), (c) e a alternativa **(d)**: proteção padrão (previews protegidos, domínio de produção público) com a defesa da produção na própria aplicação. Segurança, custo, manutenção e recomendação. **Não implementar antes da aprovação.** A opção (a) só é aceitável se o segredo não ficar exposto em páginas públicas | análise | pendente |
 | 4 | **Segurança para abrir ao público**, junto com a solução do item 3: papel de banco com privilégio mínimo (sem `postgres`); CORS restrito às origens de `orq.sources.url`; limite de requisições sem Redis (contador no Postgres, firewall da Vercel ou outro, com o custo de cada um). SQL mostrado e confirmado antes de qualquer `db push` | código + migration | pendente |
@@ -655,7 +655,7 @@ Registro vivo. Atualizar a cada sessão.
 | Item | Situação |
 |---|---|
 | Repositório | `C:\Users\Esig\Documents\quark-orquestrador` (git local, **sem remoto**: backup no GitHub é o item 2), branch `main` |
-| Ordem de trabalho | Seção 15, itens 1 a 7. Em andamento: item 1 |
+| Ordem de trabalho | Seção 15, itens 1 a 7. Item 1 feito, aguardando confirmação; próximo: item 2 |
 | Banco | Supabase "Orquestrador CRM Quark" (São Paulo), migrations `0001` e `0002` aplicadas. Tabelas com dados reais: só `orq.sources` (2 fontes de teste); demais com 0 linhas. `public` com 0 tabelas |
 | Fontes registradas | `lp-vercel-rh-teste` (vercel) e `elementor-site-rh` (elementor). Tokens só no `.env.local` |
 | Produção | `https://quark-orquestrador.vercel.app/api/ingest`, `gru1`, modo sombra, Deployment Protection ligada |
@@ -702,7 +702,7 @@ Ordem vigente: **seção 15, itens 1 a 7**. As pendências abaixo apontam para o
 
 **Caminho até o primeiro lead real**
 
-- [ ] **Item 1 — Studio rodando sozinho** (`npm run studio` com checagem de `.env.local`, banco e porta; mensagens em português; `studio/README.md`).
+- [x] **Item 1 — Studio rodando sozinho** (2026-10-04): `npm run studio` confere Node, `.env.local`, variáveis, banco e porta, lista todos os problemas de uma vez em português e não sobe se algo falhar. Testado em execução real: caminho feliz, porta ocupada, `.env.local` ausente, senha errada e variáveis vazias. Documentado em `studio/README.md`. Aguardando confirmação do Pablo.
 - [ ] **Item 2 — Backup no GitHub** (repositório privado, `push`; confirmar `.env.local` e `backups/` no `.gitignore`). O repositório hoje não tem remoto: um defeito de disco perde o código.
 - [ ] **Item 3 / P-01 — Como as fontes reais atravessam a Deployment Protection?** Com a proteção ligada, o navegador do visitante e o webhook do Elementor recebem o muro de login da Vercel. Análise pendente do nível ativo e das opções (a) *Protection Bypass for Automation* (só aceitável se o segredo não ficar exposto em página pública), (b) domínio próprio com a proteção desligada só nesse projeto, (c) proxy mínimo, (d) proteção padrão (previews protegidos, produção pública) com a defesa na aplicação. **Nada é implementado antes da aprovação.**
 - [ ] **Item 4 — Segurança para abrir ao público:** papel de banco com privilégio mínimo (hoje o endpoint usa `postgres` via pooler); CORS restrito às origens de `orq.sources.url` (hoje reflete qualquer origem); limite de requisições por fonte sem Redis (adiado até aqui). SQL mostrado e confirmado antes de qualquer `db push`.

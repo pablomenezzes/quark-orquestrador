@@ -2,11 +2,49 @@
 
 Ambiente de testes local do orquestrador: você **monta formulários**, abre numa **nova aba** (todas as perguntas na mesma tela, estilo Typeform) com os **UTMs** que quiser e vê **o que o orquestrador faria** com o envio.
 
+## Como rodar (sozinho, num PowerShell)
+
 ```powershell
-npm run studio        # abre http://127.0.0.1:4310
+cd C:\Users\Esig\Documents\quark-orquestrador
+npm run studio
 ```
 
+O navegador abre em `http://127.0.0.1:4310`. **Deixe a janela do PowerShell aberta**: fechar a janela (ou `Ctrl+C`) para o Studio. Os formulários ficam salvos em `studio/forms/` e não se perdem.
+
 Escuta só em `127.0.0.1`. Não é publicado na Vercel e não altera a Deployment Protection.
+
+### O que ele confere ao subir
+
+Antes de abrir, o Studio faz cinco checagens e mostra o resultado. Se algo falhar, **não sobe**, lista *todos* os problemas de uma vez e diz como resolver. Nunca mostra senha, token nem a URL do banco.
+
+```
+ ✔ Node.js: Node 24.19.0
+ ✔ Arquivo .env.local: Encontrado.
+ ✔ Variáveis do .env.local: Todas preenchidas.
+ ✔ Conexão com o banco: Conectado.
+ ✔ Porta do Studio: Porta 4310 livre.
+```
+
+| Se aparecer | O que significa | O que fazer |
+|---|---|---|
+| `Arquivo .env.local … não existe` | Falta o arquivo de configuração | `Copy-Item .env.example .env.local` e preencha |
+| `Faltam no .env.local: …` | Variável vazia (lista quais) | A mensagem diz onde achar cada uma no Supabase |
+| `ainda tem o texto [YOUR-PASSWORD]` | A senha não foi colocada na URL | Troque `[YOUR-PASSWORD]` (com colchetes) pela senha |
+| `não está num formato válido` | A senha tem `? , : @ #` | `node scripts/encode-db-url.mjs` |
+| `não contém o ref do projeto` | A URL é de outro projeto | Copie de novo a *Session pooler* em *Connect* |
+| `O banco recusou a senha` | Senha errada | Confira, ou *Reset database password* no Supabase |
+| `A conexão … demorou demais` | Sem internet, VPN/firewall ou projeto pausado | Verifique a rede; no painel do Supabase clique em *Restore* se aparecer |
+| `A porta 4310 já está em uso` | O Studio já está aberto em outra janela | Use a janela existente, ou `$env:STUDIO_PORT = 4311; npm run studio` |
+
+### Problemas comuns do Windows
+
+- `npm.ps1 não pode ser carregado porque a execução de scripts foi desabilitada`: use `npm.cmd run studio` (não muda nenhuma configuração do Windows).
+- `npm não é reconhecido`: o Node não está no PATH; instale em nodejs.org e abra um PowerShell novo.
+- O comando precisa ser rodado **dentro da pasta do projeto** (o `cd` acima).
+
+### Estado do Studio
+
+Está **congelado** (decisão D-28): só recebe correções. Nenhuma funcionalidade nova entra sem aprovação.
 
 ## Como usar
 
