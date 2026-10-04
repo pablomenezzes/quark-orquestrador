@@ -617,7 +617,7 @@ Status: `pendente`, `em andamento`, `concluída`. Atualizar a cada entrega.
 | # | Item | Tipo | Status |
 |---|---|---|---|
 | 1 | **Studio congelado.** Rodar sozinho no PowerShell com `npm run studio`; ao subir, checar `.env.local`, conexão com o banco e porta livre, explicando em português o que falta. Documentar em `studio/README.md`. Nenhuma funcionalidade nova | código mínimo | **feito (2026-10-04), aguardando confirmação do Pablo** |
-| 2 | **Backup do código.** Repositório privado no GitHub e `push` (o Pablo faz a autenticação). Antes: confirmar `.env.local` e `backups/` no `.gitignore` | guia | pendente |
+| 2 | **Backup do código.** Repositório privado no GitHub e `push` (o Pablo faz a autenticação). Antes: confirmar `.env.local` e `backups/` no `.gitignore` | guia | **feito (2026-10-04), aguardando confirmação do Pablo** |
 | 3 | **P-01, só análise.** Verificar o nível de Deployment Protection ativo. Comparar as opções (a), (b), (c) e a alternativa **(d)**: proteção padrão (previews protegidos, domínio de produção público) com a defesa da produção na própria aplicação. Segurança, custo, manutenção e recomendação. **Não implementar antes da aprovação.** A opção (a) só é aceitável se o segredo não ficar exposto em páginas públicas | análise | pendente |
 | 4 | **Segurança para abrir ao público**, junto com a solução do item 3: papel de banco com privilégio mínimo (sem `postgres`); CORS restrito às origens de `orq.sources.url`; limite de requisições sem Redis (contador no Postgres, firewall da Vercel ou outro, com o custo de cada um). SQL mostrado e confirmado antes de qualquer `db push` | código + migration | pendente |
 | 5 | **LGPD.** Proposta de política de eliminação/anonimização a pedido do titular, compatível com a imutabilidade de `orq.events`. Só proposta | proposta | pendente |
@@ -654,8 +654,8 @@ Registro vivo. Atualizar a cada sessão.
 
 | Item | Situação |
 |---|---|
-| Repositório | `C:\Users\Esig\Documents\quark-orquestrador` (git local, **sem remoto**: backup no GitHub é o item 2), branch `main` |
-| Ordem de trabalho | Seção 15, itens 1 a 7. Item 1 feito, aguardando confirmação; próximo: item 2 |
+| Repositório | `C:\Users\Esig\Documents\quark-orquestrador` (git local), branch `main`. **Backup:** GitHub privado `pablomenezzes/quark-orquestrador` (`origin`) |
+| Ordem de trabalho | Seção 15, itens 1 a 7. Itens 1 e 2 feitos (2 aguardando confirmação); próximo: item 3 (análise do P-01, sem implementar) |
 | Banco | Supabase "Orquestrador CRM Quark" (São Paulo), migrations `0001` e `0002` aplicadas. Dados: `orq.sources` (2 fontes de teste) e **1 lead de teste do Pablo** gravado pelo Studio em modo "gravar" em 2026-10-04 12:20Z (formulário `demo-rh`, `lp_id` `studio-demo-rh`, canal `direct`, `landing_url` de `127.0.0.1`): 1 lead, 1 touchpoint, 1 evento, 1 decisão. É permanente (eventos imutáveis) e entra na política de LGPD (item 5). Demais tabelas com 0 linhas. `public` com 0 tabelas |
 | Fontes registradas | `lp-vercel-rh-teste` (vercel) e `elementor-site-rh` (elementor). Tokens só no `.env.local` |
 | Produção | `https://quark-orquestrador.vercel.app/api/ingest`, `gru1`, modo sombra, Deployment Protection ligada |
@@ -703,7 +703,7 @@ Ordem vigente: **seção 15, itens 1 a 7**. As pendências abaixo apontam para o
 **Caminho até o primeiro lead real**
 
 - [x] **Item 1 — Studio rodando sozinho** (2026-10-04): `npm run studio` confere Node, `.env.local`, variáveis, banco e porta, lista todos os problemas de uma vez em português e não sobe se algo falhar. Testado em execução real: caminho feliz, porta ocupada, `.env.local` ausente, senha errada e variáveis vazias. Documentado em `studio/README.md`. Aguardando confirmação do Pablo.
-- [ ] **Item 2 — Backup no GitHub** (repositório privado, `push`; confirmar `.env.local` e `backups/` no `.gitignore`). O repositório hoje não tem remoto: um defeito de disco perde o código.
+- [x] **Item 2 — Backup no GitHub** (2026-10-04): repositório privado `https://github.com/pablomenezzes/quark-orquestrador`, branch `main` enviada pelo Pablo (autenticação dele, via Git Credential Manager). Conferido: remoto e local no mesmo commit; `.env.local`, `backups/`, `.vercel/` e `node_modules/` fora do repositório; nenhum valor secreto no histórico (varredura sem imprimir valores); `.gitignore` corrigido (a regra `.env*` anulava a exceção do `.env.example`). Aguardando confirmação do Pablo. **Limite:** o `git push` precisa ser feito pelo Pablo num PowerShell dele só na primeira vez; depois o login fica guardado no Windows.
 - [ ] **Item 3 / P-01 — Como as fontes reais atravessam a Deployment Protection?** Com a proteção ligada, o navegador do visitante e o webhook do Elementor recebem o muro de login da Vercel. Análise pendente do nível ativo e das opções (a) *Protection Bypass for Automation* (só aceitável se o segredo não ficar exposto em página pública), (b) domínio próprio com a proteção desligada só nesse projeto, (c) proxy mínimo, (d) proteção padrão (previews protegidos, produção pública) com a defesa na aplicação. **Nada é implementado antes da aprovação.**
 - [ ] **Item 4 — Segurança para abrir ao público:** papel de banco com privilégio mínimo (hoje o endpoint usa `postgres` via pooler); CORS restrito às origens de `orq.sources.url` (hoje reflete qualquer origem); limite de requisições por fonte sem Redis (adiado até aqui). SQL mostrado e confirmado antes de qualquer `db push`.
 - [ ] **Item 5 — LGPD x imutabilidade:** `orq.events` é imutável e guarda o `payload_bruto` com dados pessoais. Só proposta de política de eliminação/anonimização a pedido do titular; qualquer solução que mexa na imutabilidade exige aprovação.
