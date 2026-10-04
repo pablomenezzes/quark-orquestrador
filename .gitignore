@@ -1,12 +1,17 @@
+# Dependências e builds
 node_modules/
+dist/
+*.log
+
+# Segredos e configuração local (NUNCA versionar). O modelo .env.example é versionado.
 .env
 .env.*
 !.env.example
-.vercel/
-dist/
-*.log
+
+# Backups do banco (dumps completos, com dados pessoais)
 backups/
+
+# Estado local de ferramentas
+.vercel/
 supabase/.temp/
 supabase/.branches/
-.vercel
-.env*
