@@ -7,6 +7,7 @@
  * Com --apply: grava só o hash. O token em texto puro aparece UMA vez, no seu terminal;
  * copie para o LP / URL do webhook. Ele não é guardado em lugar nenhum.
  */
+import { appendFileSync } from 'node:fs';
 import pg from 'pg';
 import { assertSafeDbTarget } from '../src/db/guard';
 import { generateToken, hashToken } from '../src/security/verify-token';
@@ -54,7 +55,14 @@ await client.connect();
 try {
   await client.query(`insert into orq.sources (slug, tipo, produto, url, token_hash) values ($1, $2, $3, $4, $5)`, [slug, tipo, produto, url, hashToken(token)]);
   console.log('\nFonte registrada.');
-  console.log(`TOKEN (copie agora; não será mostrado de novo): ${token}`);
+  const saveAs = args.get('save-env');
+  if (saveAs) {
+    // Grava o token em texto puro só no .env.local (ignorado pelo git); nada é impresso.
+    appendFileSync('.env.local', `\n${saveAs}=${token}\n`);
+    console.log(`Token salvo em .env.local como ${saveAs} (não exibido).`);
+  } else {
+    console.log(`TOKEN (copie agora; não será mostrado de novo): ${token}`);
+  }
 } finally {
   await client.end();
 }
