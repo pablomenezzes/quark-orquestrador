@@ -228,7 +228,7 @@ Acréscimos aprovados ao DDL abaixo (ver seção 17):
 - **RLS ativo** em todas as tabelas, sem política para `anon` e `authenticated`: só a service key acessa. O papel de leitura do dashboard nasce com o schema `analytics` (Fase 8).
 - Gatilho `updated_at` em `core.leads`.
 - Índices nas chaves estrangeiras.
-- A API do Supabase só enxerga um schema se ele estiver em *Exposed schemas* (Project Settings → API). Isso é configuração do painel, feita uma vez, e documentada em `supabase/README.md`.
+- *Exposed schemas* do painel do Supabase **não é necessário**: o endpoint fala direto com o Postgres (decisão D-13).
 
 | Schema | Conteúdo |
 |---|---|
@@ -602,7 +602,7 @@ Status: `pendente`, `em andamento`, `concluída`. Atualizar a cada entrega.
 | 1 | Script de atribuição e dataLayer no GTM; GA4 e Pixel configurados | em andamento: script, testes (jsdom) e guia entregues (2026-10-02); já exercitado no Studio; falta validar num GTM real e configurar GA4 e Pixel |
 | 2 | Migrations dos schemas `core`, `orq` e `crm` no projeto Supabase | **concluída** (2026-10-03): `0001` e `0002` aplicadas após dump e aprovação do SQL; `public` intacto; testes de integração passando com rollback |
 | 3 | Endpoint único, adaptadores de entrada (Vercel e Elementor), identificação e log em modo sombra | em andamento: **no ar** em `https://quark-orquestrador.vercel.app/api/ingest` (`gru1`, modo sombra, Deployment Protection ligada) desde 2026-10-03; 2 fontes de teste registradas; smoke test em produção ok pelos caminhos sem escrita. Faltam: acesso das fontes reais atravessando a proteção (P-01), primeiro envio real gravado e as pendências de segurança da seção 17 |
-| 3b | Quark Studio: ambiente de testes local com simulação (extra, fora do plano original) | **concluída** (2026-10-04): construtor, formulário estilo Typeform com UTMs e modo simulação; validado de ponta a ponta contra o banco real sem gravar |
+| 3b | Quark Studio: ambiente de testes local com simulação (extra, fora do plano original) | **concluída e congelada** (2026-10-04): construtor, formulário estilo Typeform com UTMs e modo simulação; validado de ponta a ponta contra o banco real sem gravar. Única correção permitida: rodar sozinho com `npm run studio` (item 1 abaixo). Nenhuma funcionalidade nova |
 | 4 | Motor de regras em tabela + adaptadores Pipedrive e Umbler | pendente |
 | 5 | Diagnóstico como qualificador (ciclo com `lid`) | pendente |
 | 6 | Migração gradual do Make | pendente |
@@ -610,8 +610,27 @@ Status: `pendente`, `em andamento`, `concluída`. Atualizar a cada entrega.
 | 8 | Sincronizações de `mkt` e views de `analytics` para o dashboard | pendente |
 | 9 | Canvas visual de regras | pendente |
 
+### Ordem de trabalho vigente (ajuste de rota, 2026-10-04)
+
+**Diagnóstico:** o projeto está tecnicamente sólido, mas nenhuma fonte real consegue entregar um lead (P-01). A prioridade é colocar o **primeiro lead real no banco com segurança**. **Nada novo entra antes disso.** Ao fim de cada item, parar e aguardar a confirmação do Pablo.
+
+| # | Item | Tipo | Status |
+|---|---|---|---|
+| 1 | **Studio congelado.** Rodar sozinho no PowerShell com `npm run studio`; ao subir, checar `.env.local`, conexão com o banco e porta livre, explicando em português o que falta. Documentar em `studio/README.md`. Nenhuma funcionalidade nova | código mínimo | pendente |
+| 2 | **Backup do código.** Repositório privado no GitHub e `push` (o Pablo faz a autenticação). Antes: confirmar `.env.local` e `backups/` no `.gitignore` | guia | pendente |
+| 3 | **P-01, só análise.** Verificar o nível de Deployment Protection ativo. Comparar as opções (a), (b), (c) e a alternativa **(d)**: proteção padrão (previews protegidos, domínio de produção público) com a defesa da produção na própria aplicação. Segurança, custo, manutenção e recomendação. **Não implementar antes da aprovação.** A opção (a) só é aceitável se o segredo não ficar exposto em páginas públicas | análise | pendente |
+| 4 | **Segurança para abrir ao público**, junto com a solução do item 3: papel de banco com privilégio mínimo (sem `postgres`); CORS restrito às origens de `orq.sources.url`; limite de requisições sem Redis (contador no Postgres, firewall da Vercel ou outro, com o custo de cada um). SQL mostrado e confirmado antes de qualquer `db push` | código + migration | pendente |
+| 5 | **LGPD.** Proposta de política de eliminação/anonimização a pedido do titular, compatível com a imutabilidade de `orq.events`. Só proposta | proposta | pendente |
+| 6 | **Primeiro lead real.** Depois dos itens 3 e 4 aprovados e aplicados: envio do Pablo, identificável, pela LP da Vercel; confirmar lead, touchpoint, evento e decisão gravados | guia + verificação | pendente |
+| 7 | **Fase 1 no mundo real.** Preencher `ownDomains` (domínios abaixo); guiar a validação do script num GTM real (`tracking/INSTALL.md`, seção 5); registrar as fontes reais | código mínimo + guia | pendente |
+
+Domínios do item 7 (`ownDomains`): `quarkrh-diagnostico.lovable.app`, `quarkrh.com.br` (cobre `/quarkrh-sistema-de-rh-completo/`, `/funcionalidades/` e `/lp-agendar-demonstracao/`).
+
+**Só depois dos 7 itens:** adaptadores de entrada do Lovable e da Meta (o Fillout não foi citado nesta lista; confirmar com o Pablo) e a Fase 4.
+
 ## 16. Convenções de código
 
+- **Regra de escopo:** nada fora da seção 15 é construído sem aprovação prévia do Pablo. Ao identificar uma ferramenta ou melhoria útil, propor em **até 5 linhas** (problema, solução, custo em tempo, o que atrasa) e **aguardar a resposta** antes de qualquer código.
 - TypeScript em todas as funções
 - Um módulo por adaptador (`adapters/in/<fonte>.ts`, `adapters/out/<destino>.ts`)
 - Migrations versionadas em `supabase/migrations/`; nunca alterar o banco manualmente
@@ -635,7 +654,8 @@ Registro vivo. Atualizar a cada sessão.
 
 | Item | Situação |
 |---|---|
-| Repositório | `C:\Users\Esig\Documents\quark-orquestrador` (git local, sem remoto), branch `main` |
+| Repositório | `C:\Users\Esig\Documents\quark-orquestrador` (git local, **sem remoto**: backup no GitHub é o item 2), branch `main` |
+| Ordem de trabalho | Seção 15, itens 1 a 7. Em andamento: item 1 |
 | Banco | Supabase "Orquestrador CRM Quark" (São Paulo), migrations `0001` e `0002` aplicadas. Tabelas com dados reais: só `orq.sources` (2 fontes de teste); demais com 0 linhas. `public` com 0 tabelas |
 | Fontes registradas | `lp-vercel-rh-teste` (vercel) e `elementor-site-rh` (elementor). Tokens só no `.env.local` |
 | Produção | `https://quark-orquestrador.vercel.app/api/ingest`, `gru1`, modo sombra, Deployment Protection ligada |
@@ -672,23 +692,28 @@ Registro vivo. Atualizar a cada sessão.
 | D-23 | Fontes são registradas por `scripts/register-source.ts` (simulação por padrão, `--apply` grava só o hash); com `--save-env` o token vai direto ao `.env.local`, sem aparecer na tela | 2026-10-04 |
 | D-24 | Senha do banco com caracteres especiais é codificada na URL (percent-encoding) por `scripts/encode-db-url.mjs`, sem alterar a senha | 2026-10-03 |
 | D-25 | A CLI do Supabase exige `sslmode=require` na conexão pelo pooler; `scripts/db-push.ps1` acrescenta sozinho | 2026-10-03 |
+| D-26 | **Ajuste de rota:** a prioridade é o primeiro lead real no banco com segurança; nada novo antes disso. Ordem de trabalho na seção 15 (itens 1 a 7), com parada e confirmação do Pablo ao fim de cada item | 2026-10-04 |
+| D-27 | **Regra de escopo** (seção 16): nada fora da seção 15 é construído sem aprovação prévia; melhorias são propostas em até 5 linhas e aguardam resposta | 2026-10-04 |
+| D-28 | **Studio congelado:** só a correção de execução autônoma (`npm run studio` com checagens e mensagens em português). Nenhuma funcionalidade nova | 2026-10-04 |
 
 ### Pendências
 
-Prioridade para ir ao ar: **P-01** e depois LGPD.
+Ordem vigente: **seção 15, itens 1 a 7**. As pendências abaixo apontam para o item que as resolve. Parar e aguardar a confirmação do Pablo ao fim de cada item.
 
-- [ ] **P-01 — Como as fontes reais atravessam a Deployment Protection?** Com a proteção ligada, o navegador do visitante e o webhook do Elementor recebem o muro de login da Vercel. Opções a decidir (nenhuma desliga a segurança sem sua aprovação): (a) *Protection Bypass for Automation* da Vercel, com segredo enviado no header `x-vercel-protection-bypass` (funciona para o Vercel/Lovable/Fillout e para o Elementor via URL, mas o segredo fica exposto em LPs públicas); (b) domínio próprio para o endpoint com a proteção desligada só nesse projeto de produção, mantendo token + honeypot + validação; (c) proxy mínimo à parte. Recomendação a avaliar com você.
-- [ ] **LGPD x imutabilidade:** `orq.events` é imutável e guarda o `payload_bruto` com dados pessoais. Definir a política de eliminação/anonimização a pedido do titular antes de ir para o ar (exigirá aprovação por mexer na regra de imutabilidade).
-- [ ] Papel de banco com privilégio mínimo para o endpoint (hoje usa o usuário `postgres` via pooler).
-- [ ] CORS reflete qualquer origem (o token identifica a fonte). Restringir às origens de `orq.sources.url` quando as URLs forem cadastradas.
-- [ ] Limite de requisições por fonte (seção 13): adiado, sem Redis disponível.
-- [ ] Primeiro envio **real gravado** pela Vercel (o caminho de escrita está provado por testes de integração, mas ainda não por HTTP em produção). Sugestão: um envio seu, identificável, sabendo que fica no banco.
-- [ ] Preencher `ownDomains` em `config/channel-rules.ts` com os domínios do site e das LPs.
-- [ ] Validar o script de atribuição num GTM e numa página reais (`tracking/INSTALL.md`, seção 5).
-- [ ] Configurar GA4 e Pixel (Fase 1).
-- [ ] Registrar as fontes reais (hoje só as 2 de teste) com `scripts/register-source.ts`.
-- [ ] IDs do Pipedrive (pipeline, estágios, campos personalizados) em `config/pipedrive.placeholders.ts`, usados só na Fase 4.
-- [ ] Adaptadores de entrada de Lovable, Fillout e Meta Lead Ads: sessões futuras. O Studio só envia pela fonte `lp-vercel-rh-teste`.
+**Caminho até o primeiro lead real**
+
+- [ ] **Item 1 — Studio rodando sozinho** (`npm run studio` com checagem de `.env.local`, banco e porta; mensagens em português; `studio/README.md`).
+- [ ] **Item 2 — Backup no GitHub** (repositório privado, `push`; confirmar `.env.local` e `backups/` no `.gitignore`). O repositório hoje não tem remoto: um defeito de disco perde o código.
+- [ ] **Item 3 / P-01 — Como as fontes reais atravessam a Deployment Protection?** Com a proteção ligada, o navegador do visitante e o webhook do Elementor recebem o muro de login da Vercel. Análise pendente do nível ativo e das opções (a) *Protection Bypass for Automation* (só aceitável se o segredo não ficar exposto em página pública), (b) domínio próprio com a proteção desligada só nesse projeto, (c) proxy mínimo, (d) proteção padrão (previews protegidos, produção pública) com a defesa na aplicação. **Nada é implementado antes da aprovação.**
+- [ ] **Item 4 — Segurança para abrir ao público:** papel de banco com privilégio mínimo (hoje o endpoint usa `postgres` via pooler); CORS restrito às origens de `orq.sources.url` (hoje reflete qualquer origem); limite de requisições por fonte sem Redis (adiado até aqui). SQL mostrado e confirmado antes de qualquer `db push`.
+- [ ] **Item 5 — LGPD x imutabilidade:** `orq.events` é imutável e guarda o `payload_bruto` com dados pessoais. Só proposta de política de eliminação/anonimização a pedido do titular; qualquer solução que mexa na imutabilidade exige aprovação.
+- [ ] **Item 6 — Primeiro envio real gravado** pela LP da Vercel (o caminho de escrita está provado por testes de integração, mas não por HTTP em produção). Envio do Pablo, identificável.
+- [ ] **Item 7 — Fase 1 no mundo real:** `ownDomains` em `config/channel-rules.ts`; validar o script num GTM real (`tracking/INSTALL.md`, seção 5); registrar as fontes reais (hoje só as 2 de teste) com `scripts/register-source.ts`; configurar GA4 e Pixel.
+
+**Depois dos 7 itens (não iniciar antes)**
+
+- [ ] Adaptadores de entrada do Lovable e da Meta Lead Ads (Fillout: confirmar com o Pablo). O Studio só envia pela fonte `lp-vercel-rh-teste`.
+- [ ] Fase 4: motor de regras e adaptadores Pipedrive e Umbler. IDs do Pipedrive (pipeline, estágios, campos personalizados) em `config/pipedrive.placeholders.ts`.
 - [ ] Fase 0 (fora do código): aplicar a convenção de UTMs em todos os anúncios.
 
 ### Concluído
