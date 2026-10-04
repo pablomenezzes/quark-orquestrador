@@ -1,4 +1,4 @@
-import { channelConfig, type ChannelConfig } from '../../config/channel-rules';
+import { channelConfig, type ChannelConfig } from '../../config/channel-rules.js';
 
 export type ChannelInput = {
   /** Tipo da fonte em orq.sources.tipo (elementor, vercel, lovable, fillout, meta_form). */

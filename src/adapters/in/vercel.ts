@@ -1,4 +1,4 @@
-import { AdapterError, isPlainObject, type AdapterResult } from './errors';
+import { AdapterError, isPlainObject, type AdapterResult } from './errors.js';
 
 /**
  * Vercel (LP em código): o navegador faz fetch já no formato do contrato (seção 7).

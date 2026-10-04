@@ -1,0 +1,8 @@
+backups/
+.env*
+supabase/.temp/
+node_modules/
+tests/
+scripts/
+*.md
+!tracking/INSTALL.md

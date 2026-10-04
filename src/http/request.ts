@@ -1,4 +1,4 @@
-import type { IngestRequest } from '../pipeline/types';
+import type { IngestRequest } from '../pipeline/types.js';
 
 type Raw = {
   headers: Record<string, string | string[] | undefined>;

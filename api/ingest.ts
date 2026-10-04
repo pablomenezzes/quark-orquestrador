@@ -1,9 +1,9 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import pg from 'pg';
-import { PgStore } from '../src/db/pg-store';
-import { assertSafeDbTarget } from '../src/db/guard';
-import { buildIngestRequest } from '../src/http/request';
-import { ingest } from '../src/pipeline/ingest';
+import { PgStore } from '../src/db/pg-store.js';
+import { assertSafeDbTarget } from '../src/db/guard.js';
+import { buildIngestRequest } from '../src/http/request.js';
+import { ingest } from '../src/pipeline/ingest.js';
 
 /**
  * Endpoint único (seção 5). Região gru1 (vercel.json).

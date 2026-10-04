@@ -1,4 +1,4 @@
-import { AdapterError, isPlainObject, type AdapterResult } from './errors';
+import { AdapterError, isPlainObject, type AdapterResult } from './errors.js';
 
 /**
  * Elementor Pro (ação "Webhook"): traduz o formato do Elementor para o contrato (seção 7).

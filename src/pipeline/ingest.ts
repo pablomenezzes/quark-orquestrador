@@ -1,13 +1,13 @@
-import { channelConfig } from '../../config/channel-rules';
-import { parseElementor } from '../adapters/in/elementor';
-import { AdapterError, isPlainObject, type AdapterResult } from '../adapters/in/errors';
-import { parseVercel } from '../adapters/in/vercel';
-import { deriveChannel } from '../channel/derive-channel';
-import { contractSchema, type ContractEvent } from '../contract/schema';
-import { resolveLead } from '../identity/resolve-lead';
-import { normalizeEmail, normalizeLandingUrl, normalizePhone } from '../normalize';
-import { hashToken, verifyToken } from '../security/verify-token';
-import type { IngestDeps, IngestRequest, IngestResponse, SourceRow, SourceTipo, TouchpointInsert } from './types';
+import { channelConfig } from '../../config/channel-rules.js';
+import { parseElementor } from '../adapters/in/elementor.js';
+import { AdapterError, isPlainObject, type AdapterResult } from '../adapters/in/errors.js';
+import { parseVercel } from '../adapters/in/vercel.js';
+import { deriveChannel } from '../channel/derive-channel.js';
+import { contractSchema, type ContractEvent } from '../contract/schema.js';
+import { resolveLead } from '../identity/resolve-lead.js';
+import { normalizeEmail, normalizeLandingUrl, normalizePhone } from '../normalize/index.js';
+import { hashToken, verifyToken } from '../security/verify-token.js';
+import type { IngestDeps, IngestRequest, IngestResponse, SourceRow, SourceTipo, TouchpointInsert } from './types.js';
 
 /** Tipos de evento que as fontes públicas podem enviar. Os deal_* vêm do Pipedrive (fase futura). */
 const ALLOWED_EVENT_TYPES = new Set(['form_submit', 'diagnostico_iniciado', 'diagnostico_concluido']);

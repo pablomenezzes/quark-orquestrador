@@ -1,4 +1,4 @@
-import type { LeadRepo } from '../identity/resolve-lead';
+import type { LeadRepo } from '../identity/resolve-lead.js';
 
 export type SourceTipo = 'elementor' | 'vercel' | 'lovable' | 'fillout' | 'meta_form';
 

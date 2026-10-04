@@ -1,6 +1,6 @@
 import type pg from 'pg';
-import type { LeadRepo, LeadRow } from '../identity/resolve-lead';
-import type { DecisionInsert, EventInsert, SourceRow, Store, TouchpointInsert, Tx } from '../pipeline/types';
+import type { LeadRepo, LeadRow } from '../identity/resolve-lead.js';
+import type { DecisionInsert, EventInsert, SourceRow, Store, TouchpointInsert, Tx } from '../pipeline/types.js';
 
 type Queryable = { query: (text: string, values?: unknown[]) => Promise<{ rows: any[] }> };
 
