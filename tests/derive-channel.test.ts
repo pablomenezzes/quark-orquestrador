@@ -102,3 +102,22 @@ describe('deriveChannel (seção 9) — ordem de avaliação', () => {
     expect(d({ utm_source: 'x', utm_medium: 'afiliado', referrer: 'https://www.google.com/' })).toBe('organic_search');
   });
 });
+
+describe('domínios próprios reais da Quark (item 7)', () => {
+  const base2 = { source_tipo: 'elementor', utm_source: '', utm_medium: '', gclid: '', gbraid: '', wbraid: '' };
+  it('referrer do site, de subdomínios e do diagnóstico é navegação interna (direct), não referral', () => {
+    for (const ref of [
+      'https://quarkrh.com.br/funcionalidades/',
+      'https://www.quarkrh.com.br/lp-agendar-demonstracao/',
+      'https://quarkrh.com.br/quarkrh-sistema-de-rh-completo/',
+      'https://quarkrh-diagnostico.lovable.app/',
+    ]) expect(deriveChannel({ ...base2, referrer: ref })).toBe('direct');
+  });
+  it('mas um domínio parecido NÃO é próprio', () => {
+    expect(deriveChannel({ ...base2, referrer: 'https://quarkrh.com.br.golpe.xyz/' })).toBe('referral');
+    expect(deriveChannel({ ...base2, referrer: 'https://meuquarkrh.com.br/' })).toBe('referral');
+  });
+  it('e a busca orgânica continua funcionando', () => {
+    expect(deriveChannel({ ...base2, referrer: 'https://www.google.com/' })).toBe('organic_search');
+  });
+});

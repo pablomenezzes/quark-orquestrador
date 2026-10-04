@@ -49,7 +49,8 @@ export const channelConfig: ChannelConfig = {
     exact('whatsapp.com'),
     exact('wa.me'),
   ],
-  // TODO(Pablo): preencher com os domínios do site, LPs e diagnósticos (ex: 'quark.com.br').
-  ownDomains: [],
+  // Domínios próprios: referrer vindo deles é navegação interna, não um canal novo.
+  // 'quarkrh.com.br' cobre também www e qualquer subdomínio (site, funcionalidades, LPs de agendamento).
+  ownDomains: ['quarkrh.com.br', 'quarkrh-diagnostico.lovable.app'],
   unknownUtmFallback: 'other',
 };
