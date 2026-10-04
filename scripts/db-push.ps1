@@ -1,4 +1,4 @@
-<#
+﻿<#
   Fluxo seguro de db push (secao 4):
     1. lint das migrations (testes)
     2. dump completo em backups/        (regra 2)
@@ -23,8 +23,11 @@ foreach ($line in Get-Content .env.local) {
   }
 }
 
+# A CLI do Supabase exige SSL explicito no pooler (sem isso: 'Connection terminated unexpectedly').
+$dbUrl = if ($env:SUPABASE_DB_URL.Contains('sslmode=')) { $env:SUPABASE_DB_URL } else { $env:SUPABASE_DB_URL + '?sslmode=require' }
+
 Write-Host '== 3/4 Dry-run: migrations pendentes =='
-npx supabase db push --dry-run --db-url $env:SUPABASE_DB_URL
+npx supabase db push --dry-run --db-url $dbUrl
 if ($LASTEXITCODE -ne 0) { throw 'dry-run falhou.' }
 
 if (-not $Apply) {
@@ -32,4 +35,5 @@ if (-not $Apply) {
   exit 0
 }
 Write-Host '== 4/4 Aplicando =='
-npx supabase db push --db-url $env:SUPABASE_DB_URL
+npx supabase db push --db-url $dbUrl
+
