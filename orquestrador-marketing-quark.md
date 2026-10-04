@@ -1,4 +1,4 @@
-﻿# Orquestrador de Marketing Quark
+# Orquestrador de Marketing Quark
 
 Instruções do projeto para desenvolvimento com o Claude Code.
 
@@ -60,6 +60,19 @@ Construir um sistema próprio, centralizado e versionado, que:
 - O schema `public` deste projeto está **vazio**. O dashboard do QuarkRH fica em outra conta do Supabase, sem relação com este banco. Mesmo assim, por organização, **o orquestrador nunca usa o `public`** (regra 1 abaixo).
 - Funções na Vercel rodam na região `gru1` (São Paulo), ao lado do banco.
 - Como o projeto é único e vai receber dados reais, a segurança vem das regras abaixo, não de um ambiente separado.
+- **Produção (Vercel):** projeto `quark-orquestrador`, conta `pablomenezes-9499`, endpoint `https://quark-orquestrador.vercel.app/api/ingest`, região `gru1`, **modo sombra**. A **Deployment Protection está ligada e assim deve ficar** (decisão D-22): quem não está logado na Vercel recebe o muro de login.
+- **Testes:** o ambiente de testes é o **Quark Studio** local (seção "Ambiente de testes" abaixo), que simula o pipeline sem gravar.
+
+### Ambiente de testes: Quark Studio
+
+`npm run studio` sobe `http://127.0.0.1:4310` (só na máquina local, nunca publicado). Constrói formulários (perguntas, tipos, opções, destino de cada resposta no contrato), abre cada um em nova aba com todas as perguntas na mesma tela e com UTMs, presets e referrer simulado, e envia pelo **mesmo `ingest()`** do endpoint, usando o **mesmo `tracking/attribution.js`** do GTM.
+
+| Modo | Efeito |
+|---|---|
+| **Simular** (padrão) | Roda o pipeline inteiro contra o banco real e **desfaz a transação**. Devolve o que seria gravado (lead, touchpoint, evento, decisão). Não grava nada |
+| **Gravar em modo sombra** | Confirma a transação. **Irreversível** (`orq.events` é imutável). Exige `mode:"real"` explícito e dupla confirmação; os dados ficam marcados com `answers._studio_form` e `lp_id` `studio-…` |
+
+O token da fonte fica só no servidor local (`SOURCE_TOKEN_LP_VERCEL`). O servidor confere `Host`, `Origin` e `Content-Type` (anti DNS-rebinding e CSRF). Detalhes em `studio/README.md`. Formulários ficam em `studio/forms/*.json` (versionados).
 
 ### Regras obrigatórias do banco
 
@@ -85,7 +98,11 @@ Construir um sistema próprio, centralizado e versionado, que:
 | `SUPABASE_PROJECT_REF` | Project Settings → General → Reference ID (também na URL do painel). Alimenta a trava de alvo (`src/db/guard.ts`) |
 | `SUPABASE_DB_URL` | Connect → Connection string → Session pooler (porta 5432), com a senha do banco. **Secreta.** Usada pelo endpoint, pelos testes de integração, pelo dump e pelo `db push` |
 | `SUPABASE_SERVICE_ROLE_KEY` | Project Settings → API Keys → `service_role`. Não é usada nesta fase (o endpoint fala direto com o Postgres); reservada para clientes REST futuros |
-| `SHADOW_MODE` | Fixo em `true` até a Fase 6 |
+| `SHADOW_MODE` | Fixo em `true` até a Fase 6. Sem `true` exato o endpoint se recusa a operar |
+| `SOURCE_TOKEN_LP_VERCEL`, `SOURCE_TOKEN_ELEMENTOR` | Token em texto puro de cada fonte, **só no `.env.local`** (gerado por `scripts/register-source.ts --save-env`). No banco fica apenas o hash |
+| `STUDIO_PORT` | Opcional; porta do Studio (padrão 4310) |
+
+**Vercel (produção):** `SUPABASE_DB_URL` (sensível), `SUPABASE_PROJECT_REF` e `SHADOW_MODE`. Para criar ou alterar, use `vercel env add NOME production --value VALOR --force --yes`. **Nunca envie o valor por pipe no PowerShell 5.1**: ele acrescenta `CRLF` e o guarda de segurança do banco passa a recusar a conexão.
 
 ## 5. Arquitetura
 
@@ -552,12 +569,14 @@ GTM server-side. O orquestrador já cumpre o papel de servidor.
 ## 13. Segurança
 
 - Token próprio por fonte, enviado em header (`x-quark-token`) e comparado com `token_hash` (SHA-256, comparação em tempo constante). Fontes que não conseguem enviar cabeçalho (Elementor, Fillout) usam `?token=` na URL. Fonte desconhecida, inativa ou token errado recebem a mesma resposta `401`
-- Validação da assinatura dos webhooks da Meta
-- Limite de requisições por fonte
-- Honeypot contra bots nos formulários públicos
-- Registro do consentimento LGPD em cada evento
+- Validação da assinatura dos webhooks da Meta (adaptador da Meta: sessão futura)
+- Limite de requisições por fonte (pendente, ver seção 17)
+- Honeypot `website_hp` contra bots nos formulários públicos (implementado: responde 200 sem gravar)
+- Registro do consentimento LGPD em cada evento (implementado, em `orq.events.dados.consent`)
 - Chave de serviço do Supabase apenas no servidor
 - RLS ativo; o dashboard usa papel somente leitura e só acessa `analytics`
+- **Deployment Protection da Vercel ligada** em produção (D-22). Corpo máximo de 100 KB. Trava de alvo do banco (`src/db/guard.ts`) recusa conectar a um projeto que não seja o do `SUPABASE_PROJECT_REF`
+- Endpoint em modo sombra: o código não tem caminho de execução real (`SHADOW_MODE` precisa ser `true`)
 
 ## 14. Plano de migração
 
@@ -569,7 +588,9 @@ Não há ambiente de testes separado (seção 4). O "modo sombra" faz o papel de
 4. Desligar o Make fonte por fonte, nesta ordem: Vercel, Lovable, Fillout, Elementor, Meta Lead Ads.
 5. Só desligar o último cenário depois de migrar o projeto para o plano pago do Supabase.
 
-Como os dados de teste não podem ficar no banco (regra 5), o período em sombra só contém eventos **reais** dos formulários.
+Como os dados de teste não podem ficar no banco (regra 5), o período em sombra só contém eventos **reais** dos formulários. Os testes manuais usam a **simulação** do Quark Studio, que não grava.
+
+Pré-requisito para as fontes reais chegarem ao endpoint: definir como atravessar a Deployment Protection sem desligá-la (pendência P-01 na seção 17).
 
 ## 15. Fases de entrega
 
@@ -578,9 +599,10 @@ Status: `pendente`, `em andamento`, `concluída`. Atualizar a cada entrega.
 | Fase | Entrega | Status |
 |---|---|---|
 | 0 | Convenção de UTMs aplicada em todos os anúncios | pendente (fora do código) |
-| 1 | Script de atribuição e dataLayer no GTM; GA4 e Pixel configurados | em andamento: script e guia entregues (2026-10-02); falta validar no GTM e configurar GA4 e Pixel |
+| 1 | Script de atribuição e dataLayer no GTM; GA4 e Pixel configurados | em andamento: script, testes (jsdom) e guia entregues (2026-10-02); já exercitado no Studio; falta validar num GTM real e configurar GA4 e Pixel |
 | 2 | Migrations dos schemas `core`, `orq` e `crm` no projeto Supabase | **concluída** (2026-10-03): `0001` e `0002` aplicadas após dump e aprovação do SQL; `public` intacto; testes de integração passando com rollback |
-| 3 | Endpoint único, adaptadores de entrada (Vercel e Elementor), identificação e log em modo sombra | em andamento: código e testes (incl. contra o Postgres real) entregues em 2026-10-03; falta o deploy na Vercel e registrar as fontes |
+| 3 | Endpoint único, adaptadores de entrada (Vercel e Elementor), identificação e log em modo sombra | em andamento: **no ar** em `https://quark-orquestrador.vercel.app/api/ingest` (`gru1`, modo sombra, Deployment Protection ligada) desde 2026-10-03; 2 fontes de teste registradas; smoke test em produção ok pelos caminhos sem escrita. Faltam: acesso das fontes reais atravessando a proteção (P-01), primeiro envio real gravado e as pendências de segurança da seção 17 |
+| 3b | Quark Studio: ambiente de testes local com simulação (extra, fora do plano original) | **concluída** (2026-10-04): construtor, formulário estilo Typeform com UTMs e modo simulação; validado de ponta a ponta contra o banco real sem gravar |
 | 4 | Motor de regras em tabela + adaptadores Pipedrive e Umbler | pendente |
 | 5 | Diagnóstico como qualificador (ciclo com `lid`) | pendente |
 | 6 | Migração gradual do Make | pendente |
@@ -598,6 +620,9 @@ Status: `pendente`, `em andamento`, `concluída`. Atualizar a cada entrega.
 - Antes de `db push`: dump em `backups/` e SQL mostrado ao Pablo para confirmação (seção 4, regras 2 e 4)
 - Testes de integração em transação com `ROLLBACK`, via `SUPABASE_DB_URL`; nenhum dado de teste permanece (seção 4, regra 5)
 - Funções da Vercel na região `gru1`
+- Imports relativos em `src/`, `config/` e `api/` **com extensão `.js`** (Node ESM na Vercel; sem isso a função cai ao carregar). `node scripts/add-js-extensions.mjs` corrige em lote
+- Smoke tests em produção só por caminhos que **não gravam** (405, 401, 400, honeypot, OPTIONS): `orq.events` é imutável e dado de teste ali seria permanente
+- Segredos nunca são impressos nem passados por pipe; scripts que geram tokens gravam direto no `.env.local` (`--save-env`)
 - Toda função do caminho crítico registra a decisão em `orq.decisions`, inclusive em erro
 - Retentativa com backoff para chamadas ao Pipedrive e à Umbler
 - Testes para o motor de regras e para a derivação de canal antes de qualquer outra coisa
@@ -605,6 +630,18 @@ Status: `pendente`, `em andamento`, `concluída`. Atualizar a cada entrega.
 ## 17. Decisões e pendências
 
 Registro vivo. Atualizar a cada sessão.
+
+### Estado atual (2026-10-04)
+
+| Item | Situação |
+|---|---|
+| Repositório | `C:\Users\Esig\Documents\quark-orquestrador` (git local, sem remoto), branch `main` |
+| Banco | Supabase "Orquestrador CRM Quark" (São Paulo), migrations `0001` e `0002` aplicadas. Tabelas com dados reais: só `orq.sources` (2 fontes de teste); demais com 0 linhas. `public` com 0 tabelas |
+| Fontes registradas | `lp-vercel-rh-teste` (vercel) e `elementor-site-rh` (elementor). Tokens só no `.env.local` |
+| Produção | `https://quark-orquestrador.vercel.app/api/ingest`, `gru1`, modo sombra, Deployment Protection ligada |
+| Testes | 184 passando (unitários, integração em transação com rollback, Studio). Os de integração dependem do `.env.local` |
+| Backups | `backups/dump-*.sql` (ignorados pelo git). Dump antes de cada `db push` |
+| Ferramentas | Node 24, Git 2.55, `pg_dump` 17.11 em `C:\PostgreSQL17\bin`, Vercel CLI (via `npx`) logada |
 
 ### Decisões tomadas
 
@@ -628,24 +665,41 @@ Registro vivo. Atualizar a cada sessão.
 | D-16 | Falha após a validação: 500 para a fonte retentar, nada parcial gravado, e um evento bruto sem lead + decisão `erro` ficam registrados. A retentativa não é tratada como duplicada | 2026-10-03 |
 | D-17 | Decisão em modo sombra grava `acao = 'pendente_motor_regras'` até o motor de regras existir (Fase 4) | 2026-10-03 |
 | D-18 | IP e user agent: Vercel/Lovable usam os do request (é o visitante); Elementor usa só o `user_agent` do campo oculto e não grava IP (o request é do servidor do Elementor) | 2026-10-03 |
+| D-19 | `event_id` exige no mínimo 8 caracteres; corpo máximo de 100 KB; `occurred_at` ausente, inválido ou mais de 10 min no futuro vira o horário de recebimento | 2026-10-03 |
 | D-20 | Ambiente de testes = **Quark Studio** (`npm run studio`, só em 127.0.0.1): constrói formulários e envia pelo mesmo `ingest()`. A Deployment Protection da Vercel permanece ligada | 2026-10-04 |
 | D-21 | `ingest` ganhou o modo **simulação** (`dryRun`, só ativável por código do servidor): roda tudo na transação e a desfaz, devolvendo o que seria gravado. É o padrão do Studio; gravar exige `mode:"real"` com dupla confirmação | 2026-10-04 |
-| D-19 | `event_id` exige no mínimo 8 caracteres; corpo máximo de 100 KB; `occurred_at` ausente, inválido ou mais de 10 min no futuro vira o horário de recebimento | 2026-10-03 |
+| D-22 | **A Deployment Protection da Vercel não é desligada** para liberar o endpoint. A defesa continua em camadas (token, honeypot, validação, RLS), mas a abertura ao público exige uma solução que preserve a proteção (P-01) | 2026-10-04 |
+| D-23 | Fontes são registradas por `scripts/register-source.ts` (simulação por padrão, `--apply` grava só o hash); com `--save-env` o token vai direto ao `.env.local`, sem aparecer na tela | 2026-10-04 |
+| D-24 | Senha do banco com caracteres especiais é codificada na URL (percent-encoding) por `scripts/encode-db-url.mjs`, sem alterar a senha | 2026-10-03 |
+| D-25 | A CLI do Supabase exige `sslmode=require` na conexão pelo pooler; `scripts/db-push.ps1` acrescenta sozinho | 2026-10-03 |
 
 ### Pendências
 
-- [ ] Preencher `ownDomains` em `config/channel-rules.ts` com os domínios do site e das LPs.
-- [ ] Validar o script de atribuição num GTM e numa página reais (`tracking/INSTALL.md`, seção 5).
-- [ ] Configurar GA4 e Pixel (Fase 1).
-- [ ] Limite de requisições por fonte (seção 13): adiado, sem Redis disponível.
+Prioridade para ir ao ar: **P-01** e depois LGPD.
+
+- [ ] **P-01 — Como as fontes reais atravessam a Deployment Protection?** Com a proteção ligada, o navegador do visitante e o webhook do Elementor recebem o muro de login da Vercel. Opções a decidir (nenhuma desliga a segurança sem sua aprovação): (a) *Protection Bypass for Automation* da Vercel, com segredo enviado no header `x-vercel-protection-bypass` (funciona para o Vercel/Lovable/Fillout e para o Elementor via URL, mas o segredo fica exposto em LPs públicas); (b) domínio próprio para o endpoint com a proteção desligada só nesse projeto de produção, mantendo token + honeypot + validação; (c) proxy mínimo à parte. Recomendação a avaliar com você.
 - [ ] **LGPD x imutabilidade:** `orq.events` é imutável e guarda o `payload_bruto` com dados pessoais. Definir a política de eliminação/anonimização a pedido do titular antes de ir para o ar (exigirá aprovação por mexer na regra de imutabilidade).
 - [ ] Papel de banco com privilégio mínimo para o endpoint (hoje usa o usuário `postgres` via pooler).
 - [ ] CORS reflete qualquer origem (o token identifica a fonte). Restringir às origens de `orq.sources.url` quando as URLs forem cadastradas.
-- [ ] Registrar as fontes reais com `scripts/register-source.ts` (token aparece uma vez).
-- [ ] Deploy do projeto na Vercel (região `gru1`) com as variáveis de ambiente.
+- [ ] Limite de requisições por fonte (seção 13): adiado, sem Redis disponível.
+- [ ] Primeiro envio **real gravado** pela Vercel (o caminho de escrita está provado por testes de integração, mas ainda não por HTTP em produção). Sugestão: um envio seu, identificável, sabendo que fica no banco.
+- [ ] Preencher `ownDomains` em `config/channel-rules.ts` com os domínios do site e das LPs.
+- [ ] Validar o script de atribuição num GTM e numa página reais (`tracking/INSTALL.md`, seção 5).
+- [ ] Configurar GA4 e Pixel (Fase 1).
+- [ ] Registrar as fontes reais (hoje só as 2 de teste) com `scripts/register-source.ts`.
 - [ ] IDs do Pipedrive (pipeline, estágios, campos personalizados) em `config/pipedrive.placeholders.ts`, usados só na Fase 4.
-- [ ] Adaptadores de entrada de Lovable, Fillout e Meta Lead Ads: sessões futuras.
+- [ ] Adaptadores de entrada de Lovable, Fillout e Meta Lead Ads: sessões futuras. O Studio só envia pela fonte `lp-vercel-rh-teste`.
+- [ ] Fase 0 (fora do código): aplicar a convenção de UTMs em todos os anúncios.
+
+### Concluído
+
 - [x] Ferramenta de dump: `pg_dump` 17.11 instalado em `C:\PostgreSQL17\bin` (2026-10-03); `scripts/dump.ps1` o localiza.
 - [x] `db push` das migrations 0001 e 0002 executado em 2026-10-03, com dump prévio (`backups/dump-20261003-222344.sql`) e SQL aprovado.
-- [ ] A CLI do Supabase exige `sslmode=require` na conexão pelo pooler; `scripts/db-push.ps1` já faz isso.
-- [ ] `TRUNCATE` em `orq.events`: hoje o Postgres já barra por causa da FK de `orq.decisions` (erro `0A000`); o trigger é a segunda barreira.
+- [x] Deploy na Vercel (`gru1`) com `SUPABASE_DB_URL`, `SUPABASE_PROJECT_REF` e `SHADOW_MODE` (2026-10-03). Imports ESM corrigidos (`.js`) e variáveis reenviadas sem `CRLF`.
+- [x] Duas fontes de teste registradas; smoke test em produção pelos caminhos sem escrita (405, 401, honeypot 200, 400, OPTIONS 204).
+- [x] Quark Studio e modo simulação (`dryRun`) entregues (2026-10-04).
+
+### Notas técnicas
+
+- `TRUNCATE` em `orq.events`: hoje o Postgres já barra por causa da FK de `orq.decisions` (erro `0A000`); o trigger é a segunda barreira, e o teste de integração aceita os dois códigos.
+- Falha de uma função em produção cai em erro `ERR_MODULE_NOT_FOUND` se um import relativo ficar sem `.js`: o Vitest não acusa, só a execução na Vercel.
