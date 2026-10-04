@@ -1,7 +1,7 @@
 /*!
  * Quark - Script de atribuicao (secao 12.2 do orquestrador-marketing-quark.md)
  *
- * Uso: colar dentro de <script>...</script> numa tag "HTML personalizado" do GTM
+ * Uso: colar entre as tags de script, numa tag "HTML personalizado" do GTM (ou no cabecalho do site)
  * (container web unico), disparo "All Pages" com Consent Settings exigindo analytics_storage.
  * Configuracao opcional ANTES do script: window.QUARK_ATTR_CONFIG = { ... } (ver DEFAULTS).
  *

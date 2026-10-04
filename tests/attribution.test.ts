@@ -166,3 +166,34 @@ describe('attribution.js', () => {
     expect(w.QuarkAttribution.get().consent).toEqual({ marketing: true, analytics: true });
   });
 });
+
+describe('attribution.js incorporado numa página HTML (WordPress, Elementor, GTM)', () => {
+  it('não contém sequências que encerram a tag de script ou abrem comentário HTML', () => {
+    expect(SCRIPT).not.toMatch(/<\/script/i);
+    expect(SCRIPT).not.toContain('<!--');
+  });
+
+  it('funciona quando colado entre tags de script numa página, junto com a configuração', async () => {
+    const config = "window.QUARK_ATTR_CONFIG={cookieDomain:'',decorateHosts:['quarkrh-diagnostico.lovable.app'],ignoreReferrerHosts:['quarkrh.com.br']};";
+    const html = `<!doctype html><html><head><script>${config}</script><script>${SCRIPT}</script></head><body>
+      <form><input type="hidden" name="form_fields[utm_source]"><input type="hidden" name="form_fields[lead_id]"></form>
+      <a id="d" href="https://quarkrh-diagnostico.lovable.app/">diagnóstico</a></body></html>`;
+    const dom = new JSDOM(html, { url: 'https://quarkrh.com.br/lp-agendar-demonstracao/?utm_source=google&utm_medium=cpc&gclid=G1', runScripts: 'dangerously', pretendToBeVisual: true });
+    const w = dom.window as any;
+    await new Promise<void>((res) => (w.document.readyState === 'loading' ? w.document.addEventListener('DOMContentLoaded', () => res()) : res()));
+    expect(typeof w.QuarkAttribution?.get).toBe('function');
+    const q = (n: string) => (w.document.querySelector(`[name="form_fields[${n}]"]`) as HTMLInputElement).value;
+    expect(q('utm_source')).toBe('google');
+    expect(q('lead_id')).toBe(w.QuarkAttribution.leadId());
+    expect(new URL(w.document.getElementById('d').getAttribute('href')).searchParams.get('lid')).toBe(w.QuarkAttribution.leadId());
+  });
+
+  it('referrer do próprio site (inclusive www) não vira um novo toque', () => {
+    const w = load({
+      url: 'https://quarkrh.com.br/funcionalidades/',
+      referrer: 'https://www.quarkrh.com.br/',
+      config: { ignoreReferrerHosts: ['quarkrh.com.br'] },
+    });
+    expect(w.QuarkAttribution.get().attribution.referrer).toBe('');
+  });
+});
