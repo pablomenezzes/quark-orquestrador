@@ -579,8 +579,8 @@ Status: `pendente`, `em andamento`, `concluída`. Atualizar a cada entrega.
 |---|---|---|
 | 0 | Convenção de UTMs aplicada em todos os anúncios | pendente (fora do código) |
 | 1 | Script de atribuição e dataLayer no GTM; GA4 e Pixel configurados | em andamento: script e guia entregues (2026-10-02); falta validar no GTM e configurar GA4 e Pixel |
-| 2 | Migrations dos schemas `core`, `orq` e `crm` no projeto Supabase | em andamento: migrations escritas (2026-10-03); `db push` aguardando dump e aprovação |
-| 3 | Endpoint único, adaptadores de entrada (Vercel e Elementor), identificação e log em modo sombra | em andamento: código e testes entregues (2026-10-03); falta o `db push`, o deploy na Vercel e o teste de ponta a ponta com o banco |
+| 2 | Migrations dos schemas `core`, `orq` e `crm` no projeto Supabase | **concluída** (2026-10-03): `0001` e `0002` aplicadas após dump e aprovação do SQL; `public` intacto; testes de integração passando com rollback |
+| 3 | Endpoint único, adaptadores de entrada (Vercel e Elementor), identificação e log em modo sombra | em andamento: código e testes (incl. contra o Postgres real) entregues em 2026-10-03; falta o deploy na Vercel e registrar as fontes |
 | 4 | Motor de regras em tabela + adaptadores Pipedrive e Umbler | pendente |
 | 5 | Diagnóstico como qualificador (ciclo com `lid`) | pendente |
 | 6 | Migração gradual do Make | pendente |
@@ -644,4 +644,6 @@ Registro vivo. Atualizar a cada sessão.
 - [ ] IDs do Pipedrive (pipeline, estágios, campos personalizados) em `config/pipedrive.placeholders.ts`, usados só na Fase 4.
 - [ ] Adaptadores de entrada de Lovable, Fillout e Meta Lead Ads: sessões futuras.
 - [x] Ferramenta de dump: `pg_dump` 17.11 instalado em `C:\PostgreSQL17\bin` (2026-10-03); `scripts/dump.ps1` o localiza.
-- [ ] Executar o `db push` das migrations 0001 e 0002 (aguarda aprovação do SQL e dump).
+- [x] `db push` das migrations 0001 e 0002 executado em 2026-10-03, com dump prévio (`backups/dump-20261003-222344.sql`) e SQL aprovado.
+- [ ] A CLI do Supabase exige `sslmode=require` na conexão pelo pooler; `scripts/db-push.ps1` já faz isso.
+- [ ] `TRUNCATE` em `orq.events`: hoje o Postgres já barra por causa da FK de `orq.decisions` (erro `0A000`); o trigger é a segunda barreira.

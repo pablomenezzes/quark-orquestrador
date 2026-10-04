@@ -93,7 +93,14 @@ run('schema (transação com rollback)', () => {
     const eventId = await newEvent(await newLead());
     expect(await fails(`update orq.events set tipo = 'x' where id = $1`, [eventId])).toBe('23001');
     expect(await fails(`delete from orq.events where id = $1`, [eventId])).toBe('23001');
-    expect(await fails(`truncate orq.events`)).toBe('23001');
+    // TRUNCATE: com FK apontando para a tabela (orq.decisions), o Postgres barra antes do trigger (0A000).
+    // Sem FK, quem barra é o trigger (23001). Nos dois casos a tabela está protegida.
+    expect(['23001', '0A000']).toContain(await fails(`truncate orq.events`));
+    const trg = await c().query(
+      `select count(*)::int as n from pg_trigger
+        where tgrelid = 'orq.events'::regclass and not tgisinternal and (tgtype & 32) = 32`, // 32 = TRUNCATE
+    );
+    expect(trg.rows[0].n).toBe(1);
     const r = await c().query(`select tipo from orq.events where id = $1`, [eventId]);
     expect(r.rows[0].tipo).toBe('form_submit');
   });
