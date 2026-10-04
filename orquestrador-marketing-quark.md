@@ -656,7 +656,7 @@ Registro vivo. Atualizar a cada sessão.
 |---|---|
 | Repositório | `C:\Users\Esig\Documents\quark-orquestrador` (git local, **sem remoto**: backup no GitHub é o item 2), branch `main` |
 | Ordem de trabalho | Seção 15, itens 1 a 7. Item 1 feito, aguardando confirmação; próximo: item 2 |
-| Banco | Supabase "Orquestrador CRM Quark" (São Paulo), migrations `0001` e `0002` aplicadas. Tabelas com dados reais: só `orq.sources` (2 fontes de teste); demais com 0 linhas. `public` com 0 tabelas |
+| Banco | Supabase "Orquestrador CRM Quark" (São Paulo), migrations `0001` e `0002` aplicadas. Dados: `orq.sources` (2 fontes de teste) e **1 lead de teste do Pablo** gravado pelo Studio em modo "gravar" em 2026-10-04 12:20Z (formulário `demo-rh`, `lp_id` `studio-demo-rh`, canal `direct`, `landing_url` de `127.0.0.1`): 1 lead, 1 touchpoint, 1 evento, 1 decisão. É permanente (eventos imutáveis) e entra na política de LGPD (item 5). Demais tabelas com 0 linhas. `public` com 0 tabelas |
 | Fontes registradas | `lp-vercel-rh-teste` (vercel) e `elementor-site-rh` (elementor). Tokens só no `.env.local` |
 | Produção | `https://quark-orquestrador.vercel.app/api/ingest`, `gru1`, modo sombra, Deployment Protection ligada |
 | Testes | 184 passando (unitários, integração em transação com rollback, Studio). Os de integração dependem do `.env.local` |
@@ -707,7 +707,7 @@ Ordem vigente: **seção 15, itens 1 a 7**. As pendências abaixo apontam para o
 - [ ] **Item 3 / P-01 — Como as fontes reais atravessam a Deployment Protection?** Com a proteção ligada, o navegador do visitante e o webhook do Elementor recebem o muro de login da Vercel. Análise pendente do nível ativo e das opções (a) *Protection Bypass for Automation* (só aceitável se o segredo não ficar exposto em página pública), (b) domínio próprio com a proteção desligada só nesse projeto, (c) proxy mínimo, (d) proteção padrão (previews protegidos, produção pública) com a defesa na aplicação. **Nada é implementado antes da aprovação.**
 - [ ] **Item 4 — Segurança para abrir ao público:** papel de banco com privilégio mínimo (hoje o endpoint usa `postgres` via pooler); CORS restrito às origens de `orq.sources.url` (hoje reflete qualquer origem); limite de requisições por fonte sem Redis (adiado até aqui). SQL mostrado e confirmado antes de qualquer `db push`.
 - [ ] **Item 5 — LGPD x imutabilidade:** `orq.events` é imutável e guarda o `payload_bruto` com dados pessoais. Só proposta de política de eliminação/anonimização a pedido do titular; qualquer solução que mexa na imutabilidade exige aprovação.
-- [ ] **Item 6 — Primeiro envio real gravado** pela LP da Vercel (o caminho de escrita está provado por testes de integração, mas não por HTTP em produção). Envio do Pablo, identificável.
+- [ ] **Item 6 — Primeiro envio real gravado** pela LP da Vercel (o caminho de escrita está provado por testes de integração, mas não por HTTP em produção). Envio do Pablo, identificável. **Atenção:** já existe um lead de teste com o e-mail do Pablo (gravado pelo Studio em 2026-10-04); um envio com o mesmo e-mail será **deduplicado** para esse lead (`matched_by: email`), o que também testa a regra da seção 10. Para ver um lead novo, usar outro e-mail.
 - [ ] **Item 7 — Fase 1 no mundo real:** `ownDomains` em `config/channel-rules.ts`; validar o script num GTM real (`tracking/INSTALL.md`, seção 5); registrar as fontes reais (hoje só as 2 de teste) com `scripts/register-source.ts`; configurar GA4 e Pixel.
 
 **Depois dos 7 itens (não iniciar antes)**
