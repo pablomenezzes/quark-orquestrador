@@ -98,6 +98,32 @@ export class PgStore implements Store {
     return findSource(this.pool ?? this.client!, slug);
   }
 
+  /**
+   * Conta uma requisição no balde (janela fixa) e devolve o total e quanto falta para a janela virar.
+   * Uma única instrução atômica (upsert). Fora da transação do evento: o contador persiste mesmo se o resto falhar.
+   */
+  async hit(bucket: string, windowSec: number): Promise<{ hits: number; resetInSec: number }> {
+    const q: Queryable = this.pool ?? this.client!;
+    const r = await q.query(
+      `insert into orq.rate_limits (bucket, window_start, hits)
+       values ($1, to_timestamp(floor(extract(epoch from now()) / $2::int) * $2::int), 1)
+       on conflict (bucket, window_start) do update set hits = orq.rate_limits.hits + 1
+       returning hits, greatest(1, ceil(extract(epoch from window_start) + $2::int - extract(epoch from now())))::int as reset_in`,
+      [bucket, windowSec],
+    );
+    // Limpeza oportunista (1% das chamadas) das janelas antigas; falha aqui não importa.
+    if (Math.random() < 0.01) {
+      void q.query(`delete from orq.rate_limits where window_start < now() - interval '2 days'`).catch(() => undefined);
+    }
+    return { hits: Number(r.rows[0].hits), resetInSec: Number(r.rows[0].reset_in) };
+  }
+
+  async listSourceUrls(): Promise<string[]> {
+    const q: Queryable = this.pool ?? this.client!;
+    const r = await q.query(`select url from orq.sources where ativo and url is not null`);
+    return r.rows.map((x: { url: string }) => x.url);
+  }
+
   async withTransaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
     if (this.client) {
       const sp = `sp_${++this.savepoints}`;

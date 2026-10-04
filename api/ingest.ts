@@ -1,51 +1,51 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
 import pg from 'pg';
+import { rateLimitConfig } from '../config/rate-limits.js';
+import { assertLeastPrivilegeUser, assertSafeDbTarget } from '../src/db/guard.js';
 import { PgStore } from '../src/db/pg-store.js';
-import { assertSafeDbTarget } from '../src/db/guard.js';
-import { buildIngestRequest } from '../src/http/request.js';
-import { ingest } from '../src/pipeline/ingest.js';
+import { createHandler } from '../src/http/handler.js';
+import { OriginCache, parseSourceOrigins } from '../src/security/origins.js';
 
 /**
- * Endpoint único (seção 5). Região gru1 (vercel.json).
- * Modo sombra: só grava em core/orq; não chama Pipedrive, Umbler, Meta nem Google.
+ * Endpoint único (seção 5). Região gru1 (vercel.json). Modo sombra: só grava em core/orq;
+ * não chama Pipedrive, Umbler, Meta nem Google.
+ *
+ * Conecta SOMENTE com o papel de privilégio mínimo (INGEST_DB_URL, usuário orq_ingest).
+ * Nunca usa o `postgres`: se a variável estiver ausente ou apontar para outro usuário, o endpoint
+ * responde 500 "misconfigured" em vez de operar com poder demais.
  */
-let pool: pg.Pool | null = null;
-function getPool(): pg.Pool {
-  if (!pool) {
-    const url = process.env.SUPABASE_DB_URL ?? '';
-    assertSafeDbTarget({ target: url, expectedRef: process.env.SUPABASE_PROJECT_REF ?? '' });
-    pool = new pg.Pool({ connectionString: url, max: 1, ssl: { rejectUnauthorized: false } });
-  }
-  return pool;
+const url = process.env.INGEST_DB_URL ?? '';
+const salt = process.env.RATE_LIMIT_SALT ?? '';
+
+let configError: string | undefined;
+try {
+  assertSafeDbTarget({ target: url, expectedRef: process.env.SUPABASE_PROJECT_REF ?? '' });
+  assertLeastPrivilegeUser(url);
+  if (salt.length < 16) throw new Error('RATE_LIMIT_SALT ausente ou curto demais (mínimo 16 caracteres).');
+} catch (e) {
+  configError = e instanceof Error ? e.message : 'configuração inválida';
 }
 
-function cors(req: VercelRequest, res: VercelResponse) {
-  // O token identifica a fonte; o CORS só deixa o navegador da LP enviar. Reflete a origem.
-  const origin = req.headers.origin;
-  if (origin) res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Vary', 'Origin');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'content-type, x-quark-token');
-  res.setHeader('Access-Control-Max-Age', '86400');
-}
+const log = { error: (msg: string, extra?: unknown) => console.error(msg, extra) };
+const pool = configError ? null : new pg.Pool({ connectionString: url, max: 1, ssl: { rejectUnauthorized: false } });
+pool?.on('error', (e) => log.error('pool: erro no banco', { message: e.message.replace(/postgres(ql)?:\/\/\S+/gi, '<url>') }));
+const store = pool ? PgStore.fromPool(pool) : null;
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  cors(req, res);
-  if (req.method === 'OPTIONS') return res.status(204).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'method_not_allowed' });
+const origins = new OriginCache(
+  async () => {
+    if (!store) return [];
+    const urls = await store.listSourceUrls();
+    return [...new Set(urls.flatMap((u) => parseSourceOrigins(u)))];
+  },
+  60_000,
+  Date.now,
+  (e) => log.error('origens: falha ao carregar de orq.sources', { message: e instanceof Error ? e.message : String(e) }),
+);
 
-  try {
-    const result = await ingest(
-      buildIngestRequest({ headers: req.headers, body: req.body, query: req.query }),
-      {
-        store: PgStore.fromPool(getPool()),
-        shadowMode: process.env.SHADOW_MODE === 'true',
-        log: { error: (msg, extra) => console.error(msg, extra) },
-      },
-    );
-    return res.status(result.status).json(result.body);
-  } catch (e) {
-    console.error('ingest: erro inesperado', e instanceof Error ? e.message : e);
-    return res.status(500).json({ error: 'internal_error' });
-  }
-}
+export default createHandler({
+  store: store as never,
+  shadowMode: process.env.SHADOW_MODE === 'true',
+  rateLimit: { salt, config: rateLimitConfig },
+  allowedOrigins: () => origins.get(),
+  log,
+  configError,
+});

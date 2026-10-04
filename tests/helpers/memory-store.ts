@@ -26,6 +26,25 @@ export class MemoryStore implements Store {
   failOn: 'insertEvent' | 'insertTouchpointConflict' | null = null;
   /** Falha uma vez só na primeira transação (para simular erro transitório). */
   failOnce = false;
+  /** Relógio injetável (ms) para os contadores de limite. */
+  now: () => number = () => Date.now();
+  /** Contadores de limite de requisições: chave "balde|início_da_janela" -> acertos. */
+  hits = new Map<string, number>();
+  failHit = false;
+
+  async hit(bucket: string, windowSec: number): Promise<{ hits: number; resetInSec: number }> {
+    if (this.failHit) throw new Error('contador fora do ar');
+    const nowS = Math.floor(this.now() / 1000);
+    const windowStart = Math.floor(nowS / windowSec) * windowSec;
+    const key = `${bucket}|${windowStart}`;
+    const n = (this.hits.get(key) ?? 0) + 1;
+    this.hits.set(key, n);
+    return { hits: n, resetInSec: Math.max(1, windowStart + windowSec - nowS) };
+  }
+
+  async listSourceUrls(): Promise<string[]> {
+    return this.state.sources.filter((s) => s.ativo && s.url).map((s) => s.url as string);
+  }
 
   addSource(s: Partial<SourceRow> & { slug: string; token: string }): SourceRow {
     const row: SourceRow = {

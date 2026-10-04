@@ -6,6 +6,7 @@ import { deriveChannel } from '../channel/derive-channel.js';
 import { contractSchema, type ContractEvent } from '../contract/schema.js';
 import { resolveLead } from '../identity/resolve-lead.js';
 import { normalizeEmail, normalizeLandingUrl, normalizePhone } from '../normalize/index.js';
+import { checkRateLimits } from '../security/rate-limit.js';
 import { hashToken, verifyToken } from '../security/verify-token.js';
 import type { IngestDeps, IngestRequest, IngestResponse, SourceRow, SourceTipo, TouchpointInsert } from './types.js';
 
@@ -43,12 +44,28 @@ export async function ingest(req: IngestRequest, deps: IngestDeps): Promise<Inge
 
   // 1. Fonte e token (mesma resposta para fonte inexistente, inativa e token errado)
   const body = req.body;
+  // Sem token em lugar nenhum não há o que verificar: 401 sem gastar uma consulta ao banco.
+  if (!req.headers['x-quark-token'] && !req.query.token) return unauthorized();
   const slug = req.query.source || (isPlainObject(body) && typeof body.source_slug === 'string' ? body.source_slug : '');
   const source = slug ? await deps.store.findSourceBySlug(slug) : null;
   const token =
     req.headers['x-quark-token'] || (source && QUERY_TOKEN_TIPOS.has(source.tipo) ? req.query.token : undefined);
   const tokenOk = verifyToken(token, source?.token_hash ?? DUMMY_HASH);
   if (!source || !source.ativo || !tokenOk) return unauthorized();
+
+  // 1b. Limite de requisições (só depois de autenticar: quem não tem token não gasta contador).
+  //     Falha aberta: se o contador quebrar, o lead entra e o erro é registrado.
+  if (deps.rateLimit && !deps.dryRun) {
+    try {
+      const d = await checkRateLimits({ store: deps.store, source, ip: req.ip, salt: deps.rateLimit.salt, config: deps.rateLimit.config });
+      if (!d.allowed) {
+        const retry = String(d.retryAfterSec);
+        return { status: 429, body: { error: 'rate_limited', retry_after_s: d.retryAfterSec }, headers: { 'retry-after': retry } };
+      }
+    } catch (e) {
+      deps.log?.error('ingest: falha no contador de limite (seguindo sem limite)', { message: e instanceof Error ? e.message : String(e) });
+    }
+  }
 
   // 2. Adaptador de entrada
   const adapter = ADAPTERS[source.tipo];

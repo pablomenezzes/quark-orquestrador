@@ -100,7 +100,9 @@ No GTM, crie o acionador **Evento personalizado = `generate_lead`** para dispara
    window.QuarkAttribution.pushLead({ form_id: 'form-demo', lp_id: 'lp-vercel-teste' });
    ```
 3. Não precisa de campos ocultos em React: use `get()`.
-4. **O token da fonte aparece no código do navegador.** Ele só identifica a fonte; a defesa real é o honeypot, a validação do contrato e o limite de requisições (pendente). Não reutilize este token para nada mais.
+4. **Antes de funcionar no navegador, a origem da LP precisa estar cadastrada** (CORS por origem): `node scripts/set-source-url.mjs --slug <fonte> --url "https://sua-lp.com.br" --apply`. Origem não cadastrada recebe `403 origin_not_allowed`. Fontes de servidor (Elementor, Fillout, Meta) não usam navegador e não precisam disso.
+5. **Respostas que a LP deve tratar:** `200` ok (inclui `duplicate:true`), `400` payload inválido, `401` token errado, `403` origem não cadastrada, `429` limite de requisições (cabeçalho `Retry-After`; não reenviar em loop).
+6. **O token da fonte aparece no código do navegador.** Ele só identifica a fonte; a defesa real é o honeypot, a validação do contrato e o limite de requisições (pendente). Não reutilize este token para nada mais.
 
 ### Lovable (diagnóstico)
 

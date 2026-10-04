@@ -9,6 +9,8 @@ export type SourceRow = {
   produto: 'rh' | 'clinic' | null;
   token_hash: string;
   ativo: boolean;
+  /** Origens permitidas para chamadas de navegador (ver src/security/origins.ts). */
+  url?: string | null;
 };
 
 export type TouchpointInsert = {
@@ -62,6 +64,13 @@ export interface Tx {
 
 export interface Store {
   findSourceBySlug(slug: string): Promise<SourceRow | null>;
+  /**
+   * Conta uma requisição no balde e devolve o total da janela atual (fora de qualquer transação do evento,
+   * para o contador persistir mesmo se o resto falhar).
+   */
+  hit(bucket: string, windowSec: number): Promise<{ hits: number; resetInSec: number }>;
+  /** Valores da coluna `url` das fontes ativas (brutos; quem consome extrai as origens). */
+  listSourceUrls(): Promise<string[]>;
   withTransaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T>;
 }
 
@@ -75,7 +84,7 @@ export type IngestRequest = {
   bodyBytes?: number;
 };
 
-export type IngestResponse = { status: number; body: Record<string, unknown> };
+export type IngestResponse = { status: number; body: Record<string, unknown>; headers?: Record<string, string> };
 
 export type IngestDeps = {
   store: Store;
@@ -86,6 +95,8 @@ export type IngestDeps = {
    * Só pode ser ligado por código do servidor (Studio local e testes); o endpoint público nunca o liga.
    */
   dryRun?: boolean;
+  /** Limite de requisições. Sem isto (Studio, testes antigos) nada é contado. */
+  rateLimit?: { salt: string; config: import('../../config/rate-limits.js').RateLimitConfig };
   now?: () => Date;
   log?: { error: (msg: string, extra?: unknown) => void };
 };

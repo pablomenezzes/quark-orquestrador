@@ -17,6 +17,8 @@ Projeto único "Orquestrador CRM Quark" (São Paulo). Regras em `orquestrador-ma
 | `0001_schemas_core_orq_crm.sql` | Schemas `core`, `orq`, `crm`; tabelas das seções 8.1 e 8.2; triggers (`updated_at`, imutabilidade de `orq.events`); índices |
 | `0002_rls_and_grants.sql` | RLS ativo em todas as tabelas, sem política para `anon`/`authenticated`; privilégios da `service_role` |
 
+| `0003_ingest_role_and_rate_limits.sql` | Papel `orq_ingest` (privilégio mínimo, por coluna, sem acesso a `crm` nem a UPDATE/DELETE em eventos), políticas de RLS só para ele e a tabela `orq.rate_limits`. **Sem senha na migration**: ela é definida por `node scripts/set-ingest-password.mjs --apply` |
+
 O linter `tests/migrations-lint.test.ts` roda em todo `npm test` e barra DROP, RENAME, mudança de tipo, TRUNCATE, DELETE, qualquer coisa no `public` e tabela sem RLS.
 
 ## Aplicar (somente após aprovação do SQL)

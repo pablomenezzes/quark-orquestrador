@@ -17,3 +17,23 @@ export function assertSafeDbTarget(opts: { target: string; expectedRef: string; 
     throw new Error('O alvo não contém o ref do projeto esperado (SUPABASE_PROJECT_REF): recusando conectar.');
   }
 }
+
+/** Papel de banco do endpoint público (migration 0003). */
+export const INGEST_ROLE = 'orq_ingest';
+
+/**
+ * O endpoint público só pode conectar com o papel de privilégio mínimo. Aceita `orq_ingest` (conexão direta)
+ * e `orq_ingest.<ref>` (pooler do Supabase). Qualquer outro usuário (postgres, service_role...) é recusado.
+ * A mensagem nunca inclui a URL nem a senha.
+ */
+export function assertLeastPrivilegeUser(url: string): void {
+  let user = '';
+  try {
+    user = decodeURIComponent(new URL(url).username);
+  } catch {
+    throw new Error('INGEST_DB_URL ausente ou em formato inválido: o endpoint exige a conexão do papel de privilégio mínimo (orq_ingest).');
+  }
+  if (user !== INGEST_ROLE && !user.startsWith(`${INGEST_ROLE}.`)) {
+    throw new Error(`O endpoint público só pode usar o papel de privilégio mínimo (${INGEST_ROLE}), não "${user || '(sem usuário)'}".`);
+  }
+}
