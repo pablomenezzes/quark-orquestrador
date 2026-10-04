@@ -75,6 +75,25 @@ run('ingest + Postgres (transação com rollback)', () => {
     expect(d).toMatchObject({ modo: 'sombra', status: 'ok' });
   });
 
+  it('simulação (dryRun) roda o pipeline inteiro no Postgres e desfaz tudo', async () => {
+    const b = body();
+    const n = async () => [
+      await count(`select count(*)::int as n from core.leads`),
+      await count(`select count(*)::int as n from orq.touchpoints`),
+      await count(`select count(*)::int as n from orq.events`),
+      await count(`select count(*)::int as n from orq.decisions`),
+    ];
+    const before = await n();
+    const r = await ingest(req(b), { ...deps(), dryRun: true });
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ dry_run: true, canal: 'paid_search_google' });
+    expect((r.body.preview as any).lead.created).toBe(true);
+    expect(await n()).toEqual(before);
+    // o mesmo event_id continua livre: a simulação não o consumiu
+    const again = await ingest(req(b), { ...deps(), dryRun: true });
+    expect(again.body.duplicate).toBe(false);
+  });
+
   it('idempotência: o mesmo event_id não grava de novo', async () => {
     const b = body();
     await ingest(req(b), deps());

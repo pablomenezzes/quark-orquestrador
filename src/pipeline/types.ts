@@ -81,6 +81,11 @@ export type IngestDeps = {
   store: Store;
   /** Fixo em true nesta fase: não existe caminho de execução real. */
   shadowMode: boolean;
+  /**
+   * Simulação: roda o pipeline inteiro dentro da transação e a DESFAZ no fim, devolvendo o que seria gravado.
+   * Só pode ser ligado por código do servidor (Studio local e testes); o endpoint público nunca o liga.
+   */
+  dryRun?: boolean;
   now?: () => Date;
   log?: { error: (msg: string, extra?: unknown) => void };
 };

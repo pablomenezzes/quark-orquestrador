@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Quark Studio</title>
+  <link rel="stylesheet" href="/s/studio.css">
+</head>
+<body>
+  <header class="top">
+    <h1>Quark Studio</h1>
+    <span class="chip accent">ambiente de testes</span>
+    <span id="db-chip" class="chip">banco…</span>
+    <span class="spacer"></span>
+    <span class="muted" style="font-size:13px">Simula por padrão: nada é gravado, a menos que você peça.</span>
+  </header>
+
+  <div class="layout">
+    <aside class="side card">
+      <h2>Formulários</h2>
+      <button id="btn-new" class="btn primary" style="width:100%;margin-bottom:10px">+ Novo formulário</button>
+      <div id="forms-list"></div>
+    </aside>
+
+    <main class="editor" id="editor"></main>
+
+    <aside class="test-panel card" id="test-panel"></aside>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+  <script type="module" src="/s/builder.js"></script>
+</body>
+</html>

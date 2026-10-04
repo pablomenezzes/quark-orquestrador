@@ -25,6 +25,12 @@ const MAX_FUTURE_MS = 10 * 60 * 1000;
 const DUMMY_HASH = hashToken('quark-dummy-token-para-tempo-constante');
 
 class DuplicateEvent extends Error {}
+/** Lançada de propósito no fim da simulação para desfazer a transação. */
+class DryRunRollback extends Error {
+  constructor(readonly preview: Record<string, unknown>) {
+    super('dry run');
+  }
+}
 
 const res = (status: number, body: Record<string, unknown>): IngestResponse => ({ status, body });
 const unauthorized = () => res(401, { error: 'unauthorized' });
@@ -129,29 +135,55 @@ export async function ingest(req: IngestRequest, deps: IngestDeps): Promise<Inge
       const touchpointId = await tx.insertTouchpoint(touchpoint);
       if (!touchpointId) throw new DuplicateEvent(); // corrida: outro request gravou o mesmo event_id
 
+      const dados = eventData(c, source, req, lead.matched_by);
       const eventId = await tx.insertEvent({
         lead_id: lead.lead_id,
         touchpoint_id: touchpointId,
         tipo: c.event_type,
-        dados: eventData(c, source, req, lead.matched_by),
+        dados,
         payload_bruto: body,
         occurred_at: occurredAt,
       });
 
-      await tx.insertDecision({
+      const decision = {
         event_id: eventId,
         acao: 'pendente_motor_regras', // o motor de regras nasce na Fase 4
-        modo: 'sombra',
-        status: 'ok',
+        modo: 'sombra' as const,
+        status: 'ok' as const,
         erro: null,
-      });
+      };
+      await tx.insertDecision(decision);
+
+      if (deps.dryRun) {
+        throw new DryRunRollback({
+          lead: {
+            lead_id: lead.lead_id,
+            created: lead.created,
+            matched_by: lead.matched_by,
+            email_norm: emailNorm,
+            phone_e164: phoneE164,
+            nome: nul(c.contact.name),
+            empresa: nul(c.contact.company),
+            porte: c.contact.company_size,
+            cargo: nul(c.contact.role),
+            produto: source.produto,
+          },
+          touchpoint,
+          event: { tipo: c.event_type, dados, occurred_at: occurredAt },
+          decision: { acao: decision.acao, modo: decision.modo, status: decision.status },
+        });
+      }
       return { duplicate: false as const, lead_id: lead.lead_id, event_id: eventId, canal, created: lead.created };
     });
 
-    if (out.duplicate) return res(200, { ok: true, duplicate: true });
+    if (out.duplicate) return res(200, { ok: true, duplicate: true, ...(deps.dryRun ? { dry_run: true } : {}) });
     return res(200, { ok: true, duplicate: false, modo: 'sombra', lead_id: out.lead_id, event_id: out.event_id, canal: out.canal });
   } catch (e) {
-    if (e instanceof DuplicateEvent) return res(200, { ok: true, duplicate: true });
+    if (e instanceof DryRunRollback) {
+      const canal = (e.preview.touchpoint as TouchpointInsert).canal;
+      return res(200, { ok: true, dry_run: true, duplicate: false, modo: 'sombra', canal, preview: e.preview });
+    }
+    if (e instanceof DuplicateEvent) return res(200, { ok: true, duplicate: true, ...(deps.dryRun ? { dry_run: true } : {}) });
     return recordFailure(e, c, body, deps);
   }
 }
@@ -160,6 +192,8 @@ export async function ingest(req: IngestRequest, deps: IngestDeps): Promise<Inge
 async function recordFailure(err: unknown, c: ContractEvent, body: unknown, deps: IngestDeps): Promise<IngestResponse> {
   const message = err instanceof Error ? err.message : String(err);
   deps.log?.error('ingest: falha ao processar evento', { event_id: c.event_id, message });
+  // Simulação nunca persiste nada, nem o registro do erro.
+  if (deps.dryRun) return res(500, { error: 'internal_error', dry_run: true, detail: message.slice(0, 300) });
   try {
     await deps.store.withTransaction(async (tx) => {
       const eventId = await tx.insertEvent({

@@ -1,4 +1,4 @@
-﻿{
+{
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
@@ -8,9 +8,10 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
+    "allowJs": true,
+    "checkJs": false,
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["src", "api", "config", "tests", "scripts"]
+  "include": ["src", "api", "config", "tests", "scripts", "studio"]
 }
-

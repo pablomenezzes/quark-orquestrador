@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Formulário</title>
+  <link rel="stylesheet" href="/s/studio.css">
+</head>
+<body>
+  <div id="modebar" class="modebar dry"></div>
+  <div class="progress"><i id="bar"></i></div>
+  <div class="fpage" id="app"><p class="muted" style="padding-top:60px">Carregando…</p></div>
+
+  <!-- "Visitante novo": limpa os cookies de atribuição ANTES do script de atribuição rodar. -->
+  <script>
+    (function () {
+      if (new URLSearchParams(location.search).get('fresh') !== '1') return;
+      ['qk_lid', 'qk_ft', 'qk_lt'].forEach(function (n) {
+        document.cookie = n + '=; path=/; max-age=0; SameSite=Lax';
+      });
+    })();
+  </script>
+  <!-- O MESMO script de atribuição que vai para o GTM (tracking/attribution.js). -->
+  <script src="/attribution.js"></script>
+  <script type="module" src="/s/form.js"></script>
+</body>
+</html>

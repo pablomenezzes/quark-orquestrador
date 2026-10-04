@@ -628,6 +628,8 @@ Registro vivo. Atualizar a cada sessão.
 | D-16 | Falha após a validação: 500 para a fonte retentar, nada parcial gravado, e um evento bruto sem lead + decisão `erro` ficam registrados. A retentativa não é tratada como duplicada | 2026-10-03 |
 | D-17 | Decisão em modo sombra grava `acao = 'pendente_motor_regras'` até o motor de regras existir (Fase 4) | 2026-10-03 |
 | D-18 | IP e user agent: Vercel/Lovable usam os do request (é o visitante); Elementor usa só o `user_agent` do campo oculto e não grava IP (o request é do servidor do Elementor) | 2026-10-03 |
+| D-20 | Ambiente de testes = **Quark Studio** (`npm run studio`, só em 127.0.0.1): constrói formulários e envia pelo mesmo `ingest()`. A Deployment Protection da Vercel permanece ligada | 2026-10-04 |
+| D-21 | `ingest` ganhou o modo **simulação** (`dryRun`, só ativável por código do servidor): roda tudo na transação e a desfaz, devolvendo o que seria gravado. É o padrão do Studio; gravar exige `mode:"real"` com dupla confirmação | 2026-10-04 |
 | D-19 | `event_id` exige no mínimo 8 caracteres; corpo máximo de 100 KB; `occurred_at` ausente, inválido ou mais de 10 min no futuro vira o horário de recebimento | 2026-10-03 |
 
 ### Pendências

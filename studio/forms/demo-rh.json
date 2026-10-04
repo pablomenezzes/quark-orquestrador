@@ -1,0 +1,24 @@
+{
+  "id": "demo-rh",
+  "title": "Conheça o QuarkRH",
+  "description": "Responda em um minuto e veja como o QuarkRH organiza a gestão de pessoas da sua empresa.",
+  "submit_label": "Quero uma demonstração",
+  "thank_you_title": "Recebido!",
+  "thank_you_message": "Em breve entraremos em contato.",
+  "source_slug": "lp-vercel-rh-teste",
+  "form_id": "form-demo",
+  "lp_id": "studio-demo-rh",
+  "event_type": "form_submit",
+  "show_consent": true,
+  "consent_text": "Concordo em receber contato da Quark sobre o QuarkRH.",
+  "fields": [
+    { "id": "n1", "key": "qual_e_o_seu_nome", "type": "text", "label": "Qual é o seu nome?", "help": "", "placeholder": "Maria Silva", "required": true, "options": [], "map": "name" },
+    { "id": "n2", "key": "qual_e_o_seu_e_mail", "type": "email", "label": "Qual é o seu e-mail corporativo?", "help": "", "placeholder": "maria@empresa.com.br", "required": true, "options": [], "map": "email" },
+    { "id": "n3", "key": "qual_e_o_seu_whatsapp", "type": "phone", "label": "Qual é o seu WhatsApp?", "help": "Com DDD.", "placeholder": "(84) 99999-9999", "required": false, "options": [], "map": "phone" },
+    { "id": "n4", "key": "qual_e_a_sua_empresa", "type": "text", "label": "Qual é a sua empresa?", "help": "", "placeholder": "", "required": false, "options": [], "map": "company" },
+    { "id": "n5", "key": "quantos_funcionarios", "type": "number", "label": "Quantos funcionários a empresa tem?", "help": "", "placeholder": "15", "required": false, "options": [], "map": "company_size" },
+    { "id": "n6", "key": "cargo", "type": "text", "label": "Qual é o seu cargo?", "help": "", "placeholder": "", "required": false, "options": [], "map": "role" },
+    { "id": "n7", "key": "maior_desafio", "type": "radio", "label": "Qual é o seu maior desafio hoje em RH?", "help": "", "placeholder": "", "required": false, "options": ["Folha e ponto", "Recrutamento", "Desempenho e clima", "Organizar processos"], "map": "answer" },
+    { "id": "n8", "key": "interesses", "type": "checkbox", "label": "O que você quer ver na demonstração?", "help": "Marque quantas quiser.", "placeholder": "", "required": false, "options": ["Gestão de pessoas", "Relatórios", "Integrações"], "map": "answer" }
+  ]
+}
