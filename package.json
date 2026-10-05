@@ -8,7 +8,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "studio": "tsx studio/main.ts --open"
+    "studio": "tsx studio/main.ts --open",
+    "datahub:sync": "tsx scripts/datahub-sync.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",

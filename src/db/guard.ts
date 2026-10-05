@@ -37,3 +37,19 @@ export function assertLeastPrivilegeUser(url: string): void {
     throw new Error(`O endpoint público só pode usar o papel de privilégio mínimo (${INGEST_ROLE}), não "${user || '(sem usuário)'}".`);
   }
 }
+
+/**
+ * Garante que uma conexão usa o papel esperado (`orq_sync`, `orq_panel`...). Aceita `<papel>` e `<papel>.<ref>` (pooler).
+ * Recusa postgres e qualquer outro. A mensagem nunca inclui a URL nem a senha.
+ */
+export function assertRoleUser(url: string, role: string): void {
+  let user = '';
+  try {
+    user = decodeURIComponent(new URL(url).username);
+  } catch {
+    throw new Error(`URL de conexão do papel ${role} ausente ou em formato inválido.`);
+  }
+  if (user !== role && !user.startsWith(`${role}.`)) {
+    throw new Error(`Esta conexão deve usar o papel ${role}, não "${user || '(sem usuário)'}".`);
+  }
+}

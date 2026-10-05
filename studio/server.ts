@@ -3,6 +3,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { FormsStore, StoreError } from './lib/forms-store.js';
 import { FORM_ID_RE } from './lib/form-schema.js';
+import { MARCOS, PRODUTOS, PainelNotFound, type Marco, type PainelRepo, type Produto } from './lib/painel-repo.js';
 
 export type SubmitFn = (formId: string, mode: 'dry' | 'real', payload: unknown, ctx: { userAgent: string | null }) => Promise<{ status: number; body: unknown }>;
 
@@ -14,6 +15,8 @@ export type StudioOptions = {
   sources: string[];
   dbInfo: () => { connected: boolean; note?: string };
   submit: SubmitFn;
+  /** Painel de Dados (Data Hub). Sem isto, as rotas do Painel respondem 503 com a explicação. */
+  painel?: PainelRepo | null;
 };
 
 const MIME: Record<string, string> = {
@@ -118,6 +121,42 @@ export function createStudioServer(opts: StudioOptions): Server {
       return sendFile(res, abs);
     }
 
+    if (method === 'GET' && path === '/painel') return sendFile(res, join(opts.publicDir, 'painel.html'));
+    if (path.startsWith('/api/painel/')) {
+      const repo = opts.painel;
+      if (!repo) {
+        return send(res, 503, {
+          error: 'painel_nao_configurado',
+          detail: 'Falta PANEL_DB_URL no .env.local. Peça para gerar com: node scripts/set-role-password.mjs --role orq_panel --apply',
+        });
+      }
+      if (method === 'GET' && path === '/api/painel/saude') return send(res, 200, await repo.saude());
+      if (method === 'GET' && path === '/api/painel/config') return send(res, 200, await repo.config());
+      if (method === 'GET' && path === '/api/painel/usuarios') return send(res, 200, await repo.usuarios());
+      if (method === 'GET' && path === '/api/painel/campos') return send(res, 200, await repo.campos());
+
+      // A única escrita do Painel: a configuração (pipeline -> produto, etapa -> marco).
+      const pipe = /^\/api\/painel\/config\/pipeline\/([^/]+)$/.exec(path);
+      const stage = /^\/api\/painel\/config\/stage\/([^/]+)$/.exec(path);
+      if (pipe || stage) {
+        if (method !== 'PUT') return send(res, 405, { error: 'method_not_allowed' });
+        const rawId = decodeURIComponent((pipe ?? stage)![1]!);
+        if (!/^\d{1,15}$/.test(rawId)) throw new HttpError(400, 'id_invalido');
+        const id = Number(rawId);
+        const body = await readJson(req);
+        if (pipe) {
+          const v = body?.produto;
+          if (!body || !('produto' in body) || !(v === null || (PRODUTOS as readonly unknown[]).includes(v))) throw new HttpError(400, 'produto_invalido', { validos: [...PRODUTOS, null] });
+          await repo.setPipelineProduto(id, v as Produto | null);
+        } else {
+          const v = body?.marco;
+          if (!body || !('marco' in body) || !(v === null || (MARCOS as readonly unknown[]).includes(v))) throw new HttpError(400, 'marco_invalido', { validos: [...MARCOS, null] });
+          await repo.setStageMarco(id, v as Marco | null);
+        }
+        return send(res, 200, { ok: true });
+      }
+      return send(res, 404, { error: 'not_found' });
+    }
     if (method === 'GET' && path === '/api/meta') return send(res, 200, { sources: opts.sources, db: opts.dbInfo() });
     if (method === 'GET' && path === '/api/forms') return send(res, 200, store.list());
 
@@ -159,6 +198,7 @@ export function createStudioServer(opts: StudioOptions): Server {
     handle(req, res).catch((e: unknown) => {
       if (e instanceof HttpError) return send(res, e.status, { error: e.message, ...e.extra });
       if (e instanceof StoreError) return send(res, 400, { error: e.message, issues: e.issues });
+      if (e instanceof PainelNotFound) return send(res, 404, { error: 'nao_encontrado', detail: e.message });
       console.error('studio:', e instanceof Error ? e.message : e);
       send(res, 500, { error: 'internal_error' });
     });

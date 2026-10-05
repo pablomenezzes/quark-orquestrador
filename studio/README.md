@@ -82,3 +82,17 @@ Confere o `Host` (anti DNS-rebinding), a `Origin` e o `Content-Type: application
 | `studio/lib/` | Esquema (zod) e armazenamento dos formulários |
 | `studio/forms/*.json` | Seus formulários (versionados) |
 | `studio/public/` | Construtor (`index.html`, `builder.js`) e formulário (`form.html`, `form.js`, `form-logic.js`) |
+
+## Painel de Dados (Data Hub do Pipedrive)
+
+Em http://127.0.0.1:4310/painel (ou pelo link "Painel de Dados" no topo do Studio). É uma área à parte do construtor de formulários e só aparece funcionando depois que a migration do Data Hub for aplicada e a PANEL_DB_URL existir no .env.local.
+
+| Aba | Para que serve |
+|---|---|
+| Saúde da sincronização | Quando cada item foi atualizado com sucesso, últimas rodadas, erros e uso da cota do Pipedrive. Aviso vermelho se algo passar de 8 horas sem atualizar. |
+| Configuração | Liga cada **pipeline a um produto** (RH ou Clínica) e cada **etapa a um marco do funil**. Salva sozinho ao escolher. |
+| Pipelines e etapas | Lista com busca para conferir nomes e ordem. |
+| Usuários e campos | Usuários (sem e-mail) e definição de campos, com o ID original. |
+| Conferência | Totais para você comparar com o Pipedrive. |
+
+O Painel usa um papel de banco próprio (orq_panel): lê só as visões de nalytics e as tabelas de ops, **grava apenas a configuração** e não enxerga nenhuma tabela com dados pessoais. Se a PANEL_DB_URL faltar, o Studio sobe normalmente e o Painel mostra o que falta.

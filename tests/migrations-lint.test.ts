@@ -10,7 +10,7 @@ import { join } from 'node:path';
  * - toda tabela criada tem RLS ativado.
  */
 const DIR = join(__dirname, '..', 'supabase', 'migrations');
-const OWN_SCHEMAS = ['core', 'orq', 'crm', 'mkt', 'analytics'];
+const OWN_SCHEMAS = ['core', 'orq', 'crm', 'mkt', 'analytics', 'raw', 'ops'];
 
 const files = readdirSync(DIR)
   .filter((f) => f.endsWith('.sql'))

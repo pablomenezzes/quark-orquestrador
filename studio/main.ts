@@ -10,10 +10,11 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
-import { assertSafeDbTarget } from '../src/db/guard.js';
+import { assertRoleUser, assertSafeDbTarget } from '../src/db/guard.js';
 import { PgStore } from '../src/db/pg-store.js';
 import { ingest } from '../src/pipeline/ingest.js';
 import { FormsStore } from './lib/forms-store.js';
+import { PgPainelRepo } from './lib/painel-repo.js';
 import { checkPortFree, formatReport, parseEnv, runPreflight } from './lib/preflight.js';
 import { createStudioServer, type SubmitFn } from './server.js';
 
@@ -65,6 +66,19 @@ pool.on('error', (e) => {
   dbState = { connected: false, note: e.message.replace(/postgres(ql)?:\/\/\S+/g, '<url>') };
 });
 
+// Painel de Dados (Data Hub): usa o papel orq_panel (le analytics e ops; grava so a configuracao).
+// Opcional: sem PANEL_DB_URL o Studio sobe normalmente e o Painel avisa o que falta.
+let painelPool: pg.Pool | null = null;
+let painelRepo: PgPainelRepo | null = null;
+const painelUrl = process.env.PANEL_DB_URL ?? '';
+if (painelUrl) {
+  assertSafeDbTarget({ target: painelUrl, expectedRef: process.env.SUPABASE_PROJECT_REF! });
+  assertRoleUser(painelUrl, 'orq_panel');
+  painelPool = new pg.Pool({ connectionString: painelUrl, max: 2, ssl: { rejectUnauthorized: false } });
+  painelPool.on('error', () => undefined);
+  painelRepo = new PgPainelRepo(painelPool);
+}
+
 const forms = new FormsStore(join(root, 'studio', 'forms'));
 
 const submit: SubmitFn = async (formId, mode, payload, ctx) => {
@@ -92,6 +106,7 @@ const server = createStudioServer({
   sources: availableSources,
   dbInfo: () => dbState,
   submit,
+  painel: painelRepo,
 });
 
 server.on('error', (e: NodeJS.ErrnoException) => {
@@ -106,13 +121,15 @@ server.on('error', (e: NodeJS.ErrnoException) => {
 server.listen(port, '127.0.0.1', () => {
   const url = `http://127.0.0.1:${port}`;
   console.log(`\nQuark Studio rodando em ${url}`);
-  console.log('Modo padrão: SIMULAÇÃO (nada é gravado). Para parar: Ctrl+C.\n');
+  console.log('Modo padrão: SIMULAÇÃO (nada é gravado). Para parar: Ctrl+C.');
+  console.log(painelRepo ? `Painel de Dados: ${url}/painel\n` : 'Painel de Dados: desligado (falta PANEL_DB_URL no .env.local).\n');
   if (process.argv.includes('--open')) exec(`start "" "${url}"`);
 });
 
 function shutdown() {
   server.close();
   void pool.end();
+  void painelPool?.end();
   process.exit(0);
 }
 process.on('SIGINT', shutdown);

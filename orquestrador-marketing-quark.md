@@ -641,8 +641,8 @@ Expande o projeto com a camada de dados de CRM para análise: todo o histórico 
 
 | Entrega | O que | Status |
 |---|---|---|
-| 0 | Auditoria e plano (sem código): tabelas propostas, endpoints, volume, chamadas, onde rodar, credenciais, limitações | **entregue (2026-10-05); aguardando aprovação do Pablo** |
-| 1 | Pipelines, etapas, usuários e tela de configuração (pipeline → produto, etapa → marco) | pendente |
+| 0 | Auditoria e plano (sem código): tabelas propostas, endpoints, volume, chamadas, onde rodar, credenciais, limitações | **aprovada pelo Pablo (2026-10-05)** |
+| 1 | Pipelines, etapas, usuários e tela de configuração (pipeline → produto, etapa → marco) | **em andamento (2026-10-05)**: código, Painel e testes prontos (384 passando); migration `0004` escrita e **não aplicada** (aguarda a confirmação do SQL); falta o endereço da conta e o token do Pipedrive para a primeira sincronização e a conferência |
 | 2 | Deals: backfill retomável desde 2025-01-01, campos personalizados, ligação com `core.leads` | pendente |
 | 3 | Pessoas e empresas | pendente |
 | 4 | Atividades | pendente |
@@ -679,7 +679,7 @@ Registro vivo. Atualizar a cada sessão.
 |---|---|
 | Repositório | `C:\Users\Esig\Documents\quark-orquestrador` (git local), branch `main`. **Backup:** GitHub privado `pablomenezzes/quark-orquestrador` (`origin`) |
 | Ordem de trabalho | Seção 15, itens 1 a 7. Itens 1 e 2 feitos (2 aguardando confirmação); próximo: item 3 (análise do P-01, sem implementar) |
-| Data Hub (Pipedrive) | Autorizado pelo Pablo em 2026-10-05. **Entrega 0 (plano) entregue**, aguardando aprovação. Nada de código nem de banco foi criado para ele. Plano: `docs/datahub/entrega-0-plano.md`; SQL só mostrado: `docs/datahub/proposta-schema.sql` |
+| Data Hub (Pipedrive) | Autorizado em 2026-10-05. **Entrega 0 aprovada.** **Entrega 1 em andamento**: código, Painel e migration `0004` prontos, sem nada aplicado no banco. Plano: `docs/datahub/entrega-0-plano.md`; SQL aprovado como organização: `docs/datahub/proposta-schema.sql` |
 | Banco | Supabase "Orquestrador CRM Quark" (São Paulo), migrations `0001` e `0002` aplicadas. Dados: `orq.sources` (2 fontes de teste) e **1 lead de teste do Pablo** gravado pelo Studio em modo "gravar" em 2026-10-04 12:20Z (formulário `demo-rh`, `lp_id` `studio-demo-rh`, canal `direct`, `landing_url` de `127.0.0.1`): 1 lead, 1 touchpoint, 1 evento, 1 decisão. É permanente (eventos imutáveis) e entra na política de LGPD (item 5). Demais tabelas com 0 linhas. `public` com 0 tabelas |
 | Fontes registradas | `lp-vercel-rh-teste` (vercel) e `elementor-site-rh` (elementor). Tokens só no `.env.local` |
 | Produção | `https://quark-orquestrador.vercel.app/api/ingest`, `gru1`, modo sombra, Standard Protection (**produção pública**), plano **Hobby** (uso não comercial, ver P-02) |
@@ -721,6 +721,10 @@ Registro vivo. Atualizar a cada sessão.
 | D-28 | **Studio congelado:** só a correção de execução autônoma (`npm run studio` com checagens e mensagens em português). Nenhuma funcionalidade nova | 2026-10-04 |
 | D-29 | **Data Hub autorizado** (2026-10-05): a ordem 1 a 7 da seção 15 continua valendo, mas o Pablo abriu esta frente em paralelo. As regras 7 a 12 (Pipedrive só leitura, dado real permitido, nada descartado, IDs sempre, `produto` nunca em silêncio, documentação atual) valem para ela (seção 18) | 2026-10-05 |
 | D-30 | **O congelamento do Studio (D-28) é suspenso só para a área "Painel de Dados"**; nada mais no Studio muda | 2026-10-05 |
+| D-31 | **Plano da Entrega 0 aprovado** (2026-10-05): `raw`/`crm`/`ops`/`analytics` com os papéis `orq_sync` e `orq_panel`; sincronização no GitHub Actions; histórico guardando só as mudanças do deal (`dealChange`); token do Pipedrive (usuário dedicado só de visualização, se possível); Painel liberado no Studio | 2026-10-05 |
+| D-32 | **Leitor do Pipedrive somente leitura por construção**: a classe não tem nenhum método de escrita, a única chamada de rede usa o método de leitura, só fala com `*.pipedrive.com`, o token vai no cabeçalho (nunca na URL) e testes automáticos provam cada ponto (inclusive lendo o código-fonte) | 2026-10-05 |
+| D-33 | **Interpretação tolerante dos registros**: a documentação oficial não enumera os campos de pipelines, etapas, usuários e definições de campos, então os leitores aceitam as variações v1/v2 e deixam `null` quando falta algo. O JSON original **sempre** é guardado em `raw`, então qualquer ajuste pode ser reaplicado sem consultar o Pipedrive de novo | 2026-10-05 |
+| D-34 | **Painel só lê `analytics`/`ops` e só grava a configuração**; usuários aparecem sem e-mail; a view de campos junta o nome do Pipedrive com o seu rótulo (`analytics.usuarios` e `analytics.campos` acrescentadas à proposta) | 2026-10-05 |
 
 ### Pendências
 
@@ -740,10 +744,11 @@ Ordem vigente: **seção 15, itens 1 a 7**. As pendências abaixo apontam para o
 
 **Data Hub do Pipedrive (aguardando o Pablo)**
 
-- [ ] **Aprovar o plano da Entrega 0** (`docs/datahub/entrega-0-plano.md`): (1) organização das tabelas e dos 2 papéis; (2) sincronização no **GitHub Actions**; (3) histórico guardando só as mudanças do deal; (4) token do Pipedrive, de preferência de um usuário dedicado só de visualização; (5) suspender o congelamento do Studio só para o Painel de Dados.
-- [ ] **Dados do Pipedrive** (nada secreto): endereço da conta, plano e nº de usuários, contagens desde 2025-01-01 (deals, pessoas, organizações, atividades), nº de pipelines e se usam "arquivar". Com eles a estimativa de espaço e de dias de backfill deixa de ser cenário.
+- [x] **Plano da Entrega 0 aprovado pelo Pablo (2026-10-05)**: (1) organização das tabelas e dos 2 papéis; (2) sincronização no **GitHub Actions**; (3) histórico guardando só as mudanças do deal; (4) token do Pipedrive, de preferência de um usuário dedicado só de visualização; (5) congelamento do Studio suspenso só para o Painel de Dados.
+- [ ] **Entrega 1, o que falta de você:** (a) confirmar o SQL da migration `0004` (arquivo `supabase/migrations/0004_datahub_e1_base.sql`); (b) dizer o **endereço da conta** do Pipedrive; (c) guardar o **token** com `node scripts/save-secret.mjs PIPEDRIVE_API_TOKEN` (tela escondida). Depois disso: aplicar a migration (dump antes), gerar as senhas dos papéis, rodar a simulação, sincronizar e conferir no Painel.
+- [ ] **Dados do Pipedrive** (nada secreto) para a Entrega 2: plano e nº de usuários, contagens desde 2025-01-01 (deals, pessoas, organizações, atividades), nº de pipelines e se usam "arquivar". Com eles a estimativa de espaço e de dias de backfill deixa de ser cenário.
 - [ ] Decidir quando migrar o Supabase para o plano pago (a partir de ~10 mil deals o gratuito não comporta; sem backup automático no gratuito).
-- [ ] Linter das migrations: incluir `raw` e `ops` na lista de schemas permitidos (parte da Entrega 1, com teste).
+- [x] Linter das migrations aceita `raw` e `ops` (feito na Entrega 1, com testes que o provam).
 
 **Elementor pelo navegador (em espera)**
 
@@ -799,3 +804,10 @@ Camada de dados para análise, ao lado do orquestrador. Primeiro o **Pipedrive**
 - **Escopos OAuth** só de leitura que cobrem tudo: `deals:read`, `contacts:read`, `activities:read`, `users:read`, `recents:read`.
 - **Campos personalizados** na v2 vêm em `custom_fields`, com chave de 40 caracteres.
 - **Onde rodar:** Vercel Hobby só aceita cron **1 vez por dia**; GitHub Actions dá **2.000 min/mês grátis** em repositório privado; Supabase gratuito: **500 MB** de banco.
+
+### Achados adicionais da Entrega 1 (2026-10-05)
+
+- **Custos por chamada confirmados na documentação:** pipelines 5, etapas 5, definição de campos 10, usuários 20 (v1). Persons e organizations: a confirmar na Entrega 3.
+- **A documentação não lista os campos de cada registro** dessas quatro entidades. Os leitores são tolerantes (D-33) e a primeira sincronização real vai mostrar a forma verdadeira dos dados; qualquer diferença é corrigida relendo o `raw`, sem nova consulta ao Pipedrive.
+- **Usuários:** só existem na API v1 (`/v1/users`); não é paginado na documentação, mas o leitor segue `more_items_in_collection` se aparecer.
+- **Autenticação:** o token pessoal segue válido; o Pipedrive recomenda OAuth para integrações novas. Mantemos o token com o guarda de somente leitura no código.

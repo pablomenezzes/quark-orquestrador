@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { assertSafeDbTarget, assertLeastPrivilegeUser } from '../src/db/guard';
+import { assertSafeDbTarget, assertLeastPrivilegeUser, assertRoleUser } from '../src/db/guard';
 
 const REF = 'avxuerlobmrfsretwuwd';
 const OLD = 'igidjtfhqqezmuakprnw';
@@ -60,6 +60,28 @@ describe('assertLeastPrivilegeUser (o endpoint nunca usa o postgres)', () => {
       expect.unreachable();
     } catch (e) {
       expect(String((e as Error).message)).not.toContain('MinhaSenhaSecreta');
+    }
+  });
+});
+
+describe('assertRoleUser (papéis do Data Hub)', () => {
+  const url = (user: string) => `postgresql://${user}:senha@aws-0-sa-east-1.pooler.supabase.com:5432/postgres`;
+  it.each(['orq_sync', 'orq_panel'])('aceita %s e %s.<ref>', (role) => {
+    expect(() => assertRoleUser(url(role), role)).not.toThrow();
+    expect(() => assertRoleUser(url(`${role}.${REF}`), role)).not.toThrow();
+  });
+  it('recusa postgres, o papel trocado e prefixos parecidos', () => {
+    expect(() => assertRoleUser(url(`postgres.${REF}`), 'orq_sync')).toThrow(/orq_sync/);
+    expect(() => assertRoleUser(url('orq_panel'), 'orq_sync')).toThrow();
+    expect(() => assertRoleUser(url('orq_syncx'), 'orq_sync')).toThrow();
+    expect(() => assertRoleUser('', 'orq_sync')).toThrow();
+  });
+  it('não vaza a senha', () => {
+    try {
+      assertRoleUser(`postgresql://postgres:SenhaSecreta@h/db`, 'orq_sync');
+      expect.unreachable();
+    } catch (e) {
+      expect(String((e as Error).message)).not.toContain('SenhaSecreta');
     }
   });
 });

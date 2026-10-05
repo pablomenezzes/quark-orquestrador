@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Painel de Dados</title>
+  <link rel="stylesheet" href="/s/studio.css">
+  <style>
+    .wrap { max-width: 1180px; margin: 0 auto; padding: 20px; }
+    .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
+    .tab { padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); cursor: pointer; font-weight: 500; }
+    .tab[aria-selected='true'] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+    table.t { width: 100%; border-collapse: collapse; font-size: 14px; }
+    table.t th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); padding: 8px 10px; border-bottom: 1px solid var(--border); }
+    table.t td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    table.t tr:last-child td { border-bottom: 0; }
+    .num { font-variant-numeric: tabular-nums; text-align: right; }
+    .pipe-card { margin-bottom: 14px; }
+    .pipe-head { display: flex; gap: 12px; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+    .pipe-head h3 { font-size: 16px; flex: 1; min-width: 160px; }
+    select.sel { padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); }
+    select.sel.saved { border-color: var(--ok); }
+    select.sel.err { border-color: var(--danger); }
+    .kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; margin-bottom: 16px; }
+    .kpi { padding: 14px; }
+    .kpi b { display: block; font-size: 28px; letter-spacing: -0.02em; }
+    .kpi span { color: var(--muted); font-size: 13px; }
+    input.search { max-width: 360px; }
+    .empty { padding: 28px; text-align: center; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <header class="top">
+    <h1>Painel de Dados</h1>
+    <span class="chip accent">Data Hub · Pipedrive</span>
+    <span class="spacer"></span>
+    <a href="/" class="muted" style="font-size:14px">← Quark Studio (formulários)</a>
+  </header>
+
+  <div class="wrap">
+    <div id="aviso"></div>
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" data-tab="saude" aria-selected="true">Saúde da sincronização</button>
+      <button class="tab" role="tab" data-tab="config" aria-selected="false">Configuração</button>
+      <button class="tab" role="tab" data-tab="explorar" aria-selected="false">Pipelines e etapas</button>
+      <button class="tab" role="tab" data-tab="usuarios" aria-selected="false">Usuários e campos</button>
+      <button class="tab" role="tab" data-tab="conferencia" aria-selected="false">Conferência</button>
+    </div>
+    <div id="view"></div>
+  </div>
+  <div id="toast" class="toast" hidden></div>
+  <script type="module" src="/s/painel.js"></script>
+</body>
+</html>
