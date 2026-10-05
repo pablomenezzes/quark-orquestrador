@@ -642,7 +642,7 @@ Expande o projeto com a camada de dados de CRM para análise: todo o histórico 
 | Entrega | O que | Status |
 |---|---|---|
 | 0 | Auditoria e plano (sem código): tabelas propostas, endpoints, volume, chamadas, onde rodar, credenciais, limitações | **aprovada pelo Pablo (2026-10-05)** |
-| 1 | Pipelines, etapas, usuários e tela de configuração (pipeline → produto, etapa → marco) | **em andamento (2026-10-05)**: código, Painel e testes prontos (384 passando); migration `0004` escrita e **não aplicada** (aguarda a confirmação do SQL); falta o endereço da conta e o token do Pipedrive para a primeira sincronização e a conferência |
+| 1 | Pipelines, etapas, usuários e tela de configuração (pipeline → produto, etapa → marco) | **em andamento (2026-10-05)**: migration `0004` **aplicada** (dump `backups/dump-20261005-182452.sql`); papéis `orq_sync` e `orq_panel` com senha própria; 401 testes passando, inclusive as 17 provas de privilégio mínimo dentro do banco; Painel abre ligado ao banco (vazio). **Falta:** o endereço da conta e o token do Pipedrive para a primeira sincronização e a conferência |
 | 2 | Deals: backfill retomável desde 2025-01-01, campos personalizados, ligação com `core.leads` | pendente |
 | 3 | Pessoas e empresas | pendente |
 | 4 | Atividades | pendente |
@@ -679,7 +679,7 @@ Registro vivo. Atualizar a cada sessão.
 |---|---|
 | Repositório | `C:\Users\Esig\Documents\quark-orquestrador` (git local), branch `main`. **Backup:** GitHub privado `pablomenezzes/quark-orquestrador` (`origin`) |
 | Ordem de trabalho | Seção 15, itens 1 a 7. Itens 1 e 2 feitos (2 aguardando confirmação); próximo: item 3 (análise do P-01, sem implementar) |
-| Data Hub (Pipedrive) | Autorizado em 2026-10-05. **Entrega 0 aprovada.** **Entrega 1 em andamento**: código, Painel e migration `0004` prontos, sem nada aplicado no banco. Plano: `docs/datahub/entrega-0-plano.md`; SQL aprovado como organização: `docs/datahub/proposta-schema.sql` |
+| Data Hub (Pipedrive) | Autorizado em 2026-10-05. **Entrega 0 aprovada.** **Entrega 1:** migration `0004` aplicada; schemas `raw`, `ops`, `analytics` e papéis `orq_sync`/`orq_panel` existem; tabelas novas com **0 linhas** (nada sincronizado ainda: falta o token). Plano: `docs/datahub/entrega-0-plano.md` |
 | Banco | Supabase "Orquestrador CRM Quark" (São Paulo), migrations `0001` e `0002` aplicadas. Dados: `orq.sources` (2 fontes de teste) e **1 lead de teste do Pablo** gravado pelo Studio em modo "gravar" em 2026-10-04 12:20Z (formulário `demo-rh`, `lp_id` `studio-demo-rh`, canal `direct`, `landing_url` de `127.0.0.1`): 1 lead, 1 touchpoint, 1 evento, 1 decisão. É permanente (eventos imutáveis) e entra na política de LGPD (item 5). Demais tabelas com 0 linhas. `public` com 0 tabelas |
 | Fontes registradas | `lp-vercel-rh-teste` (vercel) e `elementor-site-rh` (elementor). Tokens só no `.env.local` |
 | Produção | `https://quark-orquestrador.vercel.app/api/ingest`, `gru1`, modo sombra, Standard Protection (**produção pública**), plano **Hobby** (uso não comercial, ver P-02) |
@@ -725,6 +725,7 @@ Registro vivo. Atualizar a cada sessão.
 | D-32 | **Leitor do Pipedrive somente leitura por construção**: a classe não tem nenhum método de escrita, a única chamada de rede usa o método de leitura, só fala com `*.pipedrive.com`, o token vai no cabeçalho (nunca na URL) e testes automáticos provam cada ponto (inclusive lendo o código-fonte) | 2026-10-05 |
 | D-33 | **Interpretação tolerante dos registros**: a documentação oficial não enumera os campos de pipelines, etapas, usuários e definições de campos, então os leitores aceitam as variações v1/v2 e deixam `null` quando falta algo. O JSON original **sempre** é guardado em `raw`, então qualquer ajuste pode ser reaplicado sem consultar o Pipedrive de novo | 2026-10-05 |
 | D-34 | **Painel só lê `analytics`/`ops` e só grava a configuração**; usuários aparecem sem e-mail; a view de campos junta o nome do Pipedrive com o seu rótulo (`analytics.usuarios` e `analytics.campos` acrescentadas à proposta) | 2026-10-05 |
+| D-35 | Testes têm limite de **30 s** (antes 5 s): os de integração falam com o banco pela internet e davam falso alarme em rede lenta. A permissão do `orq_sync` de ler 3 colunas de `core.leads` fica para a Entrega 2 (é onde ela é usada) | 2026-10-05 |
 
 ### Pendências
 
@@ -745,7 +746,7 @@ Ordem vigente: **seção 15, itens 1 a 7**. As pendências abaixo apontam para o
 **Data Hub do Pipedrive (aguardando o Pablo)**
 
 - [x] **Plano da Entrega 0 aprovado pelo Pablo (2026-10-05)**: (1) organização das tabelas e dos 2 papéis; (2) sincronização no **GitHub Actions**; (3) histórico guardando só as mudanças do deal; (4) token do Pipedrive, de preferência de um usuário dedicado só de visualização; (5) congelamento do Studio suspenso só para o Painel de Dados.
-- [ ] **Entrega 1, o que falta de você:** (a) confirmar o SQL da migration `0004` (arquivo `supabase/migrations/0004_datahub_e1_base.sql`); (b) dizer o **endereço da conta** do Pipedrive; (c) guardar o **token** com `node scripts/save-secret.mjs PIPEDRIVE_API_TOKEN` (tela escondida). Depois disso: aplicar a migration (dump antes), gerar as senhas dos papéis, rodar a simulação, sincronizar e conferir no Painel.
+- [ ] **Entrega 1, o que falta de você:** (a) dizer o **endereço da conta** do Pipedrive; (b) guardar o **token** com `node scripts/save-secret.mjs PIPEDRIVE_API_TOKEN` (tela escondida). A migration `0004` já foi aplicada em 2026-10-05 (confirmada pelo "siga" do Pablo). Depois disso: rodar a simulação (`npm run datahub:sync`, só lê), sincronizar (`-- --apply`) e conferir no Painel.
 - [ ] **Dados do Pipedrive** (nada secreto) para a Entrega 2: plano e nº de usuários, contagens desde 2025-01-01 (deals, pessoas, organizações, atividades), nº de pipelines e se usam "arquivar". Com eles a estimativa de espaço e de dias de backfill deixa de ser cenário.
 - [ ] Decidir quando migrar o Supabase para o plano pago (a partir de ~10 mil deals o gratuito não comporta; sem backup automático no gratuito).
 - [x] Linter das migrations aceita `raw` e `ops` (feito na Entrega 1, com testes que o provam).
