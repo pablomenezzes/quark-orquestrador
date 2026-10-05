@@ -738,6 +738,17 @@ Ordem vigente: **seção 15, itens 1 a 7**. As pendências abaixo apontam para o
 - [ ] **Item 6 — Primeiro envio real gravado** pela LP da Vercel (o caminho de escrita está provado por testes de integração, mas não por HTTP em produção). Envio do Pablo, identificável. **Atenção:** já existe um lead de teste com o e-mail do Pablo (gravado pelo Studio em 2026-10-04); um envio com o mesmo e-mail será **deduplicado** para esse lead (`matched_by: email`), o que também testa a regra da seção 10. Para ver um lead novo, usar outro e-mail.
 - [ ] **Item 7 — Fase 1 no mundo real:** `ownDomains` em `config/channel-rules.ts`; validar o script num GTM real (`tracking/INSTALL.md`, seção 5); registrar as fontes reais (hoje só as 2 de teste) com `scripts/register-source.ts`; configurar GA4 e Pixel.
 
+**Data Hub do Pipedrive (aguardando o Pablo)**
+
+- [ ] **Aprovar o plano da Entrega 0** (`docs/datahub/entrega-0-plano.md`): (1) organização das tabelas e dos 2 papéis; (2) sincronização no **GitHub Actions**; (3) histórico guardando só as mudanças do deal; (4) token do Pipedrive, de preferência de um usuário dedicado só de visualização; (5) suspender o congelamento do Studio só para o Painel de Dados.
+- [ ] **Dados do Pipedrive** (nada secreto): endereço da conta, plano e nº de usuários, contagens desde 2025-01-01 (deals, pessoas, organizações, atividades), nº de pipelines e se usam "arquivar". Com eles a estimativa de espaço e de dias de backfill deixa de ser cenário.
+- [ ] Decidir quando migrar o Supabase para o plano pago (a partir de ~10 mil deals o gratuito não comporta; sem backup automático no gratuito).
+- [ ] Linter das migrations: incluir `raw` e `ops` na lista de schemas permitidos (parte da Entrega 1, com teste).
+
+**Elementor pelo navegador (em espera)**
+
+- [ ] Proposta de capturar todo formulário do Elementor com um script global (sem campos ocultos nem webhook por formulário) foi apresentada em 2026-10-05 e **aguarda o "aprovo"** do Pablo. Nada foi construído. O bloco `tracking/elementor-head.html` e o caminho do webhook continuam prontos como plano B.
+
 **Depois dos 7 itens (não iniciar antes)**
 
 - [ ] Adaptadores de entrada do Lovable e da Meta Lead Ads (Fillout: confirmar com o Pablo). O Studio só envia pela fonte `lp-vercel-rh-teste`.
