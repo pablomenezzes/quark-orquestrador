@@ -239,6 +239,8 @@ Acréscimos aprovados ao DDL abaixo (ver seção 17):
 | `crm` | Espelho do Pipedrive |
 | `mkt` | Dados diários de anúncios, GA4 e Search Console |
 | `analytics` | Somente views. O dashboard lê só daqui |
+| `raw` | *(proposto, Data Hub, seção 18)* Payload original do Pipedrive, uma tabela por entidade |
+| `ops` | *(proposto, Data Hub, seção 18)* Controle da sincronização e configuração editável (pipeline → produto, etapa → marco, nomes de campos) |
 
 ### 8.1 Orquestração
 
@@ -633,9 +635,25 @@ Domínios do item 7 (`ownDomains`): `quarkrh-diagnostico.lovable.app`, `quarkrh.
 
 **Só depois dos 7 itens:** adaptadores de entrada do Lovable e da Meta (o Fillout não foi citado nesta lista; confirmar com o Pablo) e a Fase 4.
 
+### Data Hub do Pipedrive (comando do Pablo de 2026-10-05, em paralelo à ordem acima)
+
+Expande o projeto com a camada de dados de CRM para análise: todo o histórico do Pipedrive desde 2025-01-01, atualizado a cada 4 horas, mais um **Painel de Dados** no Studio. Regras e achados da API na **seção 18**; plano completo em `docs/datahub/entrega-0-plano.md`. Cada entrega só termina com a **definição de pronto** (seção 18) e o "conferido" do Pablo. Meta Ads e Google Ads vêm depois, em outros comandos.
+
+| Entrega | O que | Status |
+|---|---|---|
+| 0 | Auditoria e plano (sem código): tabelas propostas, endpoints, volume, chamadas, onde rodar, credenciais, limitações | **entregue (2026-10-05); aguardando aprovação do Pablo** |
+| 1 | Pipelines, etapas, usuários e tela de configuração (pipeline → produto, etapa → marco) | pendente |
+| 2 | Deals: backfill retomável desde 2025-01-01, campos personalizados, ligação com `core.leads` | pendente |
+| 3 | Pessoas e empresas | pendente |
+| 4 | Atividades | pendente |
+| 5 | Histórico de etapas (a mais importante) | pendente |
+| 6 | Sincronização automática a cada 4 horas, excluídos/mesclados, alerta de 8 horas | pendente |
+| 7 | Primeiras análises (funil, conversão, tempo por etapa, motivos de perda, origem, responsável) | pendente |
+
 ## 16. Convenções de código
 
 - **Regra de escopo:** nada fora da seção 15 é construído sem aprovação prévia do Pablo. Ao identificar uma ferramenta ou melhoria útil, propor em **até 5 linhas** (problema, solução, custo em tempo, o que atrasa) e **aguardar a resposta** antes de qualquer código.
+- **Data Hub:** regras 7 a 12 e a definição de pronto estão na seção 18. Ali valem, além das regras de sempre: Pipedrive só leitura, dado real permitido (de teste não), nada descartado na origem, IDs sempre, `produto` nunca misturado em silêncio e documentação atual da API antes de cada entidade.
 - TypeScript em todas as funções
 - Um módulo por adaptador (`adapters/in/<fonte>.ts`, `adapters/out/<destino>.ts`)
 - Migrations versionadas em `supabase/migrations/`; nunca alterar o banco manualmente
@@ -661,6 +679,7 @@ Registro vivo. Atualizar a cada sessão.
 |---|---|
 | Repositório | `C:\Users\Esig\Documents\quark-orquestrador` (git local), branch `main`. **Backup:** GitHub privado `pablomenezzes/quark-orquestrador` (`origin`) |
 | Ordem de trabalho | Seção 15, itens 1 a 7. Itens 1 e 2 feitos (2 aguardando confirmação); próximo: item 3 (análise do P-01, sem implementar) |
+| Data Hub (Pipedrive) | Autorizado pelo Pablo em 2026-10-05. **Entrega 0 (plano) entregue**, aguardando aprovação. Nada de código nem de banco foi criado para ele. Plano: `docs/datahub/entrega-0-plano.md`; SQL só mostrado: `docs/datahub/proposta-schema.sql` |
 | Banco | Supabase "Orquestrador CRM Quark" (São Paulo), migrations `0001` e `0002` aplicadas. Dados: `orq.sources` (2 fontes de teste) e **1 lead de teste do Pablo** gravado pelo Studio em modo "gravar" em 2026-10-04 12:20Z (formulário `demo-rh`, `lp_id` `studio-demo-rh`, canal `direct`, `landing_url` de `127.0.0.1`): 1 lead, 1 touchpoint, 1 evento, 1 decisão. É permanente (eventos imutáveis) e entra na política de LGPD (item 5). Demais tabelas com 0 linhas. `public` com 0 tabelas |
 | Fontes registradas | `lp-vercel-rh-teste` (vercel) e `elementor-site-rh` (elementor). Tokens só no `.env.local` |
 | Produção | `https://quark-orquestrador.vercel.app/api/ingest`, `gru1`, modo sombra, Standard Protection (**produção pública**), plano **Hobby** (uso não comercial, ver P-02) |
@@ -700,6 +719,8 @@ Registro vivo. Atualizar a cada sessão.
 | D-26 | **Ajuste de rota:** a prioridade é o primeiro lead real no banco com segurança; nada novo antes disso. Ordem de trabalho na seção 15 (itens 1 a 7), com parada e confirmação do Pablo ao fim de cada item | 2026-10-04 |
 | D-27 | **Regra de escopo** (seção 16): nada fora da seção 15 é construído sem aprovação prévia; melhorias são propostas em até 5 linhas e aguardam resposta | 2026-10-04 |
 | D-28 | **Studio congelado:** só a correção de execução autônoma (`npm run studio` com checagens e mensagens em português). Nenhuma funcionalidade nova | 2026-10-04 |
+| D-29 | **Data Hub autorizado** (2026-10-05): a ordem 1 a 7 da seção 15 continua valendo, mas o Pablo abriu esta frente em paralelo. As regras 7 a 12 (Pipedrive só leitura, dado real permitido, nada descartado, IDs sempre, `produto` nunca em silêncio, documentação atual) valem para ela (seção 18) | 2026-10-05 |
+| D-30 | **O congelamento do Studio (D-28) é suspenso só para a área "Painel de Dados"**; nada mais no Studio muda | 2026-10-05 |
 
 ### Pendências
 
@@ -735,3 +756,35 @@ Ordem vigente: **seção 15, itens 1 a 7**. As pendências abaixo apontam para o
 
 - `TRUNCATE` em `orq.events`: hoje o Postgres já barra por causa da FK de `orq.decisions` (erro `0A000`); o trigger é a segunda barreira, e o teste de integração aceita os dois códigos.
 - Falha de uma função em produção cai em erro `ERR_MODULE_NOT_FOUND` se um import relativo ficar sem `.js`: o Vitest não acusa, só a execução na Vercel.
+
+## 18. Data Hub (CRM e, depois, mídia)
+
+Camada de dados para análise, ao lado do orquestrador. Primeiro o **Pipedrive**; Meta Ads e Google Ads em comandos próprios. Plano completo: `docs/datahub/entrega-0-plano.md`. SQL proposto (não aplicado): `docs/datahub/proposta-schema.sql`.
+
+### Regras desta frente (além das regras da seção 4)
+
+7. **Pipedrive somente leitura.** Nenhuma chamada que crie, altere ou apague algo. O cliente da API desta frente **não expõe métodos de escrita**, e um teste automatizado prova isso. (O token pessoal do Pipedrive tem as permissões do usuário; por isso o ideal é um usuário dedicado só com visualização.)
+8. **Dado real é permitido, dado de teste não.** O que vem do Pipedrive é real e fica no banco. Testes automatizados continuam com dados fictícios e rollback.
+9. **Nada é descartado na origem.** Todo registro guarda o payload original além das colunas extraídas. Campos personalizados guardam o ID original e têm tabela à parte de nomes legíveis.
+10. **IDs sempre.** Nunca só o nome de pipeline, etapa, usuário ou campo: ID e nome juntos.
+11. **Produto nunca misturado em silêncio.** `produto` usa os valores de `core.leads` (`rh`, `clinic`) ou `null`. A relação `pipeline_id → produto` vive num único lugar (`ops.cfg_pipeline_produto`), editável no Painel; `produto` e `marco` são **calculados na consulta** a partir dela.
+12. **Documentação atual da API antes de cada entidade.** O que foi achado fica registrado aqui.
+
+### Definição de pronto (toda entrega)
+
+1. Testes automatizados passando, incluindo os novos. 2. **Reconciliação** com o Pipedrive (contagens por pipeline, status e período; diferenças explicadas). 3. Tela no Painel onde o Pablo vê o resultado. 4. **Roteiro de verificação** para o Pablo, em até 5 passos, em linguagem simples. 5. MD atualizado (seções 15 e 17), commit e push. Ao fim: parar e esperar o "conferido".
+
+### Organização proposta (aguardando aprovação)
+
+`raw` (payload original) → `crm` (normalizadas; `crm.deals` e `crm.stage_history` evoluem **só com `ADD COLUMN`**) → `analytics` (**só views**), com `ops` para controle e configuração. Dois papéis novos: `orq_sync` (grava, não apaga) e `orq_panel` (lê `analytics`/`ops`, grava só configuração, não vê tabelas com dados pessoais). Uma migration por entrega. `crm.deals.status` continua `open|won|lost` (excluído = `is_deleted`). O linter das migrations passa a aceitar `raw` e `ops` na Entrega 1.
+
+### O que a documentação atual do Pipedrive diz (consultada em 2026-10-05)
+
+- **API v2** cobre deals, pessoas, empresas, atividades, pipelines, etapas e definição de campos. Paginação por **cursor**, até **500** por página; filtros `updated_since` e `updated_until` (RFC 3339). Os endpoints v1 equivalentes foram descontinuados (efetivo em 2026-01-01; sem garantia depois de 2025-12-31).
+- **Histórico do deal (`GET /v1/deals/{id}/flow`) existe só na v1**, por deal, e **não está** na lista de descontinuados. A mudança de etapa vem como `dealChange` com `field_key = stage_id`, valor antigo e novo. **Usuários** também só na v1 (`/v1/users`, não descontinuado).
+- **Deals arquivados** (desde 2025-07-15) **não aparecem** nas listas comuns; usar `GET /api/v2/deals/archived`.
+- **Excluídos:** `is_deleted`; o Pipedrive apaga de vez após 30 dias. `status` aceita `open`, `won`, `lost`, `deleted`.
+- **Cota diária** = 30.000 × multiplicador do plano (Lite 1, Growth 2, Premium 5, Ultimate 7) × usuários, zerada à meia-noite, **compartilhada com o Make**. Limite por 2 segundos: token pessoal 20/40/100/120; OAuth 80/160/400/480. Custos: lista v2 de deals 10; arquivados 20; deal individual 1; atividades 10; **`flow` 40**; resposta de limite: HTTP 429 com `x-ratelimit-*`.
+- **Escopos OAuth** só de leitura que cobrem tudo: `deals:read`, `contacts:read`, `activities:read`, `users:read`, `recents:read`.
+- **Campos personalizados** na v2 vêm em `custom_fields`, com chave de 40 caracteres.
+- **Onde rodar:** Vercel Hobby só aceita cron **1 vez por dia**; GitHub Actions dá **2.000 min/mês grátis** em repositório privado; Supabase gratuito: **500 MB** de banco.
