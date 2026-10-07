@@ -58,9 +58,17 @@ export type ClientOptions = {
   maxPages?: number;
   /** Teto de unidades gastas nesta rodada. */
   maxTokens?: number;
+  /**
+   * Fração da cota diária (de TODOS que usam a conta, inclusive o Make) que esta sincronização deve deixar livre.
+   * Se, pelo cabeçalho da resposta, o que sobra do dia ficaria abaixo disso, a rodada para (erro `budget`) e continua depois.
+   * Padrão 0,6: usa no máximo 40% da cota do dia (ops.sync_settings.max_share_tokens).
+   */
+  keepFreeShare?: number;
 };
 
 const PAGE = 500;
+
+export type DealListKind = 'normal' | 'archived' | 'deleted';
 
 export class PipedriveReadClient {
   private readonly host: string;
@@ -71,6 +79,9 @@ export class PipedriveReadClient {
   private readonly maxRetries: number;
   private readonly maxPages: number;
   private readonly maxTokens: number;
+  private readonly keepFreeShare: number;
+  private dailyLimit: number | null = null;
+  private dailyRemaining: number | null = null;
   private tokens = 0;
   private requests = 0;
   private rateLimited = 0;
@@ -86,10 +97,49 @@ export class PipedriveReadClient {
     this.maxRetries = o.maxRetries ?? 5;
     this.maxPages = o.maxPages ?? 1000;
     this.maxTokens = o.maxTokens ?? Number.POSITIVE_INFINITY;
+    this.keepFreeShare = Math.min(Math.max(o.keepFreeShare ?? 0.6, 0), 1);
   }
 
   get usage() {
     return { tokens: this.tokens, requests: this.requests, rateLimited: this.rateLimited };
+  }
+
+  /** Última cota diária informada pelo Pipedrive (cabeçalhos x-daily-ratelimit-token-*). Null até a primeira resposta. */
+  get daily() {
+    return { limit: this.dailyLimit, remaining: this.dailyRemaining };
+  }
+
+  /** Um negócio pelo ID (1 unidade da cota). Usado só na conferência, para entender uma diferença. */
+  async getDeal(id: number): Promise<unknown | null> {
+    if (!Number.isInteger(id) || id <= 0) throw new PipedriveError('ID de negócio inválido.', 'client');
+    try {
+      const body = await this.readJson(`/api/v2/deals/${id}`, {});
+      return body.data ?? null;
+    } catch (e) {
+      if (e instanceof PipedriveError && e.kind === 'client' && /HTTP 404/.test(e.message)) return null;
+      throw e;
+    }
+  }
+
+  /**
+   * Uma página de negócios (API v2, cursor, 500 por página). `normal` = lista padrão; `archived` = arquivados
+   * (desde 2025-07-15 não aparecem na lista padrão); `deleted` = excluídos nos últimos 30 dias (status=deleted).
+   * Datas em RFC 3339. Devolve também o cursor da próxima página (null no fim).
+   */
+  async listDealsPage(
+    kind: DealListKind,
+    p: { updatedSince?: string | null; updatedUntil?: string | null; cursor?: string | null },
+  ): Promise<{ items: unknown[]; nextCursor: string | null }> {
+    const params: Record<string, string> = { limit: String(PAGE) };
+    // O Pipedrive recusa milissegundos nestas datas (HTTP 400 "not a valid datetime"): AAAA-MM-DDTHH:MM:SSZ.
+    const rfc = (s: string) => s.replace(/\.\d+Z$/, 'Z');
+    if (p.updatedSince) params.updated_since = rfc(p.updatedSince);
+    if (p.updatedUntil) params.updated_until = rfc(p.updatedUntil);
+    if (p.cursor) params.cursor = p.cursor;
+    if (kind === 'deleted') params.status = 'deleted';
+    const body = await this.readJson(kind === 'archived' ? '/api/v2/deals/archived' : '/api/v2/deals', params);
+    const next = body.additional_data?.next_cursor;
+    return { items: Array.isArray(body.data) ? body.data : [], nextCursor: next ? String(next) : null };
   }
 
   async listPipelines(): Promise<unknown[]> {
@@ -145,6 +195,12 @@ export class PipedriveReadClient {
     if (this.tokens + cost > this.maxTokens) {
       throw new PipedriveError(`Teto de unidades da rodada atingido (${this.tokens} de ${this.maxTokens}); a próxima chamada custaria ${cost}.`, 'budget');
     }
+    if (this.dailyLimit && this.dailyRemaining != null && this.dailyRemaining - cost < this.dailyLimit * this.keepFreeShare) {
+      throw new PipedriveError(
+        `Parada para proteger a cota diária compartilhada: restam ${this.dailyRemaining} de ${this.dailyLimit} unidades hoje e esta sincronização só pode usar ${Math.round((1 - this.keepFreeShare) * 100)}% do dia. Continua na próxima rodada.`,
+        'budget',
+      );
+    }
     const url = new URL(`https://${this.host}${path}`);
     for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
 
@@ -163,6 +219,10 @@ export class PipedriveReadClient {
       }
       this.lastAt = Date.now();
       this.requests++;
+      const lim = Number(res.headers.get('x-daily-ratelimit-token-limit'));
+      const rem = Number(res.headers.get('x-daily-ratelimit-token-remaining'));
+      if (res.headers.get('x-daily-ratelimit-token-limit') && Number.isFinite(lim) && lim > 0) this.dailyLimit = lim;
+      if (res.headers.get('x-daily-ratelimit-token-remaining') && Number.isFinite(rem) && rem >= 0) this.dailyRemaining = rem;
 
       if (res.status === 429) {
         this.rateLimited++;

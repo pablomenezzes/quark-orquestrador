@@ -3,7 +3,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { FormsStore, StoreError } from './lib/forms-store.js';
 import { FORM_ID_RE } from './lib/form-schema.js';
-import { MARCOS, PRODUTOS, STATUS_NEGOCIO, PainelNotFound, type Marco, type PainelRepo, type Produto, type StatusNegocio } from './lib/painel-repo.js';
+import { MARCOS, PRODUTOS, STATUS_NEGOCIO, PainelNotFound, type Marco, type NegociosFiltro, type PainelRepo, type Produto, type StatusNegocio } from './lib/painel-repo.js';
 
 export type SubmitFn = (formId: string, mode: 'dry' | 'real', payload: unknown, ctx: { userAgent: string | null }) => Promise<{ status: number; body: unknown }>;
 
@@ -134,6 +134,44 @@ export function createStudioServer(opts: StudioOptions): Server {
       if (method === 'GET' && path === '/api/painel/config') return send(res, 200, await repo.config());
       if (method === 'GET' && path === '/api/painel/usuarios') return send(res, 200, await repo.usuarios());
       if (method === 'GET' && path === '/api/painel/campos') return send(res, 200, await repo.campos());
+      if (method === 'GET' && path === '/api/painel/negocios/resumo') return send(res, 200, await repo.negociosResumo());
+      if (method === 'GET' && path === '/api/painel/negocios') {
+        const q = url.searchParams;
+        const f: NegociosFiltro = {};
+        const pipeline = q.get('pipeline');
+        if (pipeline) {
+          if (!/^\d{1,15}$/.test(pipeline)) throw new HttpError(400, 'pipeline_invalido');
+          f.pipeline_id = Number(pipeline);
+        }
+        const status = q.get('status');
+        if (status) {
+          if (!(STATUS_NEGOCIO as readonly string[]).includes(status)) throw new HttpError(400, 'status_invalido', { validos: [...STATUS_NEGOCIO] });
+          f.status = status as StatusNegocio;
+        }
+        if (q.get('mql') === 'sim') f.mql = true;
+        const mes = q.get('mes');
+        if (mes) {
+          if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(mes)) throw new HttpError(400, 'mes_invalido');
+          f.mes = mes;
+        }
+        const busca = q.get('q');
+        if (busca) {
+          if (busca.length > 100) throw new HttpError(400, 'busca_longa_demais');
+          f.q = busca;
+        }
+        const pagina = q.get('pagina');
+        if (pagina) {
+          if (!/^\d{1,6}$/.test(pagina) || Number(pagina) < 1) throw new HttpError(400, 'pagina_invalida');
+          f.pagina = Number(pagina);
+        }
+        return send(res, 200, await repo.negocios(f));
+      }
+      const neg = /^\/api\/painel\/negocios\/([^/]+)$/.exec(path);
+      if (neg && method === 'GET') {
+        const rawId = decodeURIComponent(neg[1]!);
+        if (!/^\d{1,15}$/.test(rawId)) throw new HttpError(400, 'id_invalido');
+        return send(res, 200, await repo.negocio(Number(rawId)));
+      }
       if (method === 'GET' && path === '/api/painel/motivos-perda') return send(res, 200, await repo.motivosPerda());
       if (method === 'GET' && path === '/api/painel/status-contagem') return send(res, 200, await repo.statusContagem());
 

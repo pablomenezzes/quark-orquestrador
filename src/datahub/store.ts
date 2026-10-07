@@ -24,6 +24,29 @@ export type JobResult = {
   erro?: string;
 };
 
+export type Checkpoint = {
+  marca_dagua: string | null;
+  cursor_atual: unknown;
+  ultimo_sucesso_em: string | null;
+  backfill_concluido: boolean;
+};
+
+/** Uma linha de negócio: o JSON original (raw) e as colunas normalizadas (crm). */
+export type DealRow = {
+  raw: RawRow & { origem_lista: 'normal' | 'archived' | 'deleted' };
+  crm: Record<string, unknown>;
+};
+
+/** Extensão do armazenamento para os negócios (Entrega 2). */
+export interface DealsStore extends DatahubStore {
+  /** pipedrive_id -> hash do payload já guardado. */
+  existingDealHashes(): Promise<Map<string, string>>;
+  upsertDeals(rows: DealRow[]): Promise<void>;
+  /** Texto normalizado do motivo de perda -> ID da opção (campo lost_reason das definições de campos). */
+  lostReasonIds(): Promise<Map<string, number>>;
+  getCheckpoint(entity: string): Promise<Checkpoint | null>;
+}
+
 export interface DatahubStore {
   /** key -> hash do payload já guardado (para ignorar o que não mudou). */
   existingHashes(kind: RawKind): Promise<Map<string, string>>;

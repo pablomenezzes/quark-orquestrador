@@ -1,4 +1,5 @@
-import type { CrmKind, DatahubStore, JobResult, RawKind, RawRow } from './store.js';
+import { normalizeReasonText } from './parse.js';
+import type { Checkpoint, CrmKind, DatahubStore, DealRow, DealsStore, JobResult, RawKind, RawRow } from './store.js';
 
 type Q = { query: (text: string, values?: unknown[]) => Promise<{ rows: any[] }> };
 
@@ -11,8 +12,73 @@ const RAW_TABLE: Record<Exclude<RawKind, 'field_defs'>, string> = {
 const numOrNull = (v: unknown): number | null => (typeof v === 'number' && Number.isInteger(v) ? v : typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : null);
 
 /** Armazenamento da sincronização sobre Postgres, com o papel orq_sync (sem DELETE em nada). */
-export class PgDatahubStore implements DatahubStore {
+export class PgDatahubStore implements DatahubStore, DealsStore {
   constructor(private readonly q: Q) {}
+
+  async existingDealHashes(): Promise<Map<string, string>> {
+    const r = await this.q.query(`select source_id::text as k, payload_hash from raw.pd_deals`);
+    return new Map(r.rows.map((x: { k: string; payload_hash: string }) => [x.k, x.payload_hash]));
+  }
+
+  /** Grava em lotes (uma ida ao banco por 250 negócios, não uma por negócio). Nunca apaga. */
+  async upsertDeals(rows: DealRow[]): Promise<void> {
+    for (let i = 0; i < rows.length; i += 250) {
+      const chunk = rows.slice(i, i + 250);
+      await this.q.query(
+        `insert into raw.pd_deals (source_id, payload, payload_hash, source_add_time, source_update_time, origem_lista)
+         select source_id, payload, payload_hash, source_add_time, source_update_time, origem_lista
+         from jsonb_to_recordset($1::jsonb) as x(source_id bigint, payload jsonb, payload_hash text, source_add_time timestamptz, source_update_time timestamptz, origem_lista text)
+         on conflict (source_id) do update set payload = excluded.payload, payload_hash = excluded.payload_hash,
+           source_add_time = excluded.source_add_time, source_update_time = excluded.source_update_time,
+           origem_lista = excluded.origem_lista, synced_at = now()`,
+        [JSON.stringify(chunk.map((r) => ({ source_id: Number(r.raw.key), payload: r.raw.payload, payload_hash: r.raw.payload_hash, source_add_time: r.raw.source_add_time, source_update_time: r.raw.source_update_time, origem_lista: r.raw.origem_lista })))],
+      );
+      await this.q.query(
+        `insert into crm.deals (pipedrive_id, pipeline_id, stage_id, owner_id, titulo, moeda, person_id, org_id, status, status_original, valor,
+           motivo_perda, motivo_perda_id, created_at, updated_at, won_at, close_time, lost_time, stage_change_time, expected_close_date,
+           origin, origin_id, channel, channel_id, is_archived, is_deleted, deleted_detected_at, custom_fields, synced_at)
+         select pipedrive_id, pipeline_id, stage_id, owner_id, titulo, moeda, person_id, org_id, status, status_original, valor,
+           motivo_perda, motivo_perda_id, created_at, updated_at, won_at, close_time, lost_time, stage_change_time, expected_close_date,
+           origin, origin_id, channel, channel_id, is_archived, is_deleted, deleted_detected_at, custom_fields, now()
+         from jsonb_to_recordset($1::jsonb) as x(pipedrive_id bigint, pipeline_id bigint, stage_id bigint, owner_id bigint, titulo text, moeda text,
+           person_id bigint, org_id bigint, status text, status_original text, valor numeric, motivo_perda text, motivo_perda_id bigint,
+           created_at timestamptz, updated_at timestamptz, won_at timestamptz, close_time timestamptz, lost_time timestamptz,
+           stage_change_time timestamptz, expected_close_date date, origin text, origin_id text, channel text, channel_id text,
+           is_archived boolean, is_deleted boolean, deleted_detected_at timestamptz, custom_fields jsonb)
+         on conflict (pipedrive_id) do update set pipeline_id = excluded.pipeline_id, stage_id = excluded.stage_id, owner_id = excluded.owner_id,
+           titulo = excluded.titulo, moeda = excluded.moeda, person_id = excluded.person_id, org_id = excluded.org_id, status = excluded.status,
+           status_original = excluded.status_original, valor = excluded.valor, motivo_perda = excluded.motivo_perda,
+           motivo_perda_id = excluded.motivo_perda_id, created_at = excluded.created_at, updated_at = excluded.updated_at,
+           won_at = excluded.won_at, close_time = excluded.close_time, lost_time = excluded.lost_time,
+           stage_change_time = excluded.stage_change_time, expected_close_date = excluded.expected_close_date, origin = excluded.origin,
+           origin_id = excluded.origin_id, channel = excluded.channel, channel_id = excluded.channel_id, is_archived = excluded.is_archived,
+           is_deleted = excluded.is_deleted,
+           deleted_detected_at = case when excluded.is_deleted then coalesce(crm.deals.deleted_detected_at, excluded.deleted_detected_at) else null end,
+           custom_fields = excluded.custom_fields, synced_at = now()`,
+        [JSON.stringify(chunk.map((r) => r.crm))],
+      );
+    }
+  }
+
+  async lostReasonIds(): Promise<Map<string, number>> {
+    const r = await this.q.query(`select opcoes from crm.field_definitions where entity = 'deal' and field_key = 'lost_reason'`);
+    const out = new Map<string, number>();
+    const opts = r.rows[0]?.opcoes;
+    for (const o of Array.isArray(opts) ? opts : []) {
+      const id = Number((o as { id?: unknown }).id);
+      const label = (o as { label?: unknown }).label;
+      if (Number.isInteger(id) && typeof label === 'string') out.set(normalizeReasonText(label), id);
+    }
+    return out;
+  }
+
+  async getCheckpoint(entity: string): Promise<Checkpoint | null> {
+    const r = await this.q.query(`select marca_dagua, cursor_atual, ultimo_sucesso_em, backfill_concluido from ops.sync_checkpoints where entity = $1`, [entity]);
+    const x = r.rows[0];
+    if (!x) return null;
+    const iso = (v: unknown) => (v ? new Date(v as string).toISOString() : null);
+    return { marca_dagua: iso(x.marca_dagua), cursor_atual: x.cursor_atual ?? null, ultimo_sucesso_em: iso(x.ultimo_sucesso_em), backfill_concluido: x.backfill_concluido === true };
+  }
 
   async existingHashes(kind: RawKind): Promise<Map<string, string>> {
     const sql =

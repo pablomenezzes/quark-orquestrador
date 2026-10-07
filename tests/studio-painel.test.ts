@@ -46,6 +46,17 @@ const repo: PainelRepo = {
     calls.push(['stage', [id, marco]]);
     if (id === 999) throw new PainelNotFound('etapa');
   },
+  async negociosResumo() {
+    return [{ pipeline_id: 1, pipeline: 'Funil RH', produto: 'rh', status: 'open', is_archived: false, qtd: 3, qtd_mql: 3, valor_total: 300 }];
+  },
+  async negocios(f) {
+    calls.push(['negocios', [f]]);
+    return { total: 1, pagina: f.pagina ?? 1, por_pagina: 50, itens: [{ deal_id: 5, titulo: 'Negócio fictício', status: 'open', is_mql: true }] };
+  },
+  async negocio(id) {
+    if (id === 999) throw new PainelNotFound('negócio');
+    return { negocio: { deal_id: id, titulo: 'Negócio fictício' }, campos: [{ field_key: 'a'.repeat(40), nome_pipedrive: 'Origem', rotulo: null, valor: 'x' }] };
+  },
   async motivosPerda() {
     return [
       { reason_id: 398, motivo: 'Lead Invalido', exclui_mql: true },
@@ -125,6 +136,46 @@ describe('páginas e leitura', () => {
     expect(u[0]).toEqual({ user_id: 100, nome: 'Ana Teste', ativo: true });
     const c = await (await fetch(`${base}/api/painel/campos`)).json();
     expect(c[0].field_key).toHaveLength(40);
+  });
+});
+
+describe('negócios (somente leitura)', () => {
+  const get = (p: string) => fetch(`${base}${p}`);
+  it('resumo por pipeline e status', async () => {
+    const j = await (await get('/api/painel/negocios/resumo')).json();
+    expect(j[0]).toMatchObject({ pipeline: 'Funil RH', status: 'open', qtd: 3, qtd_mql: 3 });
+  });
+  it('lista com filtros válidos repassa exatamente o que foi pedido', async () => {
+    const r = await get('/api/painel/negocios?pipeline=1&status=lost&mql=sim&mes=2025-03&q=ana&pagina=2');
+    expect(r.status).toBe(200);
+    expect(calls).toEqual([['negocios', [{ pipeline_id: 1, status: 'lost', mql: true, mes: '2025-03', q: 'ana', pagina: 2 }]]]);
+    expect((await r.json()).itens[0].deal_id).toBe(5);
+  });
+  it('sem filtros: lista tudo, página 1', async () => {
+    await get('/api/painel/negocios');
+    expect(calls).toEqual([['negocios', [{}]]]);
+  });
+  it.each([
+    'pipeline=abc', 'pipeline=1;drop', 'status=archived', 'status=OPEN', 'mes=2025-13', 'mes=25-01', 'pagina=0', 'pagina=-1', 'pagina=abc', `q=${'x'.repeat(101)}`,
+  ])('filtro inválido (%s) é recusado e nada é consultado', async (qs) => {
+    expect((await get(`/api/painel/negocios?${qs}`)).status).toBe(400);
+    expect(calls).toEqual([]);
+  });
+  it('ficha do negócio com campos personalizados; ID inválido 400; inexistente 404', async () => {
+    const j = await (await get('/api/painel/negocios/5')).json();
+    expect(j.negocio.deal_id).toBe(5);
+    expect(j.campos[0].field_key).toHaveLength(40);
+    expect((await get('/api/painel/negocios/abc')).status).toBe(400);
+    expect((await get('/api/painel/negocios/999')).status).toBe(404);
+  });
+  it('não há como escrever em negócios pelo Painel', async () => {
+    for (const method of ['POST', 'PUT', 'DELETE', 'PATCH']) {
+      for (const p of ['/api/painel/negocios', '/api/painel/negocios/5', '/api/painel/negocios/resumo']) {
+        const r = await fetch(`${base}${p}`, { method, headers: J, body: '{}' });
+        expect([404, 405], `${method} ${p}`).toContain(r.status);
+      }
+    }
+    expect(calls).toEqual([]);
   });
 });
 

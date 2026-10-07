@@ -8,6 +8,7 @@ const STATUS = [['open', 'Aberto'], ['won', 'Ganho'], ['lost', 'Perdido'], ['del
 const SIM_NAO = (v) => [['sim', 'Sim'], ['nao', 'Não']].map(([k, l]) => `<option value="${k}" ${(v ? 'sim' : 'nao') === k ? 'selected' : ''}>${l}</option>`).join('');
 const ENTIDADES = [
   ['pipelines', 'Pipelines'], ['stages', 'Etapas'], ['users', 'Usuários'],
+  ['deals', 'Negócios'], ['deals_archived', 'Negócios arquivados'], ['deals_deleted', 'Negócios excluídos'],
   ['deal_fields', 'Campos de negócios'], ['person_fields', 'Campos de pessoas'], ['organization_fields', 'Campos de organizações'], ['activity_fields', 'Campos de atividades'],
 ];
 const ENTIDADE_CAMPO = { deal: 'Negócios', person: 'Pessoas', organization: 'Organizações', activity: 'Atividades' };
@@ -39,9 +40,27 @@ function toast(msg) {
   toast.t = setTimeout(() => (t.hidden = true), 2200);
 }
 
-const S = { tab: 'saude', saude: null, config: null, motivos: null, statusCont: null, usuarios: null, campos: null, filtro: '' };
+const S = { tab: 'saude', saude: null, config: null, motivos: null, statusCont: null, usuarios: null, campos: null, filtro: '', neg: { resumo: null, lista: null, ficha: null, f: { pipeline: '', status: '', mql: '', mes: '', q: '', pagina: 1 } } };
+
+const nf = new Intl.NumberFormat('pt-BR');
+const brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
+const STATUS_LABEL = Object.fromEntries(STATUS);
+const dia = (v) => (v ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short' }).format(new Date(v)) : '—');
+const statusChip = (s) => `<span class="chip ${s === 'won' ? 'ok' : s === 'lost' ? 'danger' : s === 'deleted' ? 'warn' : ''}">${esc(STATUS_LABEL[s] ?? s ?? '—')}</span>`;
+
+function negQuery() {
+  const f = S.neg.f;
+  const p = new URLSearchParams();
+  for (const k of ['pipeline', 'status', 'mql', 'mes', 'q']) if (f[k]) p.set(k, f[k]);
+  if (f.pagina > 1) p.set('pagina', String(f.pagina));
+  return p.toString();
+}
 
 async function load(tab) {
+  if (tab === 'negocios') {
+    [S.neg.resumo, S.neg.lista] = await Promise.all([api('/api/painel/negocios/resumo'), api(`/api/painel/negocios?${negQuery()}`)]);
+    S.saude = await api('/api/painel/saude');
+  }
   if (tab === 'saude') S.saude = await api('/api/painel/saude');
   if (tab === 'config' || tab === 'explorar' || tab === 'conferencia') S.config = await api('/api/painel/config');
   if (tab === 'config' || tab === 'conferencia') {
@@ -140,6 +159,69 @@ function viewExplorar() {
     </tbody></table></section>`;
 }
 
+/* ---------- Negócios ---------- */
+function viewNegocios() {
+  const { resumo, lista, f } = S.neg;
+  const sum = (fn) => resumo.filter(fn).reduce((n, r) => n + r.qtd, 0);
+  const total = sum(() => true);
+  const mql = resumo.reduce((n, r) => n + r.qtd_mql, 0);
+  const byStatus = (s) => sum((r) => r.status === s);
+  const arq = sum((r) => r.is_archived);
+  const cargaPendente = ['deals', 'deals_archived', 'deals_deleted'].filter((k) => !S.saude?.entidades?.find((e) => e.entity === k)?.backfill_concluido);
+  const pipes = [...new Map(resumo.filter((r) => r.pipeline_id != null).map((r) => [r.pipeline_id, r.pipeline])).entries()];
+  const porPipe = pipes.map(([id, nome]) => {
+    const rs = resumo.filter((r) => r.pipeline_id === id);
+    const n = (s) => rs.filter((r) => r.status === s).reduce((a, r) => a + r.qtd, 0);
+    const produto = rs[0]?.produto;
+    return `<tr><td>${esc(nome)} <span class="muted">#${id}</span></td><td>${produto ? esc(produto) : '<span class="muted">—</span>'}</td><td class="num">${nf.format(n('open'))}</td><td class="num">${nf.format(n('won'))}</td><td class="num">${nf.format(n('lost'))}</td><td class="num">${nf.format(n('deleted'))}</td><td class="num"><b>${nf.format(rs.reduce((a, r) => a + r.qtd, 0))}</b></td><td class="num">${nf.format(rs.reduce((a, r) => a + r.qtd_mql, 0))}</td></tr>`;
+  }).join('');
+  const sel = (id, val, items) => `<select class="sel" id="${id}">${items.map(([v, l]) => `<option value="${esc(v)}" ${String(val) === String(v) ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+  const paginas = Math.max(1, Math.ceil(lista.total / lista.por_pagina));
+  const ficha = S.neg.ficha;
+  const campos = ficha ? ficha.campos.filter((c) => c.valor !== null && c.valor !== '' && !(Array.isArray(c.valor) && !c.valor.length)) : [];
+  return `
+    ${cargaPendente.length ? `<div class="banner warn" style="margin-bottom:12px">A <strong>carga inicial</strong> de ${esc(cargaPendente.join(', '))} ainda não terminou. Os números abaixo são parciais até ela acabar (veja a aba Saúde da sincronização).</div>` : ''}
+    <div class="kpis">
+      <div class="card kpi"><b>${nf.format(total)}</b><span>negócios no banco (todos os status)</span></div>
+      <div class="card kpi"><b>${nf.format(byStatus('open'))}</b><span>abertos</span></div>
+      <div class="card kpi"><b>${nf.format(byStatus('won'))}</b><span>ganhos</span></div>
+      <div class="card kpi"><b>${nf.format(byStatus('lost'))}</b><span>perdidos</span></div>
+      <div class="card kpi"><b>${nf.format(byStatus('deleted'))}</b><span>excluídos (marcados, nunca apagados)</span></div>
+      <div class="card kpi"><b>${nf.format(mql)}</b><span>MQL (regra dos motivos de perda; ${nf.format(arq)} arquivados incluídos no total)</span></div>
+    </div>
+    <section class="card section" style="overflow:auto"><h2>Por pipeline <span class="muted" style="font-weight:400">(compare com o Pipedrive)</span></h2>
+      <table class="t"><thead><tr><th>Pipeline</th><th>Produto</th><th class="num">Abertos</th><th class="num">Ganhos</th><th class="num">Perdidos</th><th class="num">Excluídos</th><th class="num">Total</th><th class="num">MQL</th></tr></thead><tbody>${porPipe || '<tr><td colspan="8" class="empty">Nenhum negócio importado ainda.</td></tr>'}</tbody></table></section>
+    <section class="card section" style="margin-top:16px"><h2>Lista de negócios</h2>
+      <div class="row" style="margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        ${sel('nf-pipeline', f.pipeline, [['', 'Todos os pipelines'], ...pipes.map(([id, nome]) => [String(id), nome])])}
+        ${sel('nf-status', f.status, [['', 'Todos os status'], ...STATUS])}
+        ${sel('nf-mql', f.mql, [['', 'MQL e não MQL'], ['sim', 'Só MQL']])}
+        <input class="field-input" id="nf-mes" type="month" value="${esc(f.mes)}" title="Mês de criação">
+        <input class="field-input search" id="nf-q" placeholder="ID ou parte do título…" value="${esc(f.q)}">
+        <button class="btn" id="nf-limpar" type="button">Limpar</button>
+      </div>
+      <div class="muted" style="margin-bottom:8px">${nf.format(lista.total)} negócio(s) · página ${lista.pagina} de ${nf.format(paginas)}</div>
+      <div style="overflow:auto"><table class="t"><thead><tr><th>ID</th><th>Título</th><th>Pipeline › etapa</th><th>Status</th><th>MQL</th><th class="num">Valor</th><th>Responsável</th><th>Criado</th><th>Motivo da perda</th></tr></thead><tbody>
+      ${lista.itens.map((d) => `<tr class="clicavel" data-deal="${d.deal_id}" style="cursor:pointer"><td class="muted">#${d.deal_id}</td><td>${esc(d.titulo ?? '')}</td><td>${esc(d.pipeline ?? '')} <span class="muted">› ${esc(d.etapa ?? '')}</span>${d.is_archived ? ' <span class="chip">arquivado</span>' : ''}</td><td>${statusChip(d.status)}</td><td>${d.is_mql ? '<span class="chip ok">MQL</span>' : '<span class="muted">—</span>'}</td><td class="num">${d.valor != null ? brl.format(d.valor) : '—'}</td><td>${esc(d.responsavel ?? '')}</td><td>${dia(d.criado_em)}</td><td>${d.motivo_perda ? `${esc(d.motivo_perda)} <span class="muted">#${d.motivo_perda_id ?? '?'}</span>` : ''}</td></tr>`).join('') || '<tr><td colspan="9" class="empty">Nenhum negócio com esses filtros.</td></tr>'}
+      </tbody></table></div>
+      <div class="row" style="margin-top:12px;gap:8px"><button class="btn" id="nf-ant" type="button" ${lista.pagina <= 1 ? 'disabled' : ''}>← Anterior</button><button class="btn" id="nf-prox" type="button" ${lista.pagina >= paginas ? 'disabled' : ''}>Próxima →</button></div>
+    </section>
+    ${ficha ? `<section class="card section" style="margin-top:16px" id="ficha"><div class="row" style="justify-content:space-between"><h2>Ficha do negócio #${ficha.negocio.deal_id}</h2><button class="btn" id="ficha-fechar" type="button">Fechar</button></div>
+      <table class="t"><tbody>
+        <tr><td class="muted">Título</td><td>${esc(ficha.negocio.titulo ?? '')}</td></tr>
+        <tr><td class="muted">Pipeline › etapa</td><td>${esc(ficha.negocio.pipeline ?? '')} <span class="muted">#${ficha.negocio.pipeline_id ?? ''}</span> › ${esc(ficha.negocio.etapa ?? '')} <span class="muted">#${ficha.negocio.stage_id ?? ''}</span>${ficha.negocio.marco ? ` · chegou até: ${esc(ficha.negocio.marco)}` : ''}</td></tr>
+        <tr><td class="muted">Status</td><td>${statusChip(ficha.negocio.status)} ${ficha.negocio.is_mql ? '<span class="chip ok">MQL</span>' : ''} ${ficha.negocio.conta_como_lead ? '' : '<span class="chip warn">fora da contagem de leads</span>'}</td></tr>
+        <tr><td class="muted">Responsável</td><td>${esc(ficha.negocio.responsavel ?? '')} <span class="muted">#${ficha.negocio.owner_id ?? ''}</span></td></tr>
+        <tr><td class="muted">Valor</td><td>${ficha.negocio.valor != null ? brl.format(ficha.negocio.valor) : '—'}</td></tr>
+        <tr><td class="muted">Criado · fechado · perdido · atualizado</td><td>${dia(ficha.negocio.criado_em)} · ${dia(ficha.negocio.fechado_em)} · ${dia(ficha.negocio.perdido_em)} · ${dia(ficha.negocio.atualizado_em)}</td></tr>
+        <tr><td class="muted">Motivo da perda</td><td>${ficha.negocio.motivo_perda ? `${esc(ficha.negocio.motivo_perda)} <span class="muted">#${ficha.negocio.motivo_perda_id ?? 'sem ID'}</span>` : '—'}</td></tr>
+      </tbody></table>
+      <h3 style="margin-top:16px">Campos personalizados preenchidos (${campos.length})</h3>
+      <table class="t"><thead><tr><th>Campo</th><th>Valor</th><th>ID original</th></tr></thead><tbody>
+      ${campos.map((c) => `<tr><td>${esc(c.rotulo ?? c.nome_pipedrive ?? '')}${c.rotulo && c.nome_pipedrive ? ` <span class="muted">(${esc(c.nome_pipedrive)})</span>` : ''}</td><td>${esc(typeof c.valor === 'object' ? JSON.stringify(c.valor) : c.valor)}</td><td class="mono muted">${esc(c.field_key)}</td></tr>`).join('') || '<tr><td colspan="3" class="empty">Nenhum campo personalizado preenchido.</td></tr>'}
+      </tbody></table></section>` : ''}`;
+}
+
 /* ---------- Usuários e campos ---------- */
 function viewUsuarios() {
   return `
@@ -180,7 +262,71 @@ function viewConferencia() {
     </tbody></table></section>`;
 }
 
-const VIEWS = { saude: viewSaude, config: viewConfig, explorar: viewExplorar, usuarios: viewUsuarios, conferencia: viewConferencia };
+const VIEWS = { saude: viewSaude, config: viewConfig, explorar: viewExplorar, negocios: viewNegocios, usuarios: viewUsuarios, conferencia: viewConferencia };
+
+/* Negócios: filtros, paginação e ficha */
+async function recarregarNegocios(rolarParaFicha = false) {
+  try {
+    S.neg.lista = await api(`/api/painel/negocios?${negQuery()}`);
+    $('#view').innerHTML = viewNegocios();
+    if (rolarParaFicha) $('#ficha')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) {
+    toast(`Não consegui carregar: ${e.message}`);
+  }
+}
+const aplicarFiltro = (campo, valor) => {
+  S.neg.f[campo] = valor;
+  S.neg.f.pagina = 1;
+  return recarregarNegocios();
+};
+document.addEventListener('change', (ev) => {
+  const m = { 'nf-pipeline': 'pipeline', 'nf-status': 'status', 'nf-mql': 'mql', 'nf-mes': 'mes' }[ev.target.id];
+  if (m) aplicarFiltro(m, ev.target.value);
+});
+let buscaTimer;
+document.addEventListener('input', (ev) => {
+  if (ev.target.id !== 'nf-q') return;
+  clearTimeout(buscaTimer);
+  const v = ev.target.value;
+  const pos = ev.target.selectionStart;
+  buscaTimer = setTimeout(async () => {
+    await aplicarFiltro('q', v);
+    const b = $('#nf-q');
+    if (b) {
+      b.focus();
+      b.setSelectionRange(pos, pos);
+    }
+  }, 350);
+});
+document.addEventListener('click', async (ev) => {
+  const t = ev.target;
+  if (t.id === 'nf-limpar') {
+    S.neg.f = { pipeline: '', status: '', mql: '', mes: '', q: '', pagina: 1 };
+    return recarregarNegocios();
+  }
+  if (t.id === 'nf-ant' && S.neg.f.pagina > 1) {
+    S.neg.f.pagina--;
+    return recarregarNegocios();
+  }
+  if (t.id === 'nf-prox') {
+    S.neg.f.pagina++;
+    return recarregarNegocios();
+  }
+  if (t.id === 'ficha-fechar') {
+    S.neg.ficha = null;
+    return recarregarNegocios();
+  }
+  const linha = t.closest?.('[data-deal]');
+  if (linha) {
+    try {
+      S.neg.ficha = await api(`/api/painel/negocios/${linha.dataset.deal}`);
+      $('#view').innerHTML = viewNegocios();
+      $('#ficha')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (e) {
+      toast(`Não consegui abrir o negócio: ${e.message}`);
+    }
+  }
+});
 
 async function show(tab) {
   S.tab = tab;

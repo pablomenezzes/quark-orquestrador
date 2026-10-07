@@ -90,8 +90,9 @@ Em http://127.0.0.1:4310/painel (ou pelo link "Painel de Dados" no topo do Studi
 | Aba | Para que serve |
 |---|---|
 | Saúde da sincronização | Quando cada item foi atualizado com sucesso, últimas rodadas, erros e uso da cota do Pipedrive. Aviso vermelho se algo passar de 8 horas sem atualizar. |
-| Configuração | Liga cada **pipeline a um produto** (RH ou Clínica) e cada **etapa a um marco do funil**. Salva sozinho ao escolher. |
+| Configuração | Liga cada **pipeline a um produto** (RH ou Clínica) e, se quiser, cada **etapa a "chegou até aqui"** (SQL, reunião, proposta). Define **quais status contam como lead** (aberto, ganho, perdido, excluído) e **quais motivos de perda tiram o negócio do MQL**. Ganho/perdido vêm do Status do negócio, nunca da etapa. Salva sozinho ao escolher. |
 | Pipelines e etapas | Lista com busca para conferir nomes e ordem. |
+| Negócios | Totais por status e MQL, tabela por pipeline para comparar com o Pipedrive, lista com filtros (pipeline, status, só MQL, mês de criação, ID ou título) e a ficha do negócio com os campos personalizados. Só leitura. |
 | Usuários e campos | Usuários (sem e-mail) e definição de campos, com o ID original. |
 | Conferência | Totais para você comparar com o Pipedrive. |
 

@@ -107,6 +107,76 @@ export function parseUser(raw: unknown) {
   };
 }
 
+/** Compara textos de motivo de perda sem se importar com maiúsculas, acentos soltos e espaços repetidos. */
+export const normalizeReasonText = (s: string): string => s.normalize('NFC').trim().replace(/\s+/g, ' ').toLowerCase();
+
+/** Referência a pessoa/organização/usuário: número (v2), ou objeto com `value`/`id` (v1). */
+function refId(v: unknown): number | null {
+  if (isObj(v)) return intOrNull(v.value) ?? intOrNull(v.id);
+  return intOrNull(v);
+}
+
+const numOrNull = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : null);
+
+/** Data sem hora ("AAAA-MM-DD") ou null. */
+const dateOrNull = (v: unknown): string | null => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v.trim()) ? v.trim().slice(0, 10) : null);
+
+/** O motivo de perda chega como texto; em alguns negócios veio como objeto. Devolve o texto e, se vier no objeto, o ID. */
+function lostReasonOf(v: unknown): { texto: string | null; id: number | null } {
+  if (typeof v === 'string') return { texto: textOf(v), id: null };
+  if (isObj(v)) return { texto: textOf(v.label) ?? textOf(v.name) ?? textOf(v.value), id: intOrNull(v.id) };
+  return { texto: null, id: null };
+}
+
+export type DealListOrigin = 'normal' | 'archived' | 'deleted';
+const DEAL_STATUSES = ['open', 'won', 'lost'] as const;
+
+/**
+ * Negócio da API v2. `reasons` mapeia o texto normalizado do motivo de perda para o ID da opção (campo lost_reason).
+ * Excluído: `is_deleted = true`, `status` nulo se o Pipedrive não disse open/won/lost, e o que ele disse em `status_original`.
+ */
+export function parseDeal(raw: unknown, origin: DealListOrigin, reasons: ReadonlyMap<string, number>, now: Date) {
+  const p = requireObj(raw, 'negócio');
+  const pipedrive_id = idOf(p, 'negócio');
+  const statusOriginal = textOf(p.status)?.toLowerCase() ?? null;
+  const deleted = origin === 'deleted' || p.is_deleted === true || statusOriginal === 'deleted';
+  const reason = lostReasonOf(p.lost_reason);
+  const motivo_perda_id = reason.id ?? (reason.texto ? (reasons.get(normalizeReasonText(reason.texto)) ?? null) : null);
+  const custom = isObj(p.custom_fields) ? p.custom_fields : null;
+  return {
+    pipedrive_id,
+    titulo: textOf(p.title),
+    pipeline_id: intOrNull(p.pipeline_id),
+    stage_id: intOrNull(p.stage_id),
+    owner_id: refId(p.owner_id) ?? refId(p.user_id),
+    person_id: refId(p.person_id),
+    org_id: refId(p.org_id),
+    moeda: textOf(p.currency),
+    valor: numOrNull(p.value),
+    status: statusOriginal && (DEAL_STATUSES as readonly string[]).includes(statusOriginal) ? statusOriginal : null,
+    status_original: statusOriginal,
+    motivo_perda: reason.texto,
+    motivo_perda_id,
+    created_at: toIso(p.add_time),
+    updated_at: toIso(p.update_time),
+    won_at: toIso(p.won_time),
+    close_time: toIso(p.close_time),
+    lost_time: toIso(p.lost_time),
+    stage_change_time: toIso(p.stage_change_time),
+    expected_close_date: dateOrNull(p.expected_close_date),
+    origin: textOf(p.origin),
+    origin_id: textOf(p.origin_id) ?? (typeof p.origin_id === 'number' ? String(p.origin_id) : null),
+    channel: typeof p.channel === 'number' ? String(p.channel) : textOf(p.channel),
+    channel_id: textOf(p.channel_id),
+    is_archived: origin === 'archived' || p.is_archived === true,
+    is_deleted: deleted,
+    deleted_detected_at: deleted ? now.toISOString() : null,
+    custom_fields: custom,
+    source_add_time: toIso(p.add_time),
+    source_update_time: toIso(p.update_time),
+  };
+}
+
 export const FIELD_ENTITIES = ['deal', 'person', 'organization', 'activity'] as const;
 export type FieldEntity = (typeof FIELD_ENTITIES)[number];
 

@@ -1,8 +1,32 @@
 import { randomUUID } from 'node:crypto';
-import type { DatahubStore, JobResult, RawKind, CrmKind, RawRow } from '../../src/datahub/store';
+import type { Checkpoint, DealRow, DealsStore, JobResult, RawKind, CrmKind, RawRow } from '../../src/datahub/store';
 
 /** Store em memória para testar a sincronização sem banco. Dados fictícios (regra 8). */
-export class MemoryDatahubStore implements DatahubStore {
+export class MemoryDatahubStore implements DealsStore {
+  dealsRaw = new Map<string, DealRow['raw']>();
+  dealsCrm = new Map<string, Record<string, unknown>>();
+  lostReasons = new Map<string, number>();
+  failDeals = false;
+
+  async existingDealHashes(): Promise<Map<string, string>> {
+    return new Map([...this.dealsRaw].map(([k, v]) => [k, v.payload_hash]));
+  }
+  async upsertDeals(rows: DealRow[]): Promise<void> {
+    if (this.failDeals) throw new Error('falha simulada ao gravar negócios');
+    for (const r of rows) {
+      this.dealsRaw.set(r.raw.key, r.raw);
+      this.dealsCrm.set(r.raw.key, r.crm);
+    }
+  }
+  async lostReasonIds(): Promise<Map<string, number>> {
+    return this.lostReasons;
+  }
+  async getCheckpoint(entity: string): Promise<Checkpoint | null> {
+    const c = this.checkpoints.get(entity) as Partial<Checkpoint> | undefined;
+    if (!c) return null;
+    return { marca_dagua: c.marca_dagua ?? null, cursor_atual: c.cursor_atual ?? null, ultimo_sucesso_em: c.ultimo_sucesso_em ?? null, backfill_concluido: c.backfill_concluido === true };
+  }
+
   raw: Record<RawKind, Map<string, RawRow>> = { pipelines: new Map(), stages: new Map(), users: new Map(), field_defs: new Map() };
   crm: Record<CrmKind, Map<string, Record<string, unknown>>> = { pipeline: new Map(), stage: new Map(), user: new Map(), field_def: new Map() };
   jobs = new Map<string, { entity: string; modo: string; origem: string; result?: JobResult }>();
