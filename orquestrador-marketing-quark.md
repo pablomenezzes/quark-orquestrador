@@ -642,7 +642,7 @@ Expande o projeto com a camada de dados de CRM para análise: todo o histórico 
 | Entrega | O que | Status |
 |---|---|---|
 | 0 | Auditoria e plano (sem código): tabelas propostas, endpoints, volume, chamadas, onde rodar, credenciais, limitações | **aprovada pelo Pablo (2026-10-05)** |
-| 1 | Pipelines, etapas, usuários e tela de configuração (pipeline → produto, etapa → marco) | **em andamento (2026-10-05)**: migration `0004` **aplicada** (dump `backups/dump-20261005-182452.sql`); papéis `orq_sync` e `orq_panel` com senha própria; 401 testes passando, inclusive as 17 provas de privilégio mínimo dentro do banco; Painel abre ligado ao banco (vazio). **Falta:** o endereço da conta e o token do Pipedrive para a primeira sincronização e a conferência |
+| 1 | Pipelines, etapas, usuários e tela de configuração (pipeline → produto, etapa → marco) | **entregue (2026-10-06), aguardando o "conferido" do Pablo**: sincronização real feita (8 pipelines, 43 etapas, 15 usuários, 249 definições de campos; 0 falhas; 2ª rodada ignorou tudo); Painel validado com os dados reais, inclusive gravar a configuração pela tela; 401 testes passando; migration `0004` aplicada. O Pablo ainda precisa preencher produto e marco na aba Configuração |
 | 2 | Deals: backfill retomável desde 2025-01-01, campos personalizados, ligação com `core.leads` | pendente |
 | 3 | Pessoas e empresas | pendente |
 | 4 | Atividades | pendente |
@@ -679,7 +679,7 @@ Registro vivo. Atualizar a cada sessão.
 |---|---|
 | Repositório | `C:\Users\Esig\Documents\quark-orquestrador` (git local), branch `main`. **Backup:** GitHub privado `pablomenezzes/quark-orquestrador` (`origin`) |
 | Ordem de trabalho | Seção 15, itens 1 a 7. Itens 1 e 2 feitos (2 aguardando confirmação); próximo: item 3 (análise do P-01, sem implementar) |
-| Data Hub (Pipedrive) | Autorizado em 2026-10-05. **Entrega 0 aprovada.** **Entrega 1:** migration `0004` aplicada; schemas `raw`, `ops`, `analytics` e papéis `orq_sync`/`orq_panel` existem; tabelas novas com **0 linhas** (nada sincronizado ainda: falta o token). Plano: `docs/datahub/entrega-0-plano.md` |
+| Data Hub (Pipedrive) | Autorizado em 2026-10-05. **Entrega 0 aprovada. Entrega 1 entregue** (aguardando "conferido"): conta `quarktec.pipedrive.com`; no banco já estão 8 pipelines, 43 etapas, 15 usuários e 249 definições de campos (original em `raw` e normalizado em `crm`). Cota gasta: 70 unidades por rodada completa. Plano: `docs/datahub/entrega-0-plano.md` |
 | Banco | Supabase "Orquestrador CRM Quark" (São Paulo), migrations `0001` e `0002` aplicadas. Dados: `orq.sources` (2 fontes de teste) e **1 lead de teste do Pablo** gravado pelo Studio em modo "gravar" em 2026-10-04 12:20Z (formulário `demo-rh`, `lp_id` `studio-demo-rh`, canal `direct`, `landing_url` de `127.0.0.1`): 1 lead, 1 touchpoint, 1 evento, 1 decisão. É permanente (eventos imutáveis) e entra na política de LGPD (item 5). Demais tabelas com 0 linhas. `public` com 0 tabelas |
 | Fontes registradas | `lp-vercel-rh-teste` (vercel) e `elementor-site-rh` (elementor). Tokens só no `.env.local` |
 | Produção | `https://quark-orquestrador.vercel.app/api/ingest`, `gru1`, modo sombra, Standard Protection (**produção pública**), plano **Hobby** (uso não comercial, ver P-02) |
@@ -746,7 +746,7 @@ Ordem vigente: **seção 15, itens 1 a 7**. As pendências abaixo apontam para o
 **Data Hub do Pipedrive (aguardando o Pablo)**
 
 - [x] **Plano da Entrega 0 aprovado pelo Pablo (2026-10-05)**: (1) organização das tabelas e dos 2 papéis; (2) sincronização no **GitHub Actions**; (3) histórico guardando só as mudanças do deal; (4) token do Pipedrive, de preferência de um usuário dedicado só de visualização; (5) congelamento do Studio suspenso só para o Painel de Dados.
-- [ ] **Entrega 1, o que falta de você:** (a) dizer o **endereço da conta** do Pipedrive; (b) guardar o **token** com `node scripts/save-secret.mjs PIPEDRIVE_API_TOKEN` (tela escondida). A migration `0004` já foi aplicada em 2026-10-05 (confirmada pelo "siga" do Pablo). Depois disso: rodar a simulação (`npm run datahub:sync`, só lê), sincronizar (`-- --apply`) e conferir no Painel.
+- [ ] **Entrega 1, o que falta de você:** conferir no Painel com o Pipedrive (roteiro de 5 passos entregue em 2026-10-06), preencher na aba Configuração o **produto de cada pipeline** e o **marco de cada etapa**, e dizer "conferido". Sugestões que o Pablo decide: QuarkRH → RH; QuarkClinic e "Prospecção Outbound [QuarkClinic]" → Clínica; os outros 5 pipelines (Conversão RD, [MKT] Inbound Ativo, Parcerias, CARBONE, Disparos Marketing) dependem do negócio.
 - [ ] **Dados do Pipedrive** (nada secreto) para a Entrega 2: plano e nº de usuários, contagens desde 2025-01-01 (deals, pessoas, organizações, atividades), nº de pipelines e se usam "arquivar". Com eles a estimativa de espaço e de dias de backfill deixa de ser cenário.
 - [ ] Decidir quando migrar o Supabase para o plano pago (a partir de ~10 mil deals o gratuito não comporta; sem backup automático no gratuito).
 - [x] Linter das migrations aceita `raw` e `ops` (feito na Entrega 1, com testes que o provam).
@@ -812,3 +812,19 @@ Camada de dados para análise, ao lado do orquestrador. Primeiro o **Pipedrive**
 - **A documentação não lista os campos de cada registro** dessas quatro entidades. Os leitores são tolerantes (D-33) e a primeira sincronização real vai mostrar a forma verdadeira dos dados; qualquer diferença é corrigida relendo o `raw`, sem nova consulta ao Pipedrive.
 - **Usuários:** só existem na API v1 (`/v1/users`); não é paginado na documentação, mas o leitor segue `more_items_in_collection` se aparecer.
 - **Autenticação:** o token pessoal segue válido; o Pipedrive recomenda OAuth para integrações novas. Mantemos o token com o guarda de somente leitura no código.
+
+### Conferência da Entrega 1 (2026-10-06): o que o banco tem hoje
+
+| Item | Quantidade | Observação |
+|---|---|---|
+| Pipelines | 8 | todos ativos; QuarkRH (7 etapas), QuarkClinic (7), Conversão RD (1), Prospecção Outbound [QuarkClinic] (4), [MKT] Inbound Ativo (4), Parcerias (7), CARBONE (8), Disparos Marketing (5) |
+| Etapas | 43 | todas ativas, todas com ordem e probabilidade |
+| Usuários | 15 | todos ativos, nenhum sem nome ou e-mail |
+| Campos de negócios | 134 | 84 personalizados (ID de 40 caracteres) |
+| Campos de pessoas | 51 | 10 personalizados |
+| Campos de organizações | 36 | 2 personalizados |
+| Campos de atividades | 28 | nenhum personalizado |
+| Sincronização | 7 itens, 0 falhas, 0 erros | 1ª rodada gravou tudo; 2ª ignorou tudo (hash igual). 70 unidades da cota por rodada completa |
+
+- **O formato real bateu** com o que os leitores esperavam (v2: `is_deleted`, `order_nr`, `pipeline_id` etc.); o JSON original está em `raw`. Chaves vistas no usuário (`active_flag`, `is_admin`, `role_id`...) e no campo (`field_code`, `field_name`, `is_custom_field`, `subfields`...) ficam guardadas para quando precisarmos.
+- Os nomes das etapas já trazem marcadores do funil (`[SQL]`, `[MCL]`, `[SAL]`, `[Prospect]`), úteis para o Pablo ligar cada etapa a um marco.
