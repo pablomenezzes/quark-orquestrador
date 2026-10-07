@@ -28,7 +28,7 @@ const repo: PainelRepo = {
   },
   async config() {
     return [
-      { pipeline_id: 1, pipeline: 'Funil RH', pipeline_ordem: 1, produto: 'rh', etapas: [{ stage_id: 11, etapa: 'Lead', etapa_ordem: 1, marco: 'lead' }] },
+      { pipeline_id: 1, pipeline: 'Funil RH', pipeline_ordem: 1, produto: 'rh', etapas: [{ stage_id: 11, etapa: 'Lead', etapa_ordem: 1, marco: 'sql' }] },
       { pipeline_id: 2, pipeline: 'Funil Clínica', pipeline_ordem: 2, produto: null, etapas: [] },
     ];
   },
@@ -45,6 +45,25 @@ const repo: PainelRepo = {
   async setStageMarco(id, marco) {
     calls.push(['stage', [id, marco]]);
     if (id === 999) throw new PainelNotFound('etapa');
+  },
+  async motivosPerda() {
+    return [
+      { reason_id: 398, motivo: 'Lead Invalido', exclui_mql: true },
+      { reason_id: 24, motivo: 'Achou o preço caro', exclui_mql: false },
+    ];
+  },
+  async statusContagem() {
+    return [
+      { status: 'open', conta_como_lead: true },
+      { status: 'deleted', conta_como_lead: false },
+    ];
+  },
+  async setMotivoExcluiMql(id, v) {
+    calls.push(['motivo', [id, v]]);
+    if (id === 999) throw new PainelNotFound('motivo de perda');
+  },
+  async setStatusContaComoLead(status, v) {
+    calls.push(['status', [status, v]]);
   },
 };
 
@@ -98,7 +117,7 @@ describe('páginas e leitura', () => {
     const j = await (await fetch(`${base}/api/painel/config`)).json();
     expect(j).toHaveLength(2);
     expect(j[0]).toMatchObject({ pipeline: 'Funil RH', produto: 'rh' });
-    expect(j[0].etapas[0]).toMatchObject({ etapa: 'Lead', marco: 'lead' });
+    expect(j[0].etapas[0]).toMatchObject({ etapa: 'Lead', marco: 'sql' });
     expect(j[1].produto).toBeNull();
   });
   it('usuários (sem e-mail) e campos', async () => {
@@ -115,7 +134,7 @@ describe('gravar a configuração (a única escrita do Painel)', () => {
     expect(r.status).toBe(200);
     expect(calls).toEqual([['pipeline', [1, produto]]]);
   });
-  it.each(['lead', 'mql', 'sql', 'reuniao', 'proposta', 'ganho', 'perdido', null])('etapa -> marco %s', async (marco) => {
+  it.each(['sql', 'reuniao', 'proposta', null])('etapa -> "chegou até aqui" %s', async (marco) => {
     const r = await put('/api/painel/config/stage/11', { marco });
     expect(r.status).toBe(200);
     expect(calls).toEqual([['stage', [11, marco]]]);
@@ -124,8 +143,50 @@ describe('gravar a configuração (a única escrita do Painel)', () => {
     for (const body of [{ produto: 'outro' }, { produto: '' }, { produto: 1 }, {}, { produto: ['rh'] }]) {
       expect((await put('/api/painel/config/pipeline/1', body)).status, JSON.stringify(body)).toBe(400);
     }
-    for (const body of [{ marco: 'qualificado' }, { marco: 'GANHO' }, {}]) {
+    // ganho/perdido/MQL/lead NÃO são marcos de etapa: o status vem do negócio e MQL é regra de motivo de perda
+    for (const body of [{ marco: 'qualificado' }, { marco: 'GANHO' }, { marco: 'ganho' }, { marco: 'perdido' }, { marco: 'mql' }, { marco: 'lead' }, {}]) {
       expect((await put('/api/painel/config/stage/11', body)).status, JSON.stringify(body)).toBe(400);
+    }
+    expect(calls).toEqual([]);
+  });
+  it('lista os motivos de perda (ID e nome juntos) e a contagem por status', async () => {
+    const m = await (await fetch(`${base}/api/painel/motivos-perda`)).json();
+    expect(m[0]).toEqual({ reason_id: 398, motivo: 'Lead Invalido', exclui_mql: true });
+    const s = await (await fetch(`${base}/api/painel/status-contagem`)).json();
+    expect(s).toContainEqual({ status: 'deleted', conta_como_lead: false });
+  });
+  it.each([true, false])('motivo de perda -> exclui do MQL = %s', async (v) => {
+    const r = await put('/api/painel/config/motivo-perda/398', { exclui_mql: v });
+    expect(r.status).toBe(200);
+    expect(calls).toEqual([['motivo', [398, v]]]);
+  });
+  it.each(['open', 'won', 'lost', 'deleted'])('status %s -> conta como lead', async (st) => {
+    const r = await put(`/api/painel/config/status/${st}`, { conta_como_lead: true });
+    expect(r.status).toBe(200);
+    expect(calls).toEqual([['status', [st, true]]]);
+  });
+  it('motivo e status: valores inválidos são recusados, motivo inexistente dá 404', async () => {
+    for (const body of [{ exclui_mql: 'sim' }, { exclui_mql: 1 }, { exclui_mql: null }, {}]) {
+      expect((await put('/api/painel/config/motivo-perda/398', body)).status, JSON.stringify(body)).toBe(400);
+    }
+    for (const id of ['abc', '1.5', '-1', '1;drop']) {
+      expect((await put(`/api/painel/config/motivo-perda/${encodeURIComponent(id)}`, { exclui_mql: true })).status, id).toBe(400);
+    }
+    for (const st of ['archived', 'OPEN', '']) {
+      expect((await put(`/api/painel/config/status/${st}`, { conta_como_lead: true })).status, st).toBe(st === '' ? 404 : 400);
+    }
+    for (const body of [{ conta_como_lead: 'true' }, { conta_como_lead: 0 }, {}]) {
+      expect((await put('/api/painel/config/status/open', body)).status, JSON.stringify(body)).toBe(400);
+    }
+    expect(calls).toEqual([]);
+    expect((await put('/api/painel/config/motivo-perda/999', { exclui_mql: true })).status).toBe(404);
+  });
+  it('as novas rotas também recusam outra origem e métodos que não sejam PUT', async () => {
+    expect((await put('/api/painel/config/status/open', { conta_como_lead: true }, { origin: 'https://site-malicioso.com' })).status).toBe(403);
+    for (const method of ['POST', 'DELETE', 'PATCH']) {
+      for (const p of ['/api/painel/config/status/open', '/api/painel/config/motivo-perda/398']) {
+        expect([404, 405], `${method} ${p}`).toContain((await fetch(`${base}${p}`, { method, headers: J, body: '{}' })).status);
+      }
     }
     expect(calls).toEqual([]);
   });
@@ -137,7 +198,7 @@ describe('gravar a configuração (a única escrita do Painel)', () => {
   });
   it('pipeline ou etapa que não existe: 404', async () => {
     expect((await put('/api/painel/config/pipeline/999', { produto: 'rh' })).status).toBe(404);
-    expect((await put('/api/painel/config/stage/999', { marco: 'lead' })).status).toBe(404);
+    expect((await put('/api/painel/config/stage/999', { marco: 'sql' })).status).toBe(404);
   });
   it('o Painel NÃO oferece nenhuma outra escrita: POST/DELETE nas rotas dele não existem', async () => {
     for (const p of ['/api/painel/saude', '/api/painel/config', '/api/painel/usuarios', '/api/painel/config/pipeline/1']) {

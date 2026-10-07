@@ -2,7 +2,10 @@ const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 const PRODUTOS = [['', 'Não definido'], ['rh', 'RH (QuarkRH)'], ['clinic', 'Clínica (QuarkClinic)']];
-const MARCOS = [['', 'Não definido'], ['lead', 'Lead'], ['mql', 'MQL'], ['sql', 'SQL'], ['reuniao', 'Reunião'], ['proposta', 'Proposta'], ['ganho', 'Ganho'], ['perdido', 'Perdido']];
+// Ganho/perdido/aberto/excluído vêm do Status do negócio e MQL é regra pelo motivo de perda: nenhum dos dois é marco de etapa.
+const MARCOS = [['', 'Nenhum'], ['sql', 'SQL'], ['reuniao', 'Reunião'], ['proposta', 'Proposta']];
+const STATUS = [['open', 'Aberto'], ['won', 'Ganho'], ['lost', 'Perdido'], ['deleted', 'Excluído']];
+const SIM_NAO = (v) => [['sim', 'Sim'], ['nao', 'Não']].map(([k, l]) => `<option value="${k}" ${(v ? 'sim' : 'nao') === k ? 'selected' : ''}>${l}</option>`).join('');
 const ENTIDADES = [
   ['pipelines', 'Pipelines'], ['stages', 'Etapas'], ['users', 'Usuários'],
   ['deal_fields', 'Campos de negócios'], ['person_fields', 'Campos de pessoas'], ['organization_fields', 'Campos de organizações'], ['activity_fields', 'Campos de atividades'],
@@ -36,11 +39,14 @@ function toast(msg) {
   toast.t = setTimeout(() => (t.hidden = true), 2200);
 }
 
-const S = { tab: 'saude', saude: null, config: null, usuarios: null, campos: null, filtro: '' };
+const S = { tab: 'saude', saude: null, config: null, motivos: null, statusCont: null, usuarios: null, campos: null, filtro: '' };
 
 async function load(tab) {
   if (tab === 'saude') S.saude = await api('/api/painel/saude');
   if (tab === 'config' || tab === 'explorar' || tab === 'conferencia') S.config = await api('/api/painel/config');
+  if (tab === 'config' || tab === 'conferencia') {
+    [S.motivos, S.statusCont] = await Promise.all([api('/api/painel/motivos-perda'), api('/api/painel/status-contagem')]);
+  }
   if (tab === 'usuarios' || tab === 'conferencia') {
     [S.usuarios, S.campos] = await Promise.all([api('/api/painel/usuarios'), api('/api/painel/campos')]);
   }
@@ -90,10 +96,21 @@ function viewConfig() {
   const semProduto = S.config.filter((p) => !p.produto).length;
   const semMarco = S.config.reduce((n, p) => n + p.etapas.filter((e) => !e.marco).length, 0);
   return `
-    <div class="banner ${semProduto || semMarco ? 'warn' : 'ok'}" style="margin-bottom:14px">
-      Ligue cada <strong>pipeline a um produto</strong> e cada <strong>etapa a um marco do funil</strong>. Salva sozinho ao escolher.
-      ${semProduto || semMarco ? `Faltam: ${semProduto} pipeline(s) sem produto e ${semMarco} etapa(s) sem marco.` : 'Tudo definido.'}
+    <div class="banner ${semProduto ? 'warn' : 'ok'}" style="margin-bottom:14px">
+      Ligue cada <strong>pipeline a um produto</strong>. Se quiser, marque nas etapas <strong>até onde o negócio chegou</strong> (SQL, reunião, proposta). Salva sozinho ao escolher.
+      ${semProduto ? `Faltam ${semProduto} pipeline(s) sem produto.` : 'Todos os pipelines têm produto.'}
+      <br><span class="muted">Ganho, perdido, aberto e excluído <strong>não dependem da etapa</strong>: vêm do Status do negócio. MQL <strong>não é etapa</strong>: é a regra dos motivos de perda, logo abaixo.</span>
     </div>
+    <section class="card section" style="margin-bottom:14px"><h2>Quais status contam como lead?</h2>
+      <p class="muted" style="margin-top:0">Escolha se os negócios em cada status entram na contagem de leads. Vale para todo o histórico, sem reprocessar nada.</p>
+      <table class="t"><thead><tr><th>Status do negócio</th><th style="width:220px">Conta como lead?</th></tr></thead><tbody>
+      ${S.statusCont.map((s) => `<tr><td>${esc(STATUS.find(([k]) => k === s.status)?.[1] ?? s.status)} <span class="muted">(${esc(s.status)})</span></td><td><select class="sel" data-status="${esc(s.status)}">${SIM_NAO(s.conta_como_lead)}</select></td></tr>`).join('')}
+      </tbody></table></section>
+    <section class="card section" style="margin-bottom:14px"><h2>MQL: motivos de perda que tiram o negócio do MQL</h2>
+      <p class="muted" style="margin-top:0">MQL é todo negócio que <strong>não</strong> foi perdido por um dos motivos marcados “Tira do MQL”. Abertos, ganhos e perdidos por qualquer outro motivo contam como MQL.</p>
+      <table class="t"><thead><tr><th style="width:70px">ID</th><th>Motivo da perda</th><th style="width:220px">Efeito</th></tr></thead><tbody>
+      ${S.motivos.map((m) => `<tr><td class="muted">#${m.reason_id}</td><td>${m.motivo ? esc(m.motivo) : '<span class="muted">(motivo que o Pipedrive não oferece mais)</span>'}</td><td><select class="sel" data-motivo="${m.reason_id}"><option value="nao" ${m.exclui_mql ? '' : 'selected'}>Conta como MQL</option><option value="sim" ${m.exclui_mql ? 'selected' : ''}>Tira do MQL</option></select></td></tr>`).join('') || '<tr><td colspan="3" class="empty">Nenhum motivo importado ainda.</td></tr>'}
+      </tbody></table></section>
     ${S.config.map((p) => `
     <section class="card pipe-card">
       <div class="pipe-head">
@@ -101,7 +118,7 @@ function viewConfig() {
         <label class="muted" style="font-size:13px">Produto</label>
         <select class="sel" data-pipe="${p.pipeline_id}">${opts(PRODUTOS, p.produto)}</select>
       </div>
-      ${p.etapas.length ? `<table class="t"><thead><tr><th class="num" style="width:60px">Ordem</th><th>Etapa</th><th style="width:60px">ID</th><th style="width:220px">Marco do funil</th></tr></thead><tbody>
+      ${p.etapas.length ? `<table class="t"><thead><tr><th class="num" style="width:60px">Ordem</th><th>Etapa</th><th style="width:60px">ID</th><th style="width:220px">Chegou até aqui (marco)</th></tr></thead><tbody>
         ${p.etapas.map((e) => `<tr><td class="num">${esc(e.etapa_ordem ?? '')}</td><td>${esc(e.etapa)}</td><td class="muted">#${e.stage_id}</td><td><select class="sel" data-stage="${e.stage_id}">${opts(MARCOS, e.marco)}</select></td></tr>`).join('')}
       </tbody></table>` : '<div class="empty">Este pipeline não tem etapas importadas.</div>'}
     </section>`).join('')}`;
@@ -154,6 +171,10 @@ function viewConferencia() {
     <section class="card section"><h2>Etapas por pipeline</h2><table class="t"><thead><tr><th>Pipeline</th><th class="num">Etapas</th><th>Produto</th></tr></thead><tbody>
       ${S.config.map((p) => `<tr><td>${esc(p.pipeline)}</td><td class="num">${p.etapas.length}</td><td>${p.produto ? esc(p.produto) : '<span class="muted">não definido</span>'}</td></tr>`).join('')}
     </tbody></table></section>
+    <section class="card section" style="margin-top:16px"><h2>Regras de contagem</h2><table class="t"><tbody>
+      <tr><td>Motivos de perda que tiram do MQL</td><td>${S.motivos.filter((m) => m.exclui_mql).map((m) => `#${m.reason_id} ${esc(m.motivo ?? '')}`).join(' · ') || '<span class="muted">nenhum</span>'} <span class="muted">(de ${S.motivos.length} motivos)</span></td></tr>
+      <tr><td>Status que contam como lead</td><td>${S.statusCont.filter((s) => s.conta_como_lead).map((s) => esc(STATUS.find(([k]) => k === s.status)?.[1] ?? s.status)).join(', ') || '<span class="muted">nenhum</span>'}</td></tr>
+    </tbody></table></section>
     <section class="card section" style="margin-top:16px"><h2>Campos por entidade</h2><table class="t"><thead><tr><th>Entidade</th><th class="num">Campos</th></tr></thead><tbody>
       ${Object.entries(ENTIDADE_CAMPO).map(([k, l]) => `<tr><td>${l}</td><td class="num">${porEnt[k]}</td></tr>`).join('')}
     </tbody></table></section>`;
@@ -200,14 +221,22 @@ document.addEventListener('change', async (ev) => {
   const el = ev.target;
   const pipe = el.dataset?.pipe;
   const stage = el.dataset?.stage;
-  if (!pipe && !stage) return;
+  const motivo = el.dataset?.motivo;
+  const status = el.dataset?.status;
+  if (!pipe && !stage && !motivo && !status) return;
   const value = el.value === '' ? null : el.value;
   el.classList.remove('saved', 'err');
   try {
     if (pipe) await api(`/api/painel/config/pipeline/${pipe}`, { method: 'PUT', body: { produto: value } });
+    else if (motivo) await api(`/api/painel/config/motivo-perda/${motivo}`, { method: 'PUT', body: { exclui_mql: value === 'sim' } });
+    else if (status) await api(`/api/painel/config/status/${status}`, { method: 'PUT', body: { conta_como_lead: value === 'sim' } });
     else await api(`/api/painel/config/stage/${stage}`, { method: 'PUT', body: { marco: value } });
     el.classList.add('saved');
     toast('Salvo');
+    const m = S.motivos?.find((x) => String(x.reason_id) === motivo);
+    if (m) m.exclui_mql = value === 'sim';
+    const st = S.statusCont?.find((x) => x.status === status);
+    if (st) st.conta_como_lead = value === 'sim';
     const p = S.config.find((x) => String(x.pipeline_id) === pipe);
     if (p) p.produto = value;
     for (const pp of S.config) for (const e of pp.etapas) if (String(e.stage_id) === stage) e.marco = value;

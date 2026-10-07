@@ -93,7 +93,7 @@ run('papéis do Data Hub (transação com rollback)', () => {
       expect(raw.rows[0].payload).toMatchObject({ name: 'Funil Fictício RH' });
       const crm = await c().query(`select pipeline_id, nome from crm.pipelines where pipeline_id = 910001`);
       expect(crm.rows[0]).toEqual({ pipeline_id: '910001', nome: 'Funil Fictício RH' });
-      const f = await c().query(`select field_key from crm.field_definitions where entity = 'deal'`);
+      const f = await c().query(`select field_key from crm.field_definitions where entity = 'deal' and nome = 'Campo fictício'`);
       expect(f.rows[0].field_key).toHaveLength(40);
     });
 
@@ -163,11 +163,11 @@ run('papéis do Data Hub (transação com rollback)', () => {
     it('grava a configuração (pipeline -> produto, etapa -> marco) e a view reflete na hora', async () => {
       const repo = new PgPainelRepo(c() as never);
       await repo.setPipelineProduto(910001, 'rh');
-      await repo.setStageMarco(920001, 'lead');
+      await repo.setStageMarco(920001, 'sql');
       await repo.setStageMarco(920002, 'reuniao');
       const p = (await repo.config()).find((x) => x.pipeline_id === 910001)!;
       expect(p.produto).toBe('rh');
-      expect(p.etapas.map((e) => e.marco)).toEqual(['lead', 'reuniao']);
+      expect(p.etapas.map((e) => e.marco)).toEqual(['sql', 'reuniao']);
       await repo.setPipelineProduto(910001, null);
       expect((await repo.config()).find((x) => x.pipeline_id === 910001)!.produto).toBeNull();
     });
@@ -178,7 +178,7 @@ run('papéis do Data Hub (transação com rollback)', () => {
       await expect(repo.setPipelineProduto(999999999, 'rh')).rejects.toMatchObject({ name: 'PainelNotFound' });
       await c().query('rollback to savepoint nf');
       await c().query('savepoint nf2');
-      await expect(repo.setStageMarco(999999999, 'lead')).rejects.toMatchObject({ name: 'PainelNotFound' });
+      await expect(repo.setStageMarco(999999999, 'sql')).rejects.toMatchObject({ name: 'PainelNotFound' });
       await c().query('rollback to savepoint nf2');
     });
 

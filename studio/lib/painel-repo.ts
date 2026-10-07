@@ -1,9 +1,18 @@
 import type pg from 'pg';
 
 export const PRODUTOS = ['rh', 'clinic'] as const;
-export const MARCOS = ['lead', 'mql', 'sql', 'reuniao', 'proposta', 'ganho', 'perdido'] as const;
+/**
+ * Marcos de etapa = "até onde o negócio chegou". Ganho/perdido/aberto/excluído vêm do Status do negócio (nunca da etapa)
+ * e MQL é regra pelo motivo de perda (cfg_motivo_perda), não etapa. Ver D-36.
+ */
+export const MARCOS = ['sql', 'reuniao', 'proposta'] as const;
+export const STATUS_NEGOCIO = ['open', 'won', 'lost', 'deleted'] as const;
 export type Produto = (typeof PRODUTOS)[number];
 export type Marco = (typeof MARCOS)[number];
+export type StatusNegocio = (typeof STATUS_NEGOCIO)[number];
+
+export type MotivoPerda = { reason_id: number; motivo: string | null; exclui_mql: boolean };
+export type StatusContagem = { status: StatusNegocio; conta_como_lead: boolean };
 
 export class PainelNotFound extends Error {
   constructor(what: string) {
@@ -31,6 +40,10 @@ export interface PainelRepo {
   campos(): Promise<unknown[]>;
   setPipelineProduto(pipelineId: number, produto: Produto | null): Promise<void>;
   setStageMarco(stageId: number, marco: Marco | null): Promise<void>;
+  motivosPerda(): Promise<MotivoPerda[]>;
+  statusContagem(): Promise<StatusContagem[]>;
+  setMotivoExcluiMql(reasonId: number, excluiMql: boolean): Promise<void>;
+  setStatusContaComoLead(status: StatusNegocio, conta: boolean): Promise<void>;
 }
 
 type Row = Record<string, any>;
@@ -86,6 +99,35 @@ export class PgPainelRepo implements PainelRepo {
       if ((e as { code?: string }).code === '23503') throw new PainelNotFound('pipeline');
       throw e;
     }
+  }
+
+  async motivosPerda(): Promise<MotivoPerda[]> {
+    const r = await this.pool.query(`select reason_id, motivo, exclui_mql from analytics.motivos_perda order by exclui_mql desc, motivo nulls last, reason_id`);
+    return (r.rows as Row[]).map((x) => ({ reason_id: Number(x.reason_id), motivo: x.motivo, exclui_mql: x.exclui_mql }));
+  }
+
+  async statusContagem(): Promise<StatusContagem[]> {
+    const r = await this.pool.query(
+      `select status, conta_como_lead from analytics.contagem_status
+        order by array_position(array['open','won','lost','deleted'], status)`,
+    );
+    return r.rows as StatusContagem[];
+  }
+
+  async setMotivoExcluiMql(reasonId: number, excluiMql: boolean): Promise<void> {
+    // só motivos que existem (opção do Pipedrive ou já configurado); inventar ID não grava nada
+    const r = await this.pool.query(
+      `insert into ops.cfg_motivo_perda (reason_id, exclui_mql, atualizado_em)
+       select reason_id, $2, now() from analytics.motivos_perda where reason_id = $1
+       on conflict (reason_id) do update set exclui_mql = excluded.exclui_mql, atualizado_em = now()`,
+      [reasonId, excluiMql],
+    );
+    if (!r.rowCount) throw new PainelNotFound('motivo de perda');
+  }
+
+  async setStatusContaComoLead(status: StatusNegocio, conta: boolean): Promise<void> {
+    const r = await this.pool.query(`update ops.cfg_status_contagem set conta_como_lead = $2, atualizado_em = now() where status = $1`, [status, conta]);
+    if (!r.rowCount) throw new PainelNotFound('status');
   }
 
   async setStageMarco(stageId: number, marco: Marco | null): Promise<void> {

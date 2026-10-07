@@ -3,7 +3,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { FormsStore, StoreError } from './lib/forms-store.js';
 import { FORM_ID_RE } from './lib/form-schema.js';
-import { MARCOS, PRODUTOS, PainelNotFound, type Marco, type PainelRepo, type Produto } from './lib/painel-repo.js';
+import { MARCOS, PRODUTOS, STATUS_NEGOCIO, PainelNotFound, type Marco, type PainelRepo, type Produto, type StatusNegocio } from './lib/painel-repo.js';
 
 export type SubmitFn = (formId: string, mode: 'dry' | 'real', payload: unknown, ctx: { userAgent: string | null }) => Promise<{ status: number; body: unknown }>;
 
@@ -134,8 +134,29 @@ export function createStudioServer(opts: StudioOptions): Server {
       if (method === 'GET' && path === '/api/painel/config') return send(res, 200, await repo.config());
       if (method === 'GET' && path === '/api/painel/usuarios') return send(res, 200, await repo.usuarios());
       if (method === 'GET' && path === '/api/painel/campos') return send(res, 200, await repo.campos());
+      if (method === 'GET' && path === '/api/painel/motivos-perda') return send(res, 200, await repo.motivosPerda());
+      if (method === 'GET' && path === '/api/painel/status-contagem') return send(res, 200, await repo.statusContagem());
 
-      // A única escrita do Painel: a configuração (pipeline -> produto, etapa -> marco).
+      // Regras de contagem: motivo de perda que tira do MQL, e status que conta (ou não) como lead.
+      const motivo = /^\/api\/painel\/config\/motivo-perda\/([^/]+)$/.exec(path);
+      const status = /^\/api\/painel\/config\/status\/([^/]+)$/.exec(path);
+      if (motivo || status) {
+        if (method !== 'PUT') return send(res, 405, { error: 'method_not_allowed' });
+        const key = decodeURIComponent((motivo ?? status)![1]!);
+        const body = await readJson(req);
+        if (motivo) {
+          if (!/^\d{1,15}$/.test(key)) throw new HttpError(400, 'id_invalido');
+          if (typeof body?.exclui_mql !== 'boolean') throw new HttpError(400, 'exclui_mql_invalido', { validos: [true, false] });
+          await repo.setMotivoExcluiMql(Number(key), body.exclui_mql);
+        } else {
+          if (!(STATUS_NEGOCIO as readonly string[]).includes(key)) throw new HttpError(400, 'status_invalido', { validos: [...STATUS_NEGOCIO] });
+          if (typeof body?.conta_como_lead !== 'boolean') throw new HttpError(400, 'conta_como_lead_invalido', { validos: [true, false] });
+          await repo.setStatusContaComoLead(key as StatusNegocio, body.conta_como_lead);
+        }
+        return send(res, 200, { ok: true });
+      }
+
+      // As únicas escritas do Painel: a configuração (pipeline -> produto, etapa -> marco, e as regras acima).
       const pipe = /^\/api\/painel\/config\/pipeline\/([^/]+)$/.exec(path);
       const stage = /^\/api\/painel\/config\/stage\/([^/]+)$/.exec(path);
       if (pipe || stage) {

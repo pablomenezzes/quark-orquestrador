@@ -99,6 +99,40 @@ describe('orq_panel (Painel local)', () => {
   });
 });
 
+describe('regras do funil (0005): status do negócio, MQL por motivo de perda, status que conta como lead', () => {
+  const m5 = all.filter((s) => s.file.startsWith('0005_'));
+  const sql5 = m5.map((s) => s.sql).join(' ; ');
+  it('a etapa só guarda "chegou até aqui" (sql, reuniao, proposta): ganho, perdido, mql e lead ficam de fora', () => {
+    const c = m5.find((s) => /add constraint cfg_stage_marco_chegou_ate/.test(s.sql));
+    expect(c, 'restrição ausente').toBeTruthy();
+    const lista = /marco in \(([^)]*)\)/.exec(c!.sql)![1]!.replace(/[' ]/g, '').split(',').sort();
+    expect(lista).toEqual(['proposta', 'reuniao', 'sql']);
+  });
+  it('MQL nasce com exatamente os motivos 398, 185, 184 e 587 (IDs originais do Pipedrive)', () => {
+    const ins = m5.find((s) => /^insert into ops\.cfg_motivo_perda/.test(s.sql))!;
+    const ids = [...ins.sql.matchAll(/\((\d+), true\)/g)].map((m) => Number(m[1])).sort((a, b) => a - b);
+    expect(ids).toEqual([184, 185, 398, 587]);
+  });
+  it('os 4 status existem e "excluído" começa fora da contagem de leads', () => {
+    const ins = m5.find((s) => /^insert into ops\.cfg_status_contagem/.test(s.sql))!;
+    for (const st of ['open', 'won', 'lost']) expect(ins.sql).toContain(`('${st}', true)`);
+    expect(ins.sql).toContain(`('deleted', false)`);
+    expect(sql5).toMatch(/status in \('open','won','lost','deleted'\)/);
+  });
+  it('as duas tabelas têm RLS; o Painel só edita (sem delete) e o orq_sync só lê', () => {
+    for (const t of ['ops.cfg_motivo_perda', 'ops.cfg_status_contagem']) {
+      expect(sql5).toContain(`alter table ${t} enable row level security`);
+    }
+    expect(sql5).toMatch(/grant select on ops\.cfg_motivo_perda, ops\.cfg_status_contagem to orq_sync/);
+    expect(sql5).toMatch(/grant select, insert, update on ops\.cfg_motivo_perda, ops\.cfg_status_contagem to orq_panel/);
+  });
+  it('as views novas existem e o Painel as lê', () => {
+    expect(sql5).toMatch(/create view analytics\.motivos_perda/);
+    expect(sql5).toMatch(/create view analytics\.contagem_status/);
+    expect(sql5).toMatch(/grant select on analytics\.motivos_perda, analytics\.contagem_status to orq_panel/);
+  });
+});
+
 describe('analytics tem só views', () => {
   it('nenhuma tabela é criada no schema analytics', () => {
     expect(all.filter((s) => /^create table (if not exists )?analytics\./.test(s.sql))).toEqual([]);
