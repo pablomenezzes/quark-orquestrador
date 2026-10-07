@@ -96,4 +96,4 @@ Em http://127.0.0.1:4310/painel (ou pelo link "Painel de Dados" no topo do Studi
 | Usuários e campos | Usuários (sem e-mail) e definição de campos, com o ID original. |
 | Conferência | Totais para você comparar com o Pipedrive. |
 
-O Painel usa um papel de banco próprio (orq_panel): lê só as visões de nalytics e as tabelas de ops, **grava apenas a configuração** e não enxerga nenhuma tabela com dados pessoais. Se a PANEL_DB_URL faltar, o Studio sobe normalmente e o Painel mostra o que falta.
+O Painel usa um papel de banco próprio (orq_panel): lê só as visões de analytics e as tabelas de ops, **grava apenas a configuração** e não enxerga nenhuma tabela com dados pessoais. Se a PANEL_DB_URL faltar, o Studio sobe normalmente e o Painel mostra o que falta.
