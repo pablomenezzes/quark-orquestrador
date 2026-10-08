@@ -97,3 +97,19 @@ Em http://127.0.0.1:4310/painel (ou pelo link "Painel de Dados" no topo do Studi
 | Conferência | Totais para você comparar com o Pipedrive. |
 
 O Painel usa um papel de banco próprio (orq_panel): lê só as visões de analytics e as tabelas de ops, **grava apenas a configuração** e não enxerga nenhuma tabela com dados pessoais. Se a PANEL_DB_URL faltar, o Studio sobe normalmente e o Painel mostra o que falta.
+
+## BI (análises e KPIs)
+
+Em http://127.0.0.1:4310/bi (link "BI →" no topo do Studio e do Painel de Dados). Gráficos, tabelas e KPIs sobre os negócios do Pipedrive, **só leitura**, com filtros de **período de criação**, **produto** e **pipeline** que valem para todas as análises. Cada análise tem **Gráfico**, **Tabela**, **CSV** (planilha para o Excel, com vírgula decimal) e um "Como ler" que diz o que ela mede.
+
+| Análise | Responde |
+|---|---|
+| Visão geral | Leads, MQL, % MQL, ganhos, taxa de ganho, valor ganho, abertos e perdidos |
+| Leads, MQL e ganhos por mês de criação | Como a entrada de leads evolui e quanto vira ganho |
+| Funil | Quantos chegaram em SQL, reunião e proposta (pelo histórico de etapas) e quantos ganharam |
+| Principais motivos de perda | Por que perdemos (nome e ID; marca os que tiram do MQL) |
+| Leads e conversão por origem | De onde vêm os leads (campo "Fonte do Lead") e quais viram ganho |
+| Tempo em cada etapa | Onde os negócios ficam parados (mediana em dias) |
+| Desempenho por responsável | Quem fecha mais |
+
+**Como acrescentar uma análise (peça para o Claude):** cada análise é um bloco independente em `studio/lib/bi.ts` (lista `BI_ANALISES`: id, título, pergunta, "como ler", largura e uma função que consulta **só visões de `analytics`**). Ao acrescentar um bloco, a análise ganha sozinha o filtro, o gráfico (KPIs, colunas, barras ou tabela), a tabela e o CSV. O navegador nunca manda SQL: escolhe a análise e os filtros, validados no servidor e passados ao banco sempre como parâmetros. Testes provam os números com negócios fictícios (`tests/integration/bi.int.test.ts`) e a segurança (`tests/studio-bi.test.ts`).

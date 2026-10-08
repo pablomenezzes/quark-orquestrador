@@ -15,6 +15,7 @@ import { PgStore } from '../src/db/pg-store.js';
 import { ingest } from '../src/pipeline/ingest.js';
 import { FormsStore } from './lib/forms-store.js';
 import { PgPainelRepo } from './lib/painel-repo.js';
+import { PgBiRepo } from './lib/bi.js';
 import { checkPortFree, formatReport, parseEnv, runPreflight } from './lib/preflight.js';
 import { createStudioServer, type SubmitFn } from './server.js';
 
@@ -70,6 +71,7 @@ pool.on('error', (e) => {
 // Opcional: sem PANEL_DB_URL o Studio sobe normalmente e o Painel avisa o que falta.
 let painelPool: pg.Pool | null = null;
 let painelRepo: PgPainelRepo | null = null;
+let biRepo: PgBiRepo | null = null;
 const painelUrl = process.env.PANEL_DB_URL ?? '';
 if (painelUrl) {
   assertSafeDbTarget({ target: painelUrl, expectedRef: process.env.SUPABASE_PROJECT_REF! });
@@ -77,6 +79,7 @@ if (painelUrl) {
   painelPool = new pg.Pool({ connectionString: painelUrl, max: 2, ssl: { rejectUnauthorized: false } });
   painelPool.on('error', () => undefined);
   painelRepo = new PgPainelRepo(painelPool);
+  biRepo = new PgBiRepo(painelPool); // o BI usa o mesmo papel orq_panel e só lê as visões de analytics
 }
 
 const forms = new FormsStore(join(root, 'studio', 'forms'));
@@ -107,6 +110,7 @@ const server = createStudioServer({
   dbInfo: () => dbState,
   submit,
   painel: painelRepo,
+  bi: biRepo,
 });
 
 server.on('error', (e: NodeJS.ErrnoException) => {
@@ -122,7 +126,7 @@ server.listen(port, '127.0.0.1', () => {
   const url = `http://127.0.0.1:${port}`;
   console.log(`\nQuark Studio rodando em ${url}`);
   console.log('Modo padrão: SIMULAÇÃO (nada é gravado). Para parar: Ctrl+C.');
-  console.log(painelRepo ? `Painel de Dados: ${url}/painel\n` : 'Painel de Dados: desligado (falta PANEL_DB_URL no .env.local).\n');
+  console.log(painelRepo ? `Painel de Dados: ${url}/painel\nBI: ${url}/bi\n` : 'Painel de Dados e BI: desligados (falta PANEL_DB_URL no .env.local).\n');
   if (process.argv.includes('--open')) exec(`start "" "${url}"`);
 });
 

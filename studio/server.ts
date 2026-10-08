@@ -3,6 +3,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { FormsStore, StoreError } from './lib/forms-store.js';
 import { FORM_ID_RE } from './lib/form-schema.js';
+import { BI_PRODUTOS, BiNotFound, type BiFiltros, type BiProduto, type BiRepo } from './lib/bi.js';
 import { MARCOS, PRODUTOS, STATUS_NEGOCIO, PainelNotFound, type Marco, type NegociosFiltro, type PainelRepo, type Produto, type StatusNegocio } from './lib/painel-repo.js';
 
 export type SubmitFn = (formId: string, mode: 'dry' | 'real', payload: unknown, ctx: { userAgent: string | null }) => Promise<{ status: number; body: unknown }>;
@@ -17,6 +18,8 @@ export type StudioOptions = {
   submit: SubmitFn;
   /** Painel de Dados (Data Hub). Sem isto, as rotas do Painel respondem 503 com a explicação. */
   painel?: PainelRepo | null;
+  /** BI (análises e KPIs sobre as visões de analytics). Sem isto, as rotas do BI respondem 503 com a explicação. */
+  bi?: BiRepo | null;
 };
 
 const MIME: Record<string, string> = {
@@ -122,6 +125,42 @@ export function createStudioServer(opts: StudioOptions): Server {
     }
 
     if (method === 'GET' && path === '/painel') return sendFile(res, join(opts.publicDir, 'painel.html'));
+
+    // BI: só leitura. O navegador escolhe a análise e os filtros; nunca manda SQL.
+    if (method === 'GET' && path === '/bi') return sendFile(res, join(opts.publicDir, 'bi.html'));
+    if (path.startsWith('/api/bi/')) {
+      const bi = opts.bi;
+      if (!bi) {
+        return send(res, 503, {
+          error: 'bi_nao_configurado',
+          detail: 'Falta PANEL_DB_URL no .env.local. Peça para gerar com: node scripts/set-role-password.mjs --role orq_panel --apply',
+        });
+      }
+      if (method !== 'GET') return send(res, 405, { error: 'method_not_allowed' });
+      if (path === '/api/bi/catalogo') return send(res, 200, { analises: bi.catalogo(), ...(await bi.opcoes()) });
+      const one = /^\/api\/bi\/analise\/([a-z0-9-]{1,60})$/.exec(path);
+      if (one) {
+        const q = url.searchParams;
+        const data = (v: string | null, nome: string): string => {
+          if (!v || !/^\d{4}-\d{2}-\d{2}$/.test(v) || Number.isNaN(Date.parse(`${v}T00:00:00Z`)) || new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) !== v) throw new HttpError(400, `${nome}_invalida`, { esperado: 'AAAA-MM-DD' });
+          return v;
+        };
+        const f: BiFiltros = { de: data(q.get('de'), 'de'), ate: data(q.get('ate'), 'ate') };
+        if (f.de > f.ate) throw new HttpError(400, 'periodo_invertido');
+        const produto = q.get('produto');
+        if (produto) {
+          if (!(BI_PRODUTOS as readonly string[]).includes(produto)) throw new HttpError(400, 'produto_invalido', { validos: [...BI_PRODUTOS] });
+          f.produto = produto as BiProduto;
+        }
+        const pipeline = q.get('pipeline');
+        if (pipeline) {
+          if (!/^\d{1,15}$/.test(pipeline)) throw new HttpError(400, 'pipeline_invalido');
+          f.pipeline_id = Number(pipeline);
+        }
+        return send(res, 200, await bi.rodar(one[1]!, f));
+      }
+      return send(res, 404, { error: 'not_found' });
+    }
     if (path.startsWith('/api/painel/')) {
       const repo = opts.painel;
       if (!repo) {
@@ -263,7 +302,7 @@ export function createStudioServer(opts: StudioOptions): Server {
     handle(req, res).catch((e: unknown) => {
       if (e instanceof HttpError) return send(res, e.status, { error: e.message, ...e.extra });
       if (e instanceof StoreError) return send(res, 400, { error: e.message, issues: e.issues });
-      if (e instanceof PainelNotFound) return send(res, 404, { error: 'nao_encontrado', detail: e.message });
+      if (e instanceof PainelNotFound || e instanceof BiNotFound) return send(res, 404, { error: 'nao_encontrado', detail: e.message });
       console.error('studio:', e instanceof Error ? e.message : e);
       send(res, 500, { error: 'internal_error' });
     });
