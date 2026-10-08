@@ -55,7 +55,18 @@ const repo: PainelRepo = {
   },
   async negocio(id) {
     if (id === 999) throw new PainelNotFound('negócio');
-    return { negocio: { deal_id: id, titulo: 'Negócio fictício' }, campos: [{ field_key: 'a'.repeat(40), nome_pipedrive: 'Origem', rotulo: null, valor: 'x' }] };
+    return {
+      negocio: { deal_id: id, titulo: 'Negócio fictício' },
+      campos: [{ field_key: 'a'.repeat(40), nome_pipedrive: 'Origem', rotulo: null, valor: 'x' }],
+      historico: [{ stage_id: 11, etapa: 'Lead', marco: null, entrou_em: '2026-03-01T09:00:00Z', saiu_em: null, horas_na_etapa: '10.0', etapa_atual: true, movido_por: null, origem_dado: 'criacao' }],
+    };
+  },
+  async historicoProgresso() {
+    return [{ ano_criacao: 2026, negocios: 10, sem_mudanca_de_etapa: 4, historico_lido: 3, pendentes: 3, com_linha_do_tempo: 7 }];
+  },
+  async funilMarcos(ano) {
+    calls.push(['funil', [ano]]);
+    return [{ pipeline_id: 1, pipeline: 'Funil RH', produto: 'rh', leads: 10, mql: 9, chegou_sql: 5, chegou_reuniao: 3, chegou_proposta: 2, ganhos: 1, perdidos: 6 }];
   },
   async motivosPerda() {
     return [
@@ -165,12 +176,24 @@ describe('negócios (somente leitura)', () => {
     const j = await (await get('/api/painel/negocios/5')).json();
     expect(j.negocio.deal_id).toBe(5);
     expect(j.campos[0].field_key).toHaveLength(40);
+    expect(j.historico[0]).toMatchObject({ etapa: 'Lead', etapa_atual: true, origem_dado: 'criacao' }); // linha do tempo na ficha
     expect((await get('/api/painel/negocios/abc')).status).toBe(400);
     expect((await get('/api/painel/negocios/999')).status).toBe(404);
   });
+  it('andamento da carga do histórico e funil por ano de criação', async () => {
+    const p = await (await get('/api/painel/historico/progresso')).json();
+    expect(p[0]).toMatchObject({ ano_criacao: 2026, pendentes: 3 });
+    const f = await (await get('/api/painel/funil?ano=2025')).json();
+    expect(f[0]).toMatchObject({ pipeline: 'Funil RH', chegou_proposta: 2, ganhos: 1 });
+    expect(calls).toEqual([['funil', [2025]]]);
+  });
+  it.each(['', 'ano=', 'ano=abc', 'ano=1999', 'ano=20260', 'ano=2026;drop'])('funil com ano inválido (%s) é recusado', async (qs) => {
+    expect((await get(`/api/painel/funil?${qs}`)).status).toBe(400);
+    expect(calls).toEqual([]);
+  });
   it('não há como escrever em negócios pelo Painel', async () => {
     for (const method of ['POST', 'PUT', 'DELETE', 'PATCH']) {
-      for (const p of ['/api/painel/negocios', '/api/painel/negocios/5', '/api/painel/negocios/resumo']) {
+      for (const p of ['/api/painel/negocios', '/api/painel/negocios/5', '/api/painel/negocios/resumo', '/api/painel/funil?ano=2026', '/api/painel/historico/progresso']) {
         const r = await fetch(`${base}${p}`, { method, headers: J, body: '{}' });
         expect([404, 405], `${method} ${p}`).toContain(r.status);
       }

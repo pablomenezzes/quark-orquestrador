@@ -47,6 +47,24 @@ export interface DealsStore extends DatahubStore {
   getCheckpoint(entity: string): Promise<Checkpoint | null>;
 }
 
+/** Negócio que ainda precisa ter o histórico de etapas lido (ou relido, porque a etapa mudou). */
+export type DealHistoryTask = { deal_id: number; created_at: string | null; stage_id: number | null; stage_change_time: string | null };
+
+/** Extensão do armazenamento para o histórico de etapas (Entrega 5). */
+export interface HistoryStore extends DatahubStore {
+  /** Negócios sem nenhuma mudança de etapa: uma linha "entrou na criação", sem chamar a API. Devolve quantas linhas novas. */
+  seedNoChangeHistory(range: { from: string; to: string }): Promise<number>;
+  /** Fila de negócios com mudança de etapa ainda não lida (ou lida antes da última mudança). Abertos e ganhos primeiro. */
+  pendingHistory(range: { from: string; to: string }): Promise<DealHistoryTask[]>;
+  saveDealHistory(h: {
+    deal_id: number;
+    items: unknown[];
+    items_hash: string;
+    stage_change_time: string | null;
+    rows: Array<{ stage_id: number; entrou_em: string; saiu_em: string | null; user_id: number | null; origem_dado: 'flow' | 'criacao' }>;
+  }): Promise<void>;
+}
+
 export interface DatahubStore {
   /** key -> hash do payload já guardado (para ignorar o que não mudou). */
   existingHashes(kind: RawKind): Promise<Map<string, string>>;

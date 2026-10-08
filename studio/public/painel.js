@@ -8,7 +8,7 @@ const STATUS = [['open', 'Aberto'], ['won', 'Ganho'], ['lost', 'Perdido'], ['del
 const SIM_NAO = (v) => [['sim', 'Sim'], ['nao', 'Não']].map(([k, l]) => `<option value="${k}" ${(v ? 'sim' : 'nao') === k ? 'selected' : ''}>${l}</option>`).join('');
 const ENTIDADES = [
   ['pipelines', 'Pipelines'], ['stages', 'Etapas'], ['users', 'Usuários'],
-  ['deals', 'Negócios'], ['deals_archived', 'Negócios arquivados'], ['deals_deleted', 'Negócios excluídos'],
+  ['deals', 'Negócios'], ['deals_archived', 'Negócios arquivados'], ['deals_deleted', 'Negócios excluídos'], ['deal_history', 'Histórico de etapas'],
   ['deal_fields', 'Campos de negócios'], ['person_fields', 'Campos de pessoas'], ['organization_fields', 'Campos de organizações'], ['activity_fields', 'Campos de atividades'],
 ];
 const ENTIDADE_CAMPO = { deal: 'Negócios', person: 'Pessoas', organization: 'Organizações', activity: 'Atividades' };
@@ -40,7 +40,7 @@ function toast(msg) {
   toast.t = setTimeout(() => (t.hidden = true), 2200);
 }
 
-const S = { tab: 'saude', saude: null, config: null, motivos: null, statusCont: null, usuarios: null, campos: null, filtro: '', neg: { resumo: null, lista: null, ficha: null, f: { pipeline: '', status: '', mql: '', mes: '', q: '', pagina: 1 } } };
+const S = { tab: 'saude', saude: null, config: null, motivos: null, statusCont: null, usuarios: null, campos: null, filtro: '', neg: { resumo: null, lista: null, ficha: null, progresso: null, funil: null, ano: 2026, f: { pipeline: '', status: '', mql: '', mes: '', q: '', pagina: 1 } } };
 
 const nf = new Intl.NumberFormat('pt-BR');
 const brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
@@ -58,7 +58,9 @@ function negQuery() {
 
 async function load(tab) {
   if (tab === 'negocios') {
-    [S.neg.resumo, S.neg.lista] = await Promise.all([api('/api/painel/negocios/resumo'), api(`/api/painel/negocios?${negQuery()}`)]);
+    [S.neg.resumo, S.neg.lista, S.neg.progresso, S.neg.funil] = await Promise.all([
+      api('/api/painel/negocios/resumo'), api(`/api/painel/negocios?${negQuery()}`), api('/api/painel/historico/progresso'), api(`/api/painel/funil?ano=${S.neg.ano}`),
+    ]);
     S.saude = await api('/api/painel/saude');
   }
   if (tab === 'saude') S.saude = await api('/api/painel/saude');
@@ -191,6 +193,16 @@ function viewNegocios() {
     </div>
     <section class="card section" style="overflow:auto"><h2>Por pipeline <span class="muted" style="font-weight:400">(compare com o Pipedrive)</span></h2>
       <table class="t"><thead><tr><th>Pipeline</th><th>Produto</th><th class="num">Abertos</th><th class="num">Ganhos</th><th class="num">Perdidos</th><th class="num">Excluídos</th><th class="num">Total</th><th class="num">MQL</th></tr></thead><tbody>${porPipe || '<tr><td colspan="8" class="empty">Nenhum negócio importado ainda.</td></tr>'}</tbody></table></section>
+    <section class="card section" style="margin-top:16px;overflow:auto"><h2>Histórico de etapas: andamento da carga</h2>
+      <p class="muted" style="margin-top:0">Por ano de criação do negócio. "Sem mudança de etapa" nunca saiu da etapa em que nasceu (não precisa consultar o Pipedrive); "histórico lido" já tem a linha do tempo completa; "pendentes" ainda vão ser lidos.</p>
+      <table class="t"><thead><tr><th>Ano de criação</th><th class="num">Negócios</th><th class="num">Sem mudança de etapa</th><th class="num">Histórico lido</th><th class="num">Pendentes</th><th class="num">Com linha do tempo</th></tr></thead><tbody>
+      ${S.neg.progresso.map((p) => `<tr><td>${p.ano_criacao}</td><td class="num">${nf.format(p.negocios)}</td><td class="num">${nf.format(p.sem_mudanca_de_etapa)}</td><td class="num">${nf.format(p.historico_lido)}</td><td class="num">${p.pendentes ? `<span class="chip warn">${nf.format(p.pendentes)}</span>` : '<span class="chip ok">0</span>'}</td><td class="num">${nf.format(p.com_linha_do_tempo)}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">Nenhum negócio.</td></tr>'}
+      </tbody></table></section>
+    <section class="card section" style="margin-top:16px;overflow:auto"><h2>Funil dos negócios criados em ${sel('nf-ano', S.neg.ano, [2026, 2025].map((a) => [String(a), String(a)]))}</h2>
+      <p class="muted" style="margin-top:0">Leads e MQL vêm das regras de contagem; "chegou em…" vem do histórico de etapas (só vale para quem já tem o histórico lido); ganhos e perdidos vêm do Status do negócio, nunca da etapa.</p>
+      <table class="t"><thead><tr><th>Pipeline</th><th>Produto</th><th class="num">Leads</th><th class="num">MQL</th><th class="num">Chegou em SQL</th><th class="num">Chegou em reunião</th><th class="num">Chegou em proposta</th><th class="num">Ganhos</th><th class="num">Perdidos</th></tr></thead><tbody>
+      ${S.neg.funil.map((r) => `<tr><td>${esc(r.pipeline ?? '—')} <span class="muted">#${r.pipeline_id ?? ''}</span></td><td>${r.produto ? esc(r.produto) : '<span class="muted">—</span>'}</td><td class="num">${nf.format(r.leads)}</td><td class="num">${nf.format(r.mql)}</td><td class="num">${nf.format(r.chegou_sql)}</td><td class="num">${nf.format(r.chegou_reuniao)}</td><td class="num">${nf.format(r.chegou_proposta)}</td><td class="num">${nf.format(r.ganhos)}</td><td class="num">${nf.format(r.perdidos)}</td></tr>`).join('') || '<tr><td colspan="9" class="empty">Nenhum negócio criado neste ano.</td></tr>'}
+      </tbody></table></section>
     <section class="card section" style="margin-top:16px"><h2>Lista de negócios</h2>
       <div class="row" style="margin-bottom:12px;flex-wrap:wrap;gap:8px">
         ${sel('nf-pipeline', f.pipeline, [['', 'Todos os pipelines'], ...pipes.map(([id, nome]) => [String(id), nome])])}
@@ -215,6 +227,10 @@ function viewNegocios() {
         <tr><td class="muted">Valor</td><td>${ficha.negocio.valor != null ? brl.format(ficha.negocio.valor) : '—'}</td></tr>
         <tr><td class="muted">Criado · fechado · perdido · atualizado</td><td>${dia(ficha.negocio.criado_em)} · ${dia(ficha.negocio.fechado_em)} · ${dia(ficha.negocio.perdido_em)} · ${dia(ficha.negocio.atualizado_em)}</td></tr>
         <tr><td class="muted">Motivo da perda</td><td>${ficha.negocio.motivo_perda ? `${esc(ficha.negocio.motivo_perda)} <span class="muted">#${ficha.negocio.motivo_perda_id ?? 'sem ID'}</span>` : '—'}</td></tr>
+      </tbody></table>
+      <h3 style="margin-top:16px">Por onde passou (${ficha.historico.length} etapa(s))</h3>
+      <table class="t"><thead><tr><th>Etapa</th><th>Entrou</th><th>Saiu</th><th class="num">Tempo</th><th>Movido por</th></tr></thead><tbody>
+      ${ficha.historico.map((h) => `<tr><td>${esc(h.etapa ?? '')} <span class="muted">#${h.stage_id}</span>${h.marco ? ` <span class="chip">${esc(h.marco)}</span>` : ''}${h.etapa_atual ? ' <span class="chip ok">etapa atual</span>' : ''}</td><td>${dia(h.entrou_em)}</td><td>${h.saiu_em ? dia(h.saiu_em) : '—'}</td><td class="num">${h.horas_na_etapa == null ? '—' : Number(h.horas_na_etapa) >= 48 ? `${(Number(h.horas_na_etapa) / 24).toFixed(1)} dias` : `${Number(h.horas_na_etapa).toFixed(1)} h`}</td><td>${esc(h.movido_por ?? (h.origem_dado === 'criacao' ? 'criação do negócio' : ''))}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">O histórico deste negócio ainda não foi lido.</td></tr>'}
       </tbody></table>
       <h3 style="margin-top:16px">Campos personalizados preenchidos (${campos.length})</h3>
       <table class="t"><thead><tr><th>Campo</th><th>Valor</th><th>ID original</th></tr></thead><tbody>
@@ -279,7 +295,17 @@ const aplicarFiltro = (campo, valor) => {
   S.neg.f.pagina = 1;
   return recarregarNegocios();
 };
-document.addEventListener('change', (ev) => {
+document.addEventListener('change', async (ev) => {
+  if (ev.target.id === 'nf-ano') {
+    S.neg.ano = Number(ev.target.value);
+    try {
+      S.neg.funil = await api(`/api/painel/funil?ano=${S.neg.ano}`);
+      $('#view').innerHTML = viewNegocios();
+    } catch (e) {
+      toast(`Não consegui carregar: ${e.message}`);
+    }
+    return;
+  }
   const m = { 'nf-pipeline': 'pipeline', 'nf-status': 'status', 'nf-mql': 'mql', 'nf-mes': 'mes' }[ev.target.id];
   if (m) aplicarFiltro(m, ev.target.value);
 });

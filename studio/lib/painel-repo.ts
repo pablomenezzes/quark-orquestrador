@@ -67,7 +67,9 @@ export interface PainelRepo {
   setStageMarco(stageId: number, marco: Marco | null): Promise<void>;
   negociosResumo(): Promise<NegocioResumoLinha[]>;
   negocios(f: NegociosFiltro): Promise<{ total: number; pagina: number; por_pagina: number; itens: unknown[] }>;
-  negocio(id: number): Promise<{ negocio: unknown; campos: unknown[] }>;
+  negocio(id: number): Promise<{ negocio: unknown; campos: unknown[]; historico: unknown[] }>;
+  historicoProgresso(): Promise<unknown[]>;
+  funilMarcos(ano: number): Promise<unknown[]>;
   motivosPerda(): Promise<MotivoPerda[]>;
   statusContagem(): Promise<StatusContagem[]>;
   setMotivoExcluiMql(reasonId: number, excluiMql: boolean): Promise<void>;
@@ -176,7 +178,42 @@ export class PgPainelRepo implements PainelRepo {
       `select field_key, nome_pipedrive, rotulo, valor, valor_legivel from analytics.deal_campos where deal_id = $1 order by coalesce(rotulo, nome_pipedrive, field_key)`,
       [id],
     );
-    return { negocio: d.rows[0], campos: c.rows };
+    const h = await this.pool.query(
+      `select stage_id, etapa, pipeline, marco, entrou_em, saiu_em, horas_na_etapa, etapa_atual, movido_por, origem_dado
+         from analytics.historico_etapas where deal_id = $1 order by entrou_em, stage_id`,
+      [id],
+    );
+    return { negocio: d.rows[0], campos: c.rows, historico: h.rows };
+  }
+
+  async historicoProgresso() {
+    return (await this.pool.query(`select * from analytics.historico_progresso order by ano_criacao desc`)).rows;
+  }
+
+  /**
+   * Funil por pipeline dos negócios criados no ano: leads (conta como lead), MQL, e quantos CHEGARAM em sql, reunião e proposta
+   * (pelo histórico de etapas; só vale para os negócios com histórico lido), ganhos e perdidos (pelo Status, nunca pela etapa).
+   */
+  async funilMarcos(ano: number) {
+    return (
+      await this.pool.query(
+        `select d.pipeline_id, d.pipeline, d.produto,
+                count(*) filter (where d.conta_como_lead)::int as leads,
+                count(*) filter (where d.is_mql)::int as mql,
+                count(*) filter (where m.sql)::int as chegou_sql,
+                count(*) filter (where m.reuniao)::int as chegou_reuniao,
+                count(*) filter (where m.proposta)::int as chegou_proposta,
+                count(*) filter (where d.status = 'won')::int as ganhos,
+                count(*) filter (where d.status = 'lost')::int as perdidos
+           from analytics.deals d
+           left join (select deal_id, bool_or(marco = 'sql') as sql, bool_or(marco = 'reuniao') as reuniao, bool_or(marco = 'proposta') as proposta
+                        from analytics.negocios_marcos group by deal_id) m on m.deal_id = d.deal_id
+          where extract(year from d.criado_em) = $1
+          group by d.pipeline_id, d.pipeline, d.produto
+          order by d.pipeline_id nulls last`,
+        [ano],
+      )
+    ).rows;
   }
 
   async motivosPerda(): Promise<MotivoPerda[]> {

@@ -1,7 +1,7 @@
 import { normalizeReasonText } from './parse.js';
-import type { Checkpoint, CrmKind, DatahubStore, DealRow, DealsStore, JobResult, RawKind, RawRow } from './store.js';
+import type { Checkpoint, CrmKind, DatahubStore, DealHistoryTask, DealRow, DealsStore, HistoryStore, JobResult, RawKind, RawRow } from './store.js';
 
-type Q = { query: (text: string, values?: unknown[]) => Promise<{ rows: any[] }> };
+type Q = { query: (text: string, values?: unknown[]) => Promise<{ rows: any[]; rowCount?: number | null }> };
 
 const RAW_TABLE: Record<Exclude<RawKind, 'field_defs'>, string> = {
   pipelines: 'raw.pd_pipelines',
@@ -12,8 +12,54 @@ const RAW_TABLE: Record<Exclude<RawKind, 'field_defs'>, string> = {
 const numOrNull = (v: unknown): number | null => (typeof v === 'number' && Number.isInteger(v) ? v : typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : null);
 
 /** Armazenamento da sincronização sobre Postgres, com o papel orq_sync (sem DELETE em nada). */
-export class PgDatahubStore implements DatahubStore, DealsStore {
+export class PgDatahubStore implements DatahubStore, DealsStore, HistoryStore {
   constructor(private readonly q: Q) {}
+
+  async seedNoChangeHistory(range: { from: string; to: string }): Promise<number> {
+    const r = await this.q.query(
+      `insert into crm.stage_history (deal_id, estagio, entrou_em, stage_id, origem_dado)
+       select d.pipedrive_id, coalesce(s.nome, d.stage_id::text), d.created_at, d.stage_id, 'criacao'
+         from crm.deals d left join crm.stages s on s.stage_id = d.stage_id
+        where d.stage_change_time is null and d.created_at >= $1 and d.created_at < $2
+          and d.created_at is not null and d.stage_id is not null and not d.is_deleted
+       on conflict (deal_id, stage_id, entrou_em) do nothing`,
+      [range.from, range.to],
+    );
+    return r.rowCount ?? 0;
+  }
+
+  async pendingHistory(range: { from: string; to: string }): Promise<DealHistoryTask[]> {
+    const r = await this.q.query(
+      `select d.pipedrive_id as deal_id, d.created_at, d.stage_id, d.stage_change_time
+         from crm.deals d left join raw.pd_deal_flow f on f.deal_id = d.pipedrive_id
+        where d.created_at >= $1 and d.created_at < $2 and not d.is_deleted and d.stage_change_time is not null
+          and (f.deal_id is null or f.stage_change_time_vista is distinct from d.stage_change_time)
+        order by case d.status when 'open' then 0 when 'won' then 1 else 2 end, d.created_at desc`,
+      [range.from, range.to],
+    );
+    const iso = (v: unknown) => (v ? new Date(v as string).toISOString() : null);
+    return r.rows.map((x: any) => ({ deal_id: Number(x.deal_id), created_at: iso(x.created_at), stage_id: x.stage_id == null ? null : Number(x.stage_id), stage_change_time: iso(x.stage_change_time) }));
+  }
+
+  async saveDealHistory(h: Parameters<HistoryStore['saveDealHistory']>[0]): Promise<void> {
+    await this.q.query(
+      `insert into raw.pd_deal_flow (deal_id, items, items_hash, stage_change_time_vista, lido_em)
+       values ($1, $2::jsonb, $3, $4, now())
+       on conflict (deal_id) do update set items = excluded.items, items_hash = excluded.items_hash,
+         stage_change_time_vista = excluded.stage_change_time_vista, lido_em = now()`,
+      [h.deal_id, JSON.stringify(h.items), h.items_hash, h.stage_change_time],
+    );
+    if (!h.rows.length) return;
+    await this.q.query(
+      `insert into crm.stage_history (deal_id, estagio, entrou_em, stage_id, saiu_em, user_id, origem_dado)
+       select $1, coalesce(s.nome, x.stage_id::text), x.entrou_em, x.stage_id, x.saiu_em, x.user_id, x.origem_dado
+         from jsonb_to_recordset($2::jsonb) as x(stage_id bigint, entrou_em timestamptz, saiu_em timestamptz, user_id bigint, origem_dado text)
+         left join crm.stages s on s.stage_id = x.stage_id
+       on conflict (deal_id, stage_id, entrou_em) do update set estagio = excluded.estagio, saiu_em = excluded.saiu_em,
+         user_id = excluded.user_id, origem_dado = excluded.origem_dado`,
+      [h.deal_id, JSON.stringify(h.rows)],
+    );
+  }
 
   async existingDealHashes(): Promise<Map<string, string>> {
     const r = await this.q.query(`select source_id::text as k, payload_hash from raw.pd_deals`);

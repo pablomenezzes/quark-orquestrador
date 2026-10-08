@@ -1,8 +1,40 @@
 import { randomUUID } from 'node:crypto';
-import type { Checkpoint, DealRow, DealsStore, JobResult, RawKind, CrmKind, RawRow } from '../../src/datahub/store';
+import type { Checkpoint, DealHistoryTask, DealRow, DealsStore, HistoryStore, JobResult, RawKind, CrmKind, RawRow } from '../../src/datahub/store';
+
+type HistRow = { deal_id: number; stage_id: number; entrou_em: string; saiu_em: string | null; user_id: number | null; origem_dado: string };
 
 /** Store em memória para testar a sincronização sem banco. Dados fictícios (regra 8). */
-export class MemoryDatahubStore implements DealsStore {
+export class MemoryDatahubStore implements DealsStore, HistoryStore {
+  stageHistory = new Map<string, HistRow>(); // chave: deal|stage|entrou_em (o mesmo índice único do banco)
+  dealFlow = new Map<number, { items: unknown[]; items_hash: string; stage_change_time: string | null }>();
+
+  private inRange(createdAt: unknown, r: { from: string; to: string }) {
+    const t = Date.parse(String(createdAt));
+    return Number.isFinite(t) && t >= Date.parse(r.from) && t < Date.parse(r.to);
+  }
+  async seedNoChangeHistory(range: { from: string; to: string }): Promise<number> {
+    let n = 0;
+    for (const d of this.dealsCrm.values()) {
+      if (d.stage_change_time != null || d.is_deleted || d.stage_id == null || !this.inRange(d.created_at, range)) continue;
+      const key = `${d.pipedrive_id}|${d.stage_id}|${d.created_at}`;
+      if (this.stageHistory.has(key)) continue;
+      this.stageHistory.set(key, { deal_id: Number(d.pipedrive_id), stage_id: Number(d.stage_id), entrou_em: String(d.created_at), saiu_em: null, user_id: null, origem_dado: 'criacao' });
+      n++;
+    }
+    return n;
+  }
+  async pendingHistory(range: { from: string; to: string }): Promise<DealHistoryTask[]> {
+    const rank = (s: unknown) => (s === 'open' ? 0 : s === 'won' ? 1 : 2);
+    return [...this.dealsCrm.values()]
+      .filter((d) => d.stage_change_time != null && !d.is_deleted && this.inRange(d.created_at, range) && this.dealFlow.get(Number(d.pipedrive_id))?.stage_change_time !== d.stage_change_time)
+      .sort((a, b) => rank(a.status) - rank(b.status) || Date.parse(String(b.created_at)) - Date.parse(String(a.created_at)))
+      .map((d) => ({ deal_id: Number(d.pipedrive_id), created_at: (d.created_at as string) ?? null, stage_id: d.stage_id == null ? null : Number(d.stage_id), stage_change_time: (d.stage_change_time as string) ?? null }));
+  }
+  async saveDealHistory(h: Parameters<HistoryStore['saveDealHistory']>[0]): Promise<void> {
+    this.dealFlow.set(h.deal_id, { items: h.items, items_hash: h.items_hash, stage_change_time: h.stage_change_time });
+    for (const r of h.rows) this.stageHistory.set(`${h.deal_id}|${r.stage_id}|${r.entrou_em}`, { deal_id: h.deal_id, ...r });
+  }
+
   dealsRaw = new Map<string, DealRow['raw']>();
   dealsCrm = new Map<string, Record<string, unknown>>();
   lostReasons = new Map<string, number>();

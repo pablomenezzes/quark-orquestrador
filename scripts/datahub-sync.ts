@@ -17,6 +17,7 @@ import { PgDatahubStore } from '../src/datahub/pg-store.js';
 import { PipedriveReadClient, type DealListKind } from '../src/datahub/pipedrive/client.js';
 import { E1_ENTITIES, syncBase, type E1Entity } from '../src/datahub/sync/base.js';
 import { DEAL_ENTITY, DEAL_KINDS, syncDeals } from '../src/datahub/sync/deals.js';
+import { HISTORY_ENTITY, syncHistory } from '../src/datahub/sync/history.js';
 
 try {
   process.loadEnvFile('.env.local');
@@ -25,7 +26,7 @@ try {
 }
 
 const DEAL_ENTITIES = DEAL_KINDS.map((k) => DEAL_ENTITY[k]);
-const ALL = [...E1_ENTITIES, ...DEAL_ENTITIES] as readonly string[];
+const ALL = [...E1_ENTITIES, ...DEAL_ENTITIES, HISTORY_ENTITY] as readonly string[];
 const DESDE = '2025-01-01T00:00:00Z';
 
 const argv = process.argv.slice(2);
@@ -43,6 +44,17 @@ if (bad.length) {
 const maxPages = opt('--max-pages') ? Number(opt('--max-pages')) : undefined;
 if (maxPages !== undefined && !(Number.isInteger(maxPages) && maxPages > 0)) {
   console.error('--max-pages precisa ser um número inteiro maior que zero.');
+  process.exit(1);
+}
+const wantsHistory = wanted.includes(HISTORY_ENTITY);
+const createdYear = opt('--created-year') ? Number(opt('--created-year')) : undefined;
+if (wantsHistory && !(createdYear && Number.isInteger(createdYear) && createdYear >= 2000 && createdYear <= 2100)) {
+  console.error('Para o histórico de etapas informe o ano de criação dos negócios: --created-year 2026');
+  process.exit(1);
+}
+const maxDeals = opt('--max-deals') ? Number(opt('--max-deals')) : undefined;
+if (maxDeals !== undefined && !(Number.isInteger(maxDeals) && maxDeals > 0)) {
+  console.error('--max-deals precisa ser um número inteiro maior que zero.');
   process.exit(1);
 }
 const share = opt('--share') ? Number(opt('--share')) : 0.4;
@@ -80,6 +92,7 @@ if (!apply) {
     const page = await client.listDealsPage(k, { updatedSince: DESDE });
     console.log(`${DEAL_ENTITY[k].padEnd(20)} primeira página: ${page.items.length} registro(s)${page.nextCursor ? ' (há mais páginas)' : ' (é tudo)'}`);
   }
+  if (wantsHistory) console.log(`${HISTORY_ENTITY.padEnd(20)} (simulação não consulta o histórico; use --apply)`);
   console.log(`\nUnidades da cota gastas: ${client.usage.tokens} (${client.usage.requests} requisições).`);
   console.log('Para gravar de verdade: rode de novo com --apply.');
   process.exit(0);
@@ -98,6 +111,13 @@ try {
   if (dealKinds.length) {
     const deals = await syncDeals({ client, store, kinds: dealKinds, desde: DESDE, origem: 'manual', now: () => new Date(), maxPages });
     results.push(...deals.map((d) => ({ ...d, extra: `${d.backfill ? 'carga inicial' : 'só o que mudou'}, ${d.paginas} página(s)` })));
+  }
+  if (wantsHistory) {
+    const h = await syncHistory({
+      client, store, year: createdYear!, modo: 'backfill', origem: 'manual', maxDeals, now: () => new Date(),
+      onProgress: (feitos, total) => { if (feitos % 250 === 0) console.log(`  histórico: ${feitos}/${total} negócios lidos (${client.usage.tokens} unidades até agora)`); },
+    });
+    results.push({ ...h, extra: `criados em ${createdYear}: ${h.semMudanca} sem mudança de etapa (sem consultar), ${h.pendentesAntes} com mudança, ${h.restantes} ainda na fila, ${h.avisos} aviso(s)` });
   }
   console.log('');
   console.log('entidade             status   lidos  gravados  atualizados  ignorados  falhas  unidades');

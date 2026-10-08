@@ -134,6 +134,12 @@ export function createStudioServer(opts: StudioOptions): Server {
       if (method === 'GET' && path === '/api/painel/config') return send(res, 200, await repo.config());
       if (method === 'GET' && path === '/api/painel/usuarios') return send(res, 200, await repo.usuarios());
       if (method === 'GET' && path === '/api/painel/campos') return send(res, 200, await repo.campos());
+      if (method === 'GET' && path === '/api/painel/historico/progresso') return send(res, 200, await repo.historicoProgresso());
+      if (method === 'GET' && path === '/api/painel/funil') {
+        const ano = url.searchParams.get('ano') ?? '';
+        if (!/^20\d{2}$/.test(ano)) throw new HttpError(400, 'ano_invalido');
+        return send(res, 200, await repo.funilMarcos(Number(ano)));
+      }
       if (method === 'GET' && path === '/api/painel/negocios/resumo') return send(res, 200, await repo.negociosResumo());
       if (method === 'GET' && path === '/api/painel/negocios') {
         const q = url.searchParams;

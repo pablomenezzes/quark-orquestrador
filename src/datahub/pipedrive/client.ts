@@ -109,6 +109,24 @@ export class PipedriveReadClient {
     return { limit: this.dailyLimit, remaining: this.dailyRemaining };
   }
 
+  /**
+   * Histórico de mudanças de um negócio (API v1, 40 unidades por página). Pede só `dealChange` (mudanças do negócio,
+   * sem e-mails, atividades nem notas); o filtro reduz a resposta a poucos itens e cabe numa chamada na quase totalidade dos casos.
+   */
+  async getDealFlow(id: number): Promise<unknown[]> {
+    if (!Number.isInteger(id) || id <= 0) throw new PipedriveError('ID de negócio inválido.', 'client');
+    const out: unknown[] = [];
+    let start = 0;
+    for (let page = 0; page < 20; page++) {
+      const body = await this.readJson(`/v1/deals/${id}/flow`, { items: 'dealChange', limit: '500', ...(start ? { start: String(start) } : {}) });
+      out.push(...(Array.isArray(body.data) ? body.data : []));
+      const pg = body.additional_data?.pagination;
+      if (!pg?.more_items_in_collection) return out;
+      start = Number(pg.next_start ?? start + 500);
+    }
+    throw new PipedriveError(`Histórico do negócio ${id} com mais de 20 páginas: paginação não terminou.`, 'pagination');
+  }
+
   /** Um negócio pelo ID (1 unidade da cota). Usado só na conferência, para entender uma diferença. */
   async getDeal(id: number): Promise<unknown | null> {
     if (!Number.isInteger(id) || id <= 0) throw new PipedriveError('ID de negócio inválido.', 'client');
