@@ -9,13 +9,17 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "studio": "tsx studio/main.ts --open",
-    "datahub:sync": "tsx scripts/datahub-sync.ts"
+    "datahub:sync": "tsx scripts/datahub-sync.ts",
+    "backup": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/backup-local.ps1",
+    "sincronia": "node scripts/sincronia.mjs",
+    "mcp:build": "node scripts/build-mcp.mjs"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@supabase/supabase-js": "^2.45.0",
     "libphonenumber-js": "^1.11.0",
     "pg": "^8.23.1",
-    "zod": "^3.23.0"
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/jsdom": "^30.0.0",

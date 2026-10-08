@@ -109,6 +109,28 @@ Em http://127.0.0.1:4310/painel (item **Painel de Dados** do menu). É uma área
 
 O Painel usa um papel de banco próprio (orq_panel): lê só as visões de analytics e as tabelas de ops, **grava apenas a configuração** e não enxerga nenhuma tabela com dados pessoais. Se a PANEL_DB_URL faltar, o Studio sobe normalmente e o Painel mostra o que falta.
 
+## Conversar com os dados no Claude Desktop (conector local)
+
+Um conector (`quark-dados`) que o Claude Desktop inicia no seu computador, **sem abrir porta**, para você perguntar em português ("qual fonte converte melhor?", "compare as safras de março e agosto") e receber números e tabelas dos mesmos dados do BI. **Só leitura**, só visões de `analytics`, **sem e-mail, telefone, nome de pessoa nem título de negócio** (o banco recusa o resto).
+
+| Passo | Comando |
+|---|---|
+| Gerar o conector | `npm run mcp:build` |
+| Registrar no Claude Desktop | `node scripts/instalar-mcp-claude.mjs --apply` (guarda uma cópia da sua configuração antes) e depois **feche o Claude Desktop por completo e abra de novo** |
+| Remover | `node scripts/instalar-mcp-claude.mjs --remover --apply` |
+
+Ferramentas: `quark_definicoes` (comece por aqui), `quark_analise` (as análises do BI com filtros por nome), `quark_esquema`, `quark_sql` (um SELECT, até 200 linhas) e `quark_atualizacao` (quando os dados foram atualizados).
+
+## Backup local e sincronia (sempre em dia, sem conflito)
+
+| O que | Comando |
+|---|---|
+| Backup do banco da nuvem para esta máquina, conferido tabela por tabela | `npm run backup` (roda sozinho todo dia às 03:00 pela tarefa `QuarkDados-BackupLocal`) |
+| Ver se nuvem, GitHub e este computador estão iguais (sem conflito) | `npm run sincronia` |
+| Ver/criar/remover a tarefa diária | `powershell -File scripts\agendar-backup.ps1` (`-Status`, `-Remover`) |
+
+Os backups ficam em `backups\` (fora do git): `nuvem-AAAAMMDD-HHMM.dump`, `ULTIMO_BACKUP.json` e `backup.log`. A nuvem é sempre a fonte da verdade: nunca se edita uma cópia local para subir. Detalhes na regra 7 da seção 4 do `orquestrador-marketing-quark.md`.
+
 ## BI (análises e KPIs)
 
 Em http://127.0.0.1:4310/bi (item **BI** do menu). Gráficos, tabelas e KPIs sobre os negócios do Pipedrive, **só leitura**, em **4 páginas** (abas): Visão geral, Safra, Canais e Qualidade.

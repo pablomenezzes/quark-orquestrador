@@ -133,6 +133,50 @@ describe('regras do funil (0005): status do negócio, MQL por motivo de perda, s
   });
 });
 
+describe('orq_chat (conector do Claude Desktop): só leitura, só analytics, sem dados pessoais', () => {
+  const mine = all.filter((s) => s.file.startsWith('0012_'));
+  const grants = grantsTo('orq_chat');
+  it('é criado sem superusuário, sem criar banco/papéis, sem herdar, sem replicação, com limite de conexões e sem senha', () => {
+    const cr = all.find((s) => /^create role orq_chat\b/.test(s.sql));
+    expect(cr, 'create role ausente').toBeTruthy();
+    for (const f of ['login', 'nosuperuser', 'nocreatedb', 'nocreaterole', 'noinherit', 'noreplication']) expect(cr!.sql).toContain(f);
+    expect(cr!.sql).toMatch(/connection limit \d+/);
+    expect(cr!.sql).not.toMatch(/bypassrls|\bpassword\b/);
+    for (const s of all.filter((x) => x.sql.includes('orq_chat'))) expect(s.sql).not.toMatch(/\bpassword\b\s*'/);
+  });
+  it('tem tempo máximo de consulta e fica em modo somente leitura por padrão', () => {
+    const sets = all.filter((s) => /^alter role orq_chat set /.test(s.sql)).map((s) => s.sql).join(' | ');
+    expect(sets).toContain('statement_timeout');
+    expect(sets).toContain('idle_in_transaction_session_timeout');
+    expect(sets).toContain('default_transaction_read_only = on');
+  });
+  it('só recebe SELECT (nunca escrita, grant all, with grant option nem acesso para public)', () => {
+    expect(grants.length).toBeGreaterThan(0);
+    for (const s of grants.filter((x) => !/^grant usage on schema/.test(x.sql))) {
+      expect(s.sql, s.sql).toMatch(/^grant select\b/);
+      expect(s.sql).not.toMatch(/\b(insert|update|delete|truncate|references|trigger)\b|with grant option|grant all/);
+    }
+  });
+  it('só enxerga o schema analytics', () => {
+    const t = [...tablesIn(grants)];
+    expect(t.filter((x) => !x.startsWith('analytics.'))).toEqual([]);
+    expect(grants.filter((x) => /^grant usage on schema/.test(x.sql)).map((x) => x.sql)).toEqual(['grant usage on schema analytics to orq_chat']);
+  });
+  it('nunca recebe visões com dados pessoais', () => {
+    const t = [...tablesIn(grants)];
+    for (const v of ['pessoas', 'organizacoes', 'vinculos', 'usuarios', 'campos', 'deal_campos']) expect(t, v).not.toContain(`analytics.${v}`);
+  });
+  it('as visões com o título do negócio (nome de pessoa) só são liberadas por COLUNA, sem o título', () => {
+    for (const v of ['analytics.deals', 'analytics.negocios_bi']) {
+      const g = grants.filter((x) => new RegExp(`\\bon ${v.replace('.', '\\.')}\\b`).test(x.sql));
+      expect(g.length, v).toBe(1);
+      expect(g[0]!.sql, v).toMatch(/^grant select \(/);
+      expect(g[0]!.sql, v).not.toMatch(/\btitulo\b/);
+    }
+    expect(mine.length).toBeGreaterThan(0);
+  });
+});
+
 describe('analytics tem só views', () => {
   it('nenhuma tabela é criada no schema analytics', () => {
     expect(all.filter((s) => /^create table (if not exists )?analytics\./.test(s.sql))).toEqual([]);

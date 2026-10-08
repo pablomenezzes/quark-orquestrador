@@ -15,3 +15,6 @@ backups/
 .vercel/
 supabase/.temp/
 supabase/.branches/
+
+# conector do Claude Desktop gerado por npm run mcp:build
+mcp/dist/

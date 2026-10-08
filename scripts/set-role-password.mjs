@@ -9,7 +9,7 @@ import { randomBytes } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import pg from 'pg';
 
-const ROLES = { orq_sync: 'SYNC_DB_URL', orq_panel: 'PANEL_DB_URL' };
+const ROLES = { orq_sync: 'SYNC_DB_URL', orq_panel: 'PANEL_DB_URL', orq_chat: 'CHAT_DB_URL' };
 const argv = process.argv.slice(2);
 const role = argv[argv.indexOf('--role') + 1];
 const apply = argv.includes('--apply');
