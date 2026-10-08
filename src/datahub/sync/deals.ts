@@ -1,4 +1,4 @@
-import { ParseError, parseDeal, payloadHash } from '../parse.js';
+import { ParseError, parseDeal, payloadHash, slimCustomFields } from '../parse.js';
 import type { Checkpoint, DealRow, DealsStore, JobResult } from '../store.js';
 import { PipedriveError, type DealListKind } from '../pipedrive/client.js';
 import { scrubMessage } from './base.js';
@@ -98,8 +98,10 @@ export async function syncDeals(args: {
               counts.ignorados++;
               continue;
             }
-            const { source_add_time, source_update_time, ...crm } = parsed;
-            rows.push({ raw: { key, payload: item, payload_hash: hash, source_add_time, source_update_time, origem_lista: kind }, crm });
+            // custom_fields vai só para o JSON de raw (sem as chaves vazias); crm.deals NÃO repete essa cópia (D-40).
+            const { source_add_time, source_update_time, custom_fields: _cf, ...crm } = parsed;
+            void _cf;
+            rows.push({ raw: { key, payload: slimCustomFields(item), payload_hash: hash, source_add_time, source_update_time, origem_lista: kind }, crm });
             existing.set(key, hash);
             if (prev === undefined) counts.gravados++;
             else counts.atualizados++;

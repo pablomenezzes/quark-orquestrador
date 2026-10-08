@@ -28,7 +28,8 @@ const run = describe.skipIf(!ready);
 const NOW = new Date('2026-10-07T12:00:00.000Z');
 const D = (id: number, over: Record<string, unknown> = {}) => ({
   id, title: `Negócio fictício ${id}`, pipeline_id: 940001, stage_id: 950001, owner_id: 960001, person_id: 1, org_id: 2, currency: 'BRL', value: 100,
-  status: 'open', lost_reason: null, add_time: '2025-03-10T10:00:00Z', update_time: '2025-03-11T10:00:00Z', is_deleted: false, custom_fields: { ['b'.repeat(40)]: 'x' }, ...over,
+  status: 'open', lost_reason: null, add_time: '2025-03-10T10:00:00Z', update_time: '2025-03-11T10:00:00Z', is_deleted: false,
+  custom_fields: { ['b'.repeat(40)]: 'x', ['c'.repeat(40)]: null }, ...over,
 });
 const fakeClient = (data: Record<'normal' | 'archived' | 'deleted', unknown[]>): DealsClient => ({
   usage: { tokens: 0, requests: 0, rateLimited: 0 },
@@ -92,7 +93,9 @@ run('negócios (transação com rollback)', () => {
     expect(raw.rows[0].payload.lost_reason).toBe('Lead Invalido');
     const crm = await c().query(`select pipeline_id, stage_id, owner_id, motivo_perda, motivo_perda_id, status, is_archived, is_deleted, status_original, custom_fields from crm.deals where pipedrive_id = any($1) order by pipedrive_id`, [[98000002, 98000005, 98000006]]);
     expect(crm.rows[0]).toMatchObject({ pipeline_id: '940001', stage_id: '950001', owner_id: '960001', motivo_perda: 'Lead Invalido', motivo_perda_id: '398', status: 'lost' });
-    expect(Object.keys(crm.rows[0].custom_fields)[0]).toHaveLength(40);
+    // economia de espaço (D-40): os campos personalizados ficam SÓ no JSON de raw, sem as chaves vazias
+    expect(crm.rows[0].custom_fields).toBeNull();
+    expect(Object.keys(raw.rows[0].payload.custom_fields)).toEqual(['b'.repeat(40)]);
     expect(crm.rows[1]).toMatchObject({ is_archived: true });
     expect(crm.rows[2]).toMatchObject({ is_deleted: true, status: null, status_original: 'deleted' });
   });

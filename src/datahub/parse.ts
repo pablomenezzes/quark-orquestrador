@@ -107,6 +107,17 @@ export function parseUser(raw: unknown) {
   };
 }
 
+/**
+ * Economia de espaço (D-40): o JSON guardado em `raw` perde SÓ as chaves de `custom_fields` que valem `null`.
+ * Um negócio traz ~84 campos personalizados com nomes de 40 caracteres e só ~26 têm valor; "ausente" significa vazio, e a lista
+ * completa de campos continua em `crm.field_definitions`. O hash de "mudou ou não" é calculado sobre o JSON ORIGINAL, antes disto.
+ */
+export function slimCustomFields<T>(item: T): T {
+  if (!isObj(item) || !isObj(item.custom_fields)) return item;
+  const kept = Object.fromEntries(Object.entries(item.custom_fields).filter(([, v]) => v !== null));
+  return { ...item, custom_fields: kept } as T;
+}
+
 /** Compara textos de motivo de perda sem se importar com maiúsculas, acentos soltos e espaços repetidos. */
 export const normalizeReasonText = (s: string): string => s.normalize('NFC').trim().replace(/\s+/g, ' ').toLowerCase();
 

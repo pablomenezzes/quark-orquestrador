@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { PipedriveReadClient, PipedriveError } from '../src/datahub/pipedrive/client';
-import { parseDeal, normalizeReasonText } from '../src/datahub/parse';
+import { parseDeal, normalizeReasonText, slimCustomFields } from '../src/datahub/parse';
 import { syncDeals, type DealsClient } from '../src/datahub/sync/deals';
 import { MemoryDatahubStore } from './helpers/memory-datahub-store';
 
@@ -12,6 +12,20 @@ const deal = (id: number, over: Record<string, unknown> = {}) => ({
   id, title: `Negócio fictício ${id}`, pipeline_id: 1, stage_id: 11, owner_id: 7, person_id: 100 + id, org_id: 200 + id,
   currency: 'BRL', value: 1500, status: 'open', lost_reason: null, add_time: '2025-03-10T10:00:00Z', update_time: '2025-03-11T10:00:00Z',
   stage_change_time: '2025-03-11T10:00:00Z', is_deleted: false, is_archived: false, custom_fields: { [`${'a'.repeat(39)}1`]: 'valor' }, ...over,
+});
+
+describe('slimCustomFields', () => {
+  it('tira só as chaves nulas de custom_fields e não mexe no resto nem no original', () => {
+    const original = { id: 1, status: 'open', custom_fields: { a: null, b: 'x', c: 0, d: false, e: { n: null } } };
+    const slim = slimCustomFields(original);
+    expect(slim).toEqual({ id: 1, status: 'open', custom_fields: { b: 'x', c: 0, d: false, e: { n: null } } });
+    expect(original.custom_fields).toHaveProperty('a'); // não altera o objeto recebido
+  });
+  it('sem custom_fields (ou não-objeto) devolve igual', () => {
+    expect(slimCustomFields({ id: 1 })).toEqual({ id: 1 });
+    expect(slimCustomFields({ id: 1, custom_fields: null })).toEqual({ id: 1, custom_fields: null });
+    expect(slimCustomFields('texto')).toBe('texto');
+  });
 });
 
 describe('parseDeal', () => {
@@ -202,6 +216,20 @@ describe('sincronização de negócios', () => {
     expect(store.dealsCrm.get('9')).toMatchObject({ is_archived: true });
     expect(store.dealsCrm.get('2')).toMatchObject({ is_deleted: false }); // os outros não foram tocados
     expect(store.dealsCrm.size).toBe(3); // nada sumiu
+  });
+
+  it('economia de espaço (D-40): o JSON de raw perde só as chaves nulas de custom_fields; crm não repete os campos; o hash é do original', async () => {
+    const store = new MemoryDatahubStore();
+    const comNulos = deal(1, { update_time: '2026-10-07T11:55:00Z', custom_fields: { [`${'a'.repeat(39)}1`]: 'valor', [`${'a'.repeat(39)}2`]: null, [`${'a'.repeat(39)}3`]: 0, [`${'a'.repeat(39)}4`]: '', [`${'a'.repeat(39)}5`]: [] } });
+    const pd = () => fakePipedrive({ normal: [comNulos], archived: [], deleted: [] }).client;
+    await base(store, pd(), { kinds: ['normal'] });
+    // só o null saiu; zero, texto vazio e lista vazia são valores e ficam
+    expect(Object.keys((store.dealsRaw.get('1')!.payload as any).custom_fields).sort()).toEqual(['1', '3', '4', '5'].map((n) => `${'a'.repeat(39)}${n}`));
+    expect((store.dealsRaw.get('1')!.payload as any).title).toBe('Negócio fictício 1'); // o resto do JSON é intacto
+    expect(store.dealsCrm.get('1')).not.toHaveProperty('custom_fields');
+    // o hash é do JSON original: a rodada seguinte, com o mesmo negócio, ignora em vez de achar que mudou
+    const [r] = await base(store, pd(), { kinds: ['normal'], now: () => new Date('2026-10-07T13:00:00Z') });
+    expect(r).toMatchObject({ lidos: 1, ignorados: 1, gravados: 0, atualizados: 0 });
   });
 
   it('motivo de perda ganha o ID usando as opções do campo', async () => {

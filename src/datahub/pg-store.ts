@@ -36,15 +36,15 @@ export class PgDatahubStore implements DatahubStore, DealsStore {
       await this.q.query(
         `insert into crm.deals (pipedrive_id, pipeline_id, stage_id, owner_id, titulo, moeda, person_id, org_id, status, status_original, valor,
            motivo_perda, motivo_perda_id, created_at, updated_at, won_at, close_time, lost_time, stage_change_time, expected_close_date,
-           origin, origin_id, channel, channel_id, is_archived, is_deleted, deleted_detected_at, custom_fields, synced_at)
+           origin, origin_id, channel, channel_id, is_archived, is_deleted, deleted_detected_at, synced_at)
          select pipedrive_id, pipeline_id, stage_id, owner_id, titulo, moeda, person_id, org_id, status, status_original, valor,
            motivo_perda, motivo_perda_id, created_at, updated_at, won_at, close_time, lost_time, stage_change_time, expected_close_date,
-           origin, origin_id, channel, channel_id, is_archived, is_deleted, deleted_detected_at, custom_fields, now()
+           origin, origin_id, channel, channel_id, is_archived, is_deleted, deleted_detected_at, now()
          from jsonb_to_recordset($1::jsonb) as x(pipedrive_id bigint, pipeline_id bigint, stage_id bigint, owner_id bigint, titulo text, moeda text,
            person_id bigint, org_id bigint, status text, status_original text, valor numeric, motivo_perda text, motivo_perda_id bigint,
            created_at timestamptz, updated_at timestamptz, won_at timestamptz, close_time timestamptz, lost_time timestamptz,
            stage_change_time timestamptz, expected_close_date date, origin text, origin_id text, channel text, channel_id text,
-           is_archived boolean, is_deleted boolean, deleted_detected_at timestamptz, custom_fields jsonb)
+           is_archived boolean, is_deleted boolean, deleted_detected_at timestamptz)
          on conflict (pipedrive_id) do update set pipeline_id = excluded.pipeline_id, stage_id = excluded.stage_id, owner_id = excluded.owner_id,
            titulo = excluded.titulo, moeda = excluded.moeda, person_id = excluded.person_id, org_id = excluded.org_id, status = excluded.status,
            status_original = excluded.status_original, valor = excluded.valor, motivo_perda = excluded.motivo_perda,
@@ -54,7 +54,7 @@ export class PgDatahubStore implements DatahubStore, DealsStore {
            origin_id = excluded.origin_id, channel = excluded.channel, channel_id = excluded.channel_id, is_archived = excluded.is_archived,
            is_deleted = excluded.is_deleted,
            deleted_detected_at = case when excluded.is_deleted then coalesce(crm.deals.deleted_detected_at, excluded.deleted_detected_at) else null end,
-           custom_fields = excluded.custom_fields, synced_at = now()`,
+           synced_at = now()`,
         [JSON.stringify(chunk.map((r) => r.crm))],
       );
     }
