@@ -173,7 +173,7 @@ export class PgPainelRepo implements PainelRepo {
     const d = await this.pool.query(`select * from analytics.deals where deal_id = $1`, [id]);
     if (!d.rows[0]) throw new PainelNotFound('negócio');
     const c = await this.pool.query(
-      `select field_key, nome_pipedrive, rotulo, valor from analytics.deal_campos where deal_id = $1 order by coalesce(rotulo, nome_pipedrive, field_key)`,
+      `select field_key, nome_pipedrive, rotulo, valor, valor_legivel from analytics.deal_campos where deal_id = $1 order by coalesce(rotulo, nome_pipedrive, field_key)`,
       [id],
     );
     return { negocio: d.rows[0], campos: c.rows };

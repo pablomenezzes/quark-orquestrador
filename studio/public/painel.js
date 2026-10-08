@@ -218,7 +218,7 @@ function viewNegocios() {
       </tbody></table>
       <h3 style="margin-top:16px">Campos personalizados preenchidos (${campos.length})</h3>
       <table class="t"><thead><tr><th>Campo</th><th>Valor</th><th>ID original</th></tr></thead><tbody>
-      ${campos.map((c) => `<tr><td>${esc(c.rotulo ?? c.nome_pipedrive ?? '')}${c.rotulo && c.nome_pipedrive ? ` <span class="muted">(${esc(c.nome_pipedrive)})</span>` : ''}</td><td>${esc(typeof c.valor === 'object' ? JSON.stringify(c.valor) : c.valor)}</td><td class="mono muted">${esc(c.field_key)}</td></tr>`).join('') || '<tr><td colspan="3" class="empty">Nenhum campo personalizado preenchido.</td></tr>'}
+      ${campos.map((c) => `<tr><td>${esc(c.rotulo ?? c.nome_pipedrive ?? '')}${c.rotulo && c.nome_pipedrive ? ` <span class="muted">(${esc(c.nome_pipedrive)})</span>` : ''}</td><td>${c.valor_legivel ? `${esc(c.valor_legivel)} <span class="muted">#${esc(c.valor)}</span>` : esc(typeof c.valor === 'object' ? JSON.stringify(c.valor) : c.valor)}</td><td class="mono muted">${esc(c.field_key)}</td></tr>`).join('') || '<tr><td colspan="3" class="empty">Nenhum campo personalizado preenchido.</td></tr>'}
       </tbody></table></section>` : ''}`;
 }
 

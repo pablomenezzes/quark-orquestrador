@@ -113,15 +113,16 @@ run('papéis do Data Hub (transação com rollback)', () => {
       }
     });
 
-    it('NÃO enxerga o orquestrador (orq.*) nem core.leads (a leitura de 3 colunas dos leads só entra na Entrega 2)', async () => {
+    it('NÃO enxerga o orquestrador (orq.*) e de core.leads lê SÓ id, e-mail e telefone (para o vínculo, Entrega 3)', async () => {
       for (const sql of [
         'select * from orq.events', 'select * from orq.sources', 'select * from orq.touchpoints',
         'insert into orq.rate_limits (bucket, window_start) values (\'x\', now())',
-        'update core.leads set nome = \'x\'', 'select nome from core.leads', 'select * from core.leads',
-        'select id, email_norm, phone_e164 from core.leads limit 1',
+        'update core.leads set nome = \'x\'', 'select nome from core.leads', 'select * from core.leads', 'select empresa, cargo, produto from core.leads',
+        'insert into core.leads (email_norm) values (\'x@exemplo.invalid\')', 'delete from core.leads',
       ]) {
         expect(await denied(sql), sql).toBe('42501');
       }
+      expect(await denied('select id, email_norm, phone_e164 from core.leads limit 1')).toBe('NO_ERROR');
     });
 
     it('NÃO escreve na configuração do Painel nem cria objetos', async () => {
