@@ -11,7 +11,7 @@
 
   Conferencias: (1) o arquivo tem indice legivel (pg_restore --list); (2) as linhas de 23 tabelas DENTRO do arquivo sao
   contadas e comparadas com as da nuvem (scripts\verificar-backup.mjs); (3) tudo e anotado em backups\ULTIMO_BACKUP.json
-  e backups\backup.log. Se existir um PostgreSQL completo no computador, o espelho vivo tambem e refeito (scripts\espelho.ps1).
+  e backups\backup.log.
 
   Retencao do -Prune (so apaga arquivos nuvem-*.dump): mantem SEMPRE os 7 mais recentes, todos com menos de 30 dias e os do
   dia 1 de cada mes. Nunca toca nos dumps .sql feitos antes de cada db push (scripts\db-push.ps1).
@@ -59,16 +59,9 @@ try {
   $divergentes = @($conf | Where-Object { $_ -match 'DIVERGE' })
   if ($codigo -ne 0) { Log ("ATENCAO: o backup NAO bate com a nuvem: " + ($divergentes -join ' ; ')) } else { Log "Conferencia: $resumo" }
 
-  $espelho = 'nao disponivel (sem PostgreSQL completo no computador); o backup foi conferido por contagem de linhas'
-  if (Test-Path (Join-Path (Split-Path $bin -Parent) 'share\postgres.bki')) {
-    & "$PSScriptRoot\espelho.ps1" -Restaurar $arquivo
-    $espelho = 'refeito a partir deste backup'
-    Log 'Espelho local refeito a partir do backup.'
-  }
-
   $resultado = [ordered]@{
     arquivo = (Split-Path $arquivo -Leaf); tamanho_mb = [math]::Round($tam / 1MB, 1); feito_em = (Get-Date).ToString('o')
-    conferido_com_a_nuvem = ($codigo -eq 0); resumo = "$resumo"; divergencias = $divergentes; espelho = $espelho; commit = (git rev-parse --short HEAD 2>$null)
+    conferido_com_a_nuvem = ($codigo -eq 0); resumo = "$resumo"; divergencias = $divergentes; commit = (git rev-parse --short HEAD 2>$null)
   }
   $resultado | ConvertTo-Json -Depth 4 | Set-Content -Path 'backups\ULTIMO_BACKUP.json' -Encoding UTF8
 

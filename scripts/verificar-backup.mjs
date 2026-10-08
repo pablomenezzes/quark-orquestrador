@@ -36,6 +36,12 @@ export async function contarNoBackup(file) {
   return out;
 }
 
+// --so-contar: so imprime, em JSON, as linhas de cada tabela dentro do arquivo (usado por restaurar-backup.ps1 para conferir o destino)
+if (process.argv.includes('--so-contar')) {
+  console.log(JSON.stringify(await contarNoBackup(arquivo)));
+  process.exit(0);
+}
+
 const r = spawnSync(process.execPath, ['scripts/contagens.mjs', '--nuvem'], { encoding: 'utf8' });
 if (r.status !== 0) {
   console.error(r.stderr || 'Nao consegui contar as linhas da nuvem.');

@@ -131,6 +131,8 @@ Ferramentas: `quark_definicoes` (comece por aqui), `quark_analise` (as análises
 
 Os backups ficam em `backups\` (fora do git): `nuvem-AAAAMMDD-HHMM.dump`, `ULTIMO_BACKUP.json` e `backup.log`. A nuvem é sempre a fonte da verdade: nunca se edita uma cópia local para subir. Detalhes na regra 7 da seção 4 do `orquestrador-marketing-quark.md`.
 
+**Se um dia for preciso restaurar** (a nuvem perdida ou corrompida): o arquivo mais recente já está pronto em `backups\`, e o roteiro está em `backups\COMO-RESTAURAR.txt`. Em resumo: criar um projeto Supabase novo e vazio, recriar a estrutura com `npx supabase db push --db-url <novo>` e rodar `scripts\restaurar-backup.ps1 -Destino <novo>`, que carrega os dados e confere tabela por tabela. O roteiro **se recusa** a tocar no banco de produção e a restaurar em banco que já tenha dados. Não é preciso instalar nada.
+
 ## BI (análises e KPIs)
 
 Em http://127.0.0.1:4310/bi (item **BI** do menu). Gráficos, tabelas e KPIs sobre os negócios do Pipedrive, **só leitura**, em **4 páginas** (abas): Visão geral, Safra, Canais e Qualidade.

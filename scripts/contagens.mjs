@@ -1,7 +1,6 @@
-// Conta as linhas das tabelas principais de um banco e imprime em JSON (uma chave por tabela). Usado para comparar a nuvem com o espelho local.
-//   node scripts/contagens.mjs --nuvem      -> o Supabase (SUPABASE_DB_URL do .env.local)
-//   node scripts/contagens.mjs --espelho    -> o banco espelho local (127.0.0.1:54329)
-// So leitura. Nada secreto e impresso.
+// Conta as linhas das tabelas principais de um banco e imprime em JSON (uma chave por tabela). So leitura. Nada secreto e impresso.
+//   node scripts/contagens.mjs --nuvem          -> o Supabase de producao (SUPABASE_DB_URL do .env.local)
+//   CONTAGENS_URL=<url> node scripts/contagens.mjs   -> outro banco (usado por restaurar-backup.ps1 para conferir o destino de uma restauracao)
 import pg from 'pg';
 
 try {
@@ -17,21 +16,20 @@ export const TABELAS = [
   'ops.sync_jobs', 'ops.sync_checkpoints', 'ops.cfg_pipeline_produto', 'ops.cfg_stage_marco', 'ops.cfg_motivo_perda', 'ops.cfg_status_contagem',
 ];
 
-const argv = process.argv.slice(2);
-const espelho = argv.includes('--espelho');
-const url = espelho ? 'postgresql://postgres@127.0.0.1:54329/quark_espelho' : (process.env.SUPABASE_DB_URL ?? '');
+const outro = process.env.CONTAGENS_URL ?? '';
+const url = outro || (process.env.SUPABASE_DB_URL ?? '');
 if (!url) {
-  console.error('Falta SUPABASE_DB_URL no .env.local.');
+  console.error('Falta SUPABASE_DB_URL no .env.local (ou CONTAGENS_URL).');
   process.exit(1);
 }
-if (!espelho) {
+if (!outro) {
   const ref = process.env.SUPABASE_PROJECT_REF ?? '';
   if (!ref || !url.includes(ref)) {
     console.error('SUPABASE_DB_URL nao contem SUPABASE_PROJECT_REF: recusando.');
     process.exit(1);
   }
 }
-const c = new pg.Client({ connectionString: url, ssl: espelho ? false : { rejectUnauthorized: false } });
+const c = new pg.Client({ connectionString: url, ssl: { rejectUnauthorized: false } });
 await c.connect();
 const out = {};
 try {
@@ -39,8 +37,6 @@ try {
     const existe = (await c.query('select to_regclass($1) is not null as e', [t])).rows[0].e;
     out[t] = existe ? Number((await c.query(`select count(*)::bigint as n from ${t}`)).rows[0].n) : null;
   }
-  const m = await c.query(`select to_regclass('supabase_migrations.schema_migrations') is not null as e`);
-  out['_migracoes'] = m.rows[0].e ? Number((await c.query('select count(*)::int as n from supabase_migrations.schema_migrations')).rows[0].n) : null;
 } finally {
   await c.end();
 }
