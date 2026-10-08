@@ -102,7 +102,8 @@ run('BI (transação com rollback)', () => {
   it('funil: marcos pelo histórico; um ganho dado cedo continua contando em "chegou em"', async () => {
     const r = await exec('funil');
     const v = Object.fromEntries((r.grafico as { itens: Array<{ rotulo: string; valor: number }> }).itens.map((i) => [i.rotulo, i.valor]));
-    expect(v).toEqual({ Leads: 6, MQL: 5, 'Chegou em SQL': 1, 'Chegou em reunião': 1, 'Chegou em proposta': 1, Ganhos: 2 });
+    // "chegou em X ou além": o 2 foi direto para reunião e proposta (sem passar pela etapa SQL) e conta como SQL; o 6 chegou em SQL
+    expect(v).toEqual({ Leads: 6, MQL: 5, 'Chegou em SQL': 2, 'Chegou em reunião': 1, 'Chegou em proposta': 1, Ganhos: 2 });
   });
 
   it('motivos de perda e por responsável', async () => {
@@ -138,6 +139,7 @@ run('BI (transação com rollback)', () => {
       const vazio = r.grafico.tipo === 'kpis'
         ? r.grafico.itens.every((i) => (i.formato === 'pct' ? i.valor === null : i.valor === 0))
         : r.grafico.tipo === 'colunas' ? r.grafico.categorias.length === 0
+        : r.grafico.tipo === 'funis' ? r.grafico.colunas.length === 0
         : r.grafico.tipo === 'barras' ? r.grafico.itens.every((i) => i.valor === 0) || r.grafico.itens.length === 0 || a.id === 'qualidade-branco' || a.id === 'funil'
         : r.tabela.linhas.length === 0 || a.id === 'safra-ganhos';
       expect(vazio, `${a.id} deveria ficar vazia com uma fonte e um tipo que não existem`).toBe(true);
@@ -150,14 +152,14 @@ run('BI (transação com rollback)', () => {
     expect(l).toMatchObject({ safra: '2099-03', leads: 6, ganhos: 2, perdidos: 3, abertos: 1, valor: 1500, ciclo: 15 }); // ciclos de 10 e 20 dias: mediana 15
     expect(Number(l.pmql)).toBeCloseTo(5 / 6, 5);
     expect(Number(l.taxa)).toBeCloseTo(2 / 5, 5);
-    expect(Number(l.psql)).toBeCloseTo(1 / 6, 5);
+    expect(Number(l.psql)).toBeCloseTo(2 / 6, 5); // SQL ou além: os negócios 2 e 6
   });
 
   it('safra: funil por safra (% dos leads que chegou em cada marco)', async () => {
     const g = (await exec('safra-funil')).grafico as { tipo: string; colunas: string[]; linhas: Array<{ rotulo: string; valores: Array<number | null> }> };
     expect(g.tipo).toBe('matriz');
     expect(g.linhas[0]!.rotulo).toBe('2099-03');
-    expect(g.linhas[0]!.valores.map((v) => Math.round((v ?? 0) * 1000) / 1000)).toEqual([0.833, 0.167, 0.167, 0.167, 0.333]); // MQL, SQL, reunião, proposta, ganho (de 6 leads)
+    expect(g.linhas[0]!.valores.map((v) => Math.round((v ?? 0) * 1000) / 1000)).toEqual([0.833, 0.333, 0.167, 0.167, 0.333]); // MQL, SQL (ou além), reunião (ou além), proposta, ganho (de 6 leads)
   });
 
   it('safra: curva de ganhos acumulados; safra que ainda não tem a idade fica em branco (não finge conversão)', async () => {
@@ -179,6 +181,47 @@ run('BI (transação com rollback)', () => {
     expect(Number(p['Origem Fictícia A']!.pinv)).toBeCloseTo(1 / 3, 5); // o 3 é inválido
     expect(p['902']).toMatchObject({ leads: 2, ganhos: 1, valor: 500, ticket: 500 }); // opção desconhecida aparece pelo ID
     expect(p['(sem fonte)']).toMatchObject({ leads: 1 });
+  });
+
+  it('canais: funis lado a lado, com os passos condicionais (nunca passam de 100%)', async () => {
+    const g = (await exec('canais-funis')).grafico as { tipo: string; etapas: string[]; colunas: Array<{ id: string; nome: string; slot: number; total?: boolean; leads: number; valores: number[]; passos: Array<number | null> }> };
+    expect(g.tipo).toBe('funis');
+    expect(g.etapas).toEqual(['Leads', 'MQL', 'Chegou em SQL', 'Chegou em reunião', 'Chegou em proposta', 'Ganhos']);
+    expect(g.colunas.map((k) => k.nome)).toEqual(['Origem Fictícia A', '902', '(sem fonte)', 'Total das fontes do filtro']);
+    const col = (nome: string) => g.colunas.find((k) => k.nome === nome)!;
+    // Fonte A: negócios 1, 2, 3 (o 3 é inválido; o 2 passou por reunião e proposta e ganhou)
+    expect(col('Origem Fictícia A').valores).toEqual([3, 2, 1, 1, 1, 1]); // o 2 pulou a etapa SQL: conta como "SQL ou além"
+    expect(col('Origem Fictícia A').passos[1]).toBeCloseTo(2 / 3, 5); // lead -> MQL
+    expect(col('Origem Fictícia A').passos[2]).toBeCloseTo(1 / 2, 5); // MQL -> SQL: 1 dos 2 MQL chegou (o negócio 2)
+    expect(col('Origem Fictícia A').passos[3]).toBe(1); // SQL -> reunião: 1 de 1
+    expect(col('Origem Fictícia A').passos[4]).toBe(1); // reunião -> proposta: 1 de 1
+    expect(col('Origem Fictícia A').passos[5]).toBe(1); // proposta -> ganho: 1 de 1
+    // Fonte 902: negócios 4 (perdido) e 6 (ganho; chegou em SQL e parou ali)
+    expect(col('902').valores).toEqual([2, 2, 1, 0, 0, 1]);
+    expect(col('902').passos[2]).toBeCloseTo(1 / 2, 5);
+    expect(col('902').passos[3]).toBe(0); // SQL -> reunião: 0 de 1
+    expect(col('902').passos[4]).toBeNull(); // ninguém chegou em reunião: sem base (não finge 0%)
+    expect(col('902').passos[5]).toBeNull();
+    // o funil só diminui (cada etapa de marco é "ou além")
+    for (const k of g.colunas) for (let i = 3; i <= 4; i++) expect(k.valores[i]!, `${k.nome} etapa ${i}`).toBeLessThanOrEqual(k.valores[i - 1]!);
+    // Total (todas as fontes do filtro)
+    expect(col('Total das fontes do filtro')).toMatchObject({ total: true, leads: 6, valores: [6, 5, 2, 1, 1, 2] });
+    // nenhum passo passa de 100%, mesmo com ganho dado antes de alguma etapa
+    for (const k of g.colunas) for (const s of k.passos) if (s != null) expect(s).toBeLessThanOrEqual(1);
+  });
+
+  it('canais: taxas de conversão por fonte, passo a passo e o resultado final', async () => {
+    const r = await exec('canais-conversoes');
+    const g = r.grafico as { tipo: string; colunas: string[]; escala?: string; linhas: Array<{ rotulo: string; valores: Array<number | null> }> };
+    expect(g.tipo).toBe('matriz');
+    expect(g.escala).toBe('linha');
+    expect(g.colunas).toEqual(['Origem Fictícia A', '902', '(sem fonte)', 'Total']);
+    expect(g.linhas.map((l) => l.rotulo)).toEqual(['Lead → MQL', 'MQL → SQL', 'SQL → reunião', 'Reunião → proposta', 'Proposta → ganho', 'Lead → ganho (resultado final)']);
+    const final = g.linhas.at(-1)!.valores;
+    expect(final[0]).toBeCloseTo(1 / 3, 5); // fonte A: 1 ganho em 3 leads
+    expect(final[1]).toBeCloseTo(1 / 2, 5); // 902: 1 ganho em 2 leads
+    expect(final[3]).toBeCloseTo(2 / 6, 5); // total
+    expect(r.tabela.colunas.map((x) => x.rotulo)).toEqual(['Conversão', 'Origem Fictícia A', '902', '(sem fonte)', 'Total']);
   });
 
   it('canais por mês: cada fonte com a sua cor fixa; as demais juntas em "Outras fontes"', async () => {

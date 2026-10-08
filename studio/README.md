@@ -132,7 +132,9 @@ Cada análise tem **Gráfico** (ou **Mapa**), **Tabela**, **CSV** (planilha para
 | **Safra** | Resultado de cada safra | Por mês de criação: % MQL, % que chegou em SQL, reunião e proposta, ganhos, taxa, valor e ciclo mediano |
 | | Funil por safra | Mapa de calor do % de cada safra em cada marco |
 | | Curva de safra | % dos leads de cada safra ganhos até 1, 2… 13 meses depois (células sem a idade ficam vazias) |
-| **Canais** | Comparativo por fonte | Volume, % MQL, % inválidos, funil, ganhos, taxa, valor, ticket e ciclo por fonte |
+| **Canais** | **Funis lado a lado** | Uma coluna por fonte (as 6 com mais leads) e o total, com as mesmas etapas alinhadas (Leads, MQL, SQL, reunião, proposta, ganhos): barra = % dos leads da própria fonte, número = quantidade e o "passo" (conversão da etapa anterior) em cada etapa |
+| | **Taxas de conversão por fonte** | Mapa: Lead→MQL, MQL→SQL, SQL→reunião, reunião→proposta, proposta→ganho e Lead→ganho, uma coluna por fonte, com a cor comparando as fontes dentro de cada linha |
+| | Comparativo por fonte | Volume, % MQL, % inválidos, funil, ganhos, taxa, valor, ticket e ciclo por fonte |
 | | Leads por fonte, mês a mês | Evolução de cada fonte (cor fixa por fonte; as demais em "Outras fontes") |
 | | Canal de origem RD | De onde exatamente vêm os leads dentro das fontes escolhidas |
 | **Qualidade** | Indicadores | % MQL, % inválidos, % perdidos, % sem fonte, sem tipo, sem faixa (RH e Clínica), sem pessoa e sem organização |
@@ -141,6 +143,6 @@ Cada análise tem **Gráfico** (ou **Mapa**), **Tabela**, **CSV** (planilha para
 | | Por que os leads são inválidos | Motivos (nome e ID) que tiram do MQL |
 | | Dados em branco | % em branco por campo (Faixa de Colaboradores só em RH; Faixa de profissionais da saúde só em Clínica) |
 
-**Definições:** *inválido* = lead perdido por um motivo que a regra do Painel tira do MQL (hoje: Lead Invalido, Cliente em Busca de Suporte, Contato Inexistente, Oportunidade Duplicada). *Em branco* = campo do Pipedrive não preenchido.
+**Definições:** *chegou em SQL / reunião / proposta* = passou pela etapa marcada com esse nome **ou por uma posterior** (muitos negócios pulam etapas; assim o funil só diminui e os passos nunca passam de 100%); *ganho* vem sempre do Status do negócio. *inválido* = lead perdido por um motivo que a regra do Painel tira do MQL (hoje: Lead Invalido, Cliente em Busca de Suporte, Contato Inexistente, Oportunidade Duplicada). *Em branco* = campo do Pipedrive não preenchido.
 
 **Como acrescentar uma análise (peça para o Claude):** cada análise é um bloco independente em `studio/lib/bi.ts` (lista `BI_ANALISES`: id, título, pergunta, "como ler", largura e uma função que consulta **só visões de `analytics`**). Ao acrescentar um bloco, a análise ganha sozinha o filtro, o gráfico (KPIs, colunas, barras ou tabela), a tabela e o CSV. O navegador nunca manda SQL: escolhe a análise e os filtros, validados no servidor e passados ao banco sempre como parâmetros. Testes provam os números com negócios fictícios (`tests/integration/bi.int.test.ts`) e a segurança (`tests/studio-bi.test.ts`).

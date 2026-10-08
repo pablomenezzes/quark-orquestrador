@@ -37,8 +37,13 @@ export type Grafico =
   /** `slot`: cor fixa da série (1 a 4 = paleta categórica; 0 = neutro, para "outras"). A cor segue a entidade, nunca a posição. */
   | { tipo: 'colunas'; categorias: string[]; series: Array<{ id: string; nome: string; slot: number; valores: number[] }>; formato?: 'int' | 'pct' }
   | { tipo: 'barras'; itens: Array<{ rotulo: string; valor: number; detalhe?: string }>; formato: 'int' | 'dias' | 'pct'; ordinal?: boolean }
-  /** Mapa de calor. `escala`: a cor é relativa ao maior valor de cada coluna ('coluna') ou da matriz toda ('global', padrão). */
-  | { tipo: 'matriz'; colunas: string[]; linhas: Array<{ rotulo: string; valores: Array<number | null>; detalhe?: string }>; formato: 'pct'; escala?: 'coluna' | 'global' }
+  /** Mapa de calor. `escala`: a cor é relativa ao maior valor de cada coluna ('coluna'), de cada linha ('linha') ou da matriz toda ('global', padrão). */
+  | { tipo: 'matriz'; colunas: string[]; linhas: Array<{ rotulo: string; valores: Array<number | null>; detalhe?: string }>; formato: 'pct'; escala?: 'coluna' | 'linha' | 'global' }
+  /**
+   * Funis lado a lado: uma coluna por fonte (ou "Total"), as mesmas etapas em todas. `valores[i]` = negócios que chegaram na etapa i;
+   * `passos[i]` = dos que chegaram na etapa i-1, que parte chegou na i (nunca passa de 100%; null onde não há base).
+   */
+  | { tipo: 'funis'; etapas: string[]; colunas: Array<{ id: string; nome: string; slot: number; total?: boolean; leads: number; valores: number[]; passos: Array<number | null> }> }
   | { tipo: 'tabela' };
 export type BiResultado = { grafico: Grafico; tabela: Tabela; avisos: string[] };
 
@@ -108,8 +113,12 @@ async function avisoHistorico(db: Db, f: BiFiltros): Promise<string[]> {
   return r.map((x) => `Histórico de etapas de ${x.ano_criacao}: ${x.pendentes} negócios ainda sem leitura; o que depende de etapas (chegou em…, tempo por etapa) está incompleto para eles.`);
 }
 
-/** Subconsulta dos marcos (chegou em SQL, reunião, proposta) para os negócios da CTE `b`. */
-const MARCOS_CTE = `m as (select deal_id, bool_or(marco = 'sql') as sql, bool_or(marco = 'reuniao') as reuniao, bool_or(marco = 'proposta') as proposta
+/**
+ * Subconsulta dos marcos para os negócios da CTE `b`. "Chegou em X" significa "chegou em X OU EM UMA ETAPA POSTERIOR": muitos negócios
+ * pulam etapas (vão de Qualificação direto para Agendado), e quem chegou em reunião ou proposta passou, na prática, pelo SQL.
+ * Assim o funil só diminui e as taxas de passo fazem sentido. Ordem dos marcos: sql < reunião < proposta.
+ */
+const MARCOS_CTE = `m as (select deal_id, bool_or(marco in ('sql', 'reuniao', 'proposta')) as sql, bool_or(marco in ('reuniao', 'proposta')) as reuniao, bool_or(marco = 'proposta') as proposta
                           from analytics.negocios_marcos where deal_id in (select deal_id from b) group by deal_id)`;
 const SEM_MARCOS = 'Nenhuma etapa foi marcada como SQL, reunião ou proposta (ou ainda não há histórico lido): marque as etapas na aba Configuração do Painel de Dados.';
 
@@ -131,6 +140,53 @@ async function safras(db: Db, f: BiFiltros) {
        from b left join m on m.deal_id = b.deal_id group by 1 order by 1`,
     p,
   );
+}
+
+/** Cor fixa por fonte (a cor segue a entidade, nunca a posição): Google ADS 1, Meta ADS 2, Orgânico 3, Social 4; demais 0 (neutro). */
+const SLOT_FONTE: Record<string, number> = { 'Marketing [Google ADS]': 1, 'Marketing [Meta ADS]': 2, 'Marketing [Orgânico]': 3, 'Marketing [Social]': 4 };
+const slotDe = (fonte: string) => SLOT_FONTE[fonte] ?? 0;
+const ETAPAS_FUNIL = ['Leads', 'MQL', 'Chegou em SQL', 'Chegou em reunião', 'Chegou em proposta', 'Ganhos'];
+const PASSOS = ['Lead → MQL', 'MQL → SQL', 'SQL → reunião', 'Reunião → proposta', 'Proposta → ganho'];
+
+/**
+ * Funil completo por fonte. Cada negócio que conta como lead tem 6 marcas (lead, MQL, chegou em SQL, reunião, proposta, ganho).
+ * Os passos são CONDICIONAIS ("dos que chegaram em A, quantos chegaram em B"), por isso nunca passam de 100%, mesmo quando um ganho
+ * foi dado antes de alguma etapa (o ganho vem do Status, não da etapa).
+ */
+async function funisPorFonte(db: Db, f: BiFiltros, maxFontes = 6) {
+  const p: unknown[] = [];
+  const w = filtroSql(f, 'd', p);
+  const rows = await q(
+    db,
+    `with b as (select d.deal_id, ${FONTE} as fonte, d.fonte_id, d.is_mql, d.status from analytics.negocios_bi d where d.conta_como_lead and ${w.join(' and ')}), ${MARCOS_CTE},
+          x as (select b.fonte, b.fonte_id, b.is_mql as mql, coalesce(m.sql, false) as sql, coalesce(m.reuniao, false) as reuniao, coalesce(m.proposta, false) as proposta, (b.status = 'won') as ganho
+                  from b left join m on m.deal_id = b.deal_id)
+     select grouping(x.fonte) as e_total, x.fonte, x.fonte_id, count(*)::int as leads,
+            count(*) filter (where mql)::int as mql, count(*) filter (where sql)::int as sql, count(*) filter (where reuniao)::int as reuniao,
+            count(*) filter (where proposta)::int as proposta, count(*) filter (where ganho)::int as ganho,
+            count(*) filter (where mql and sql)::int as mql_sql, count(*) filter (where sql and reuniao)::int as sql_reuniao,
+            count(*) filter (where reuniao and proposta)::int as reuniao_proposta, count(*) filter (where proposta and ganho)::int as proposta_ganho
+       from x group by grouping sets ((x.fonte, x.fonte_id), ()) order by e_total, leads desc`,
+    p,
+  );
+  const coluna = (r: Row, total: boolean) => ({
+    id: total ? 'total' : String(r.fonte_id ?? 'branco'),
+    nome: total ? 'Total das fontes do filtro' : (r.fonte as string),
+    slot: total ? 0 : slotDe(r.fonte),
+    total,
+    leads: n(r.leads),
+    valores: [n(r.leads), n(r.mql), n(r.sql), n(r.reuniao), n(r.proposta), n(r.ganho)],
+    passos: [null, razao(n(r.mql), n(r.leads)), razao(n(r.mql_sql), n(r.mql)), razao(n(r.sql_reuniao), n(r.sql)), razao(n(r.reuniao_proposta), n(r.reuniao)), razao(n(r.proposta_ganho), n(r.proposta))] as Array<number | null>,
+  });
+  const fontes = rows.filter((r) => n(r.e_total) === 0).slice(0, maxFontes).map((r) => coluna(r, false));
+  const total = rows.find((r) => n(r.e_total) === 1);
+  // sem nenhum lead no filtro o agrupamento ainda devolve uma linha de total zerada: nesse caso não há funil para mostrar
+  const colunas = total && n(total.leads) > 0 ? [...fontes, coluna(total, true)] : [];
+  const mostradas = rows.filter((r) => n(r.e_total) === 0).length;
+  const avisos = await avisoHistorico(db, f);
+  if (colunas.length && colunas.every((x) => x.valores[2]! + x.valores[3]! + x.valores[4]! === 0)) avisos.unshift(SEM_MARCOS);
+  if (mostradas > maxFontes) avisos.push(`Mostra as ${maxFontes} fontes com mais leads (de ${mostradas}); o total considera todas.`);
+  return { colunas, avisos };
 }
 
 export const BI_ANALISES: BiAnalise[] = [
@@ -214,7 +270,7 @@ export const BI_ANALISES: BiAnalise[] = [
     pagina: 'geral',
     titulo: 'Funil: até onde os negócios chegaram',
     pergunta: 'Quantos negócios chegam em cada marco do funil?',
-    como_ler: 'Negócios criados no período. "Chegou em SQL, reunião, proposta" vem do histórico de etapas (primeira vez que passou por uma etapa marcada na Configuração do Painel de Dados); ganhos vêm do Status, nunca da etapa. Um ganho dado em Proposta conta como ganho e também como "chegou em proposta".',
+    como_ler: 'Negócios criados no período. "Chegou em SQL, reunião, proposta" vem do histórico de etapas (passou por uma etapa marcada na Configuração do Painel de Dados) e significa "chegou ali ou além": quem foi direto para reunião conta também como SQL. Ganhos vêm do Status, nunca da etapa. Um ganho dado em Proposta conta como ganho e também como "chegou em proposta".',
     largura: 'meia',
     async rodar(db, f) {
       const p: unknown[] = [];
@@ -422,6 +478,52 @@ export const BI_ANALISES: BiAnalise[] = [
   },
 
   /* ===================== CANAIS ===================== */
+  {
+    id: 'canais-funis',
+    pagina: 'canais',
+    titulo: 'Funis lado a lado: cada fonte, do lead ao ganho',
+    pergunta: 'Em que etapa cada fonte perde força, comparando os funis inteiros?',
+    como_ler: 'Uma coluna por fonte (as 6 com mais leads) e o total, com as mesmas etapas alinhadas: Leads, MQL, chegou em SQL, reunião, proposta e Ganhos. A barra mostra a parte dos leads da PRÓPRIA fonte que chegou na etapa (a barra dos leads é sempre cheia), então dá para comparar a forma dos funis mesmo com volumes muito diferentes; o número é a quantidade. Em cada etapa, "passo" = dos negócios que chegaram na etapa anterior, quantos chegaram nesta (nunca passa de 100%). Só entram negócios que contam como lead. "Chegou em SQL" inclui quem foi direto para reunião ou proposta (chegou em X ou além), porque muitos negócios pulam etapas. As etapas vêm do histórico e das marcações na Configuração do Painel de Dados; ganhos vêm do Status do negócio (um ganho pode ter pulado etapas).',
+    largura: 'cheia',
+    async rodar(db, f) {
+      const { colunas, avisos } = await funisPorFonte(db, f);
+      const linhas: Array<Record<string, string | number | null>> = ETAPAS_FUNIL.map((etapa, i) => {
+        const l: Record<string, string | number | null> = { etapa };
+        for (const k of colunas) {
+          l[`${k.id}_qtd`] = k.valores[i]!;
+          l[`${k.id}_pct`] = razao(k.valores[i]!, k.leads);
+          l[`${k.id}_passo`] = k.passos[i] ?? null;
+        }
+        return l;
+      });
+      return {
+        grafico: { tipo: 'funis', etapas: ETAPAS_FUNIL, colunas },
+        tabela: {
+          colunas: [c('etapa', 'Etapa'), ...colunas.flatMap((k) => [c(`${k.id}_qtd`, `${k.nome}: negócios`, 'int'), c(`${k.id}_pct`, `${k.nome}: % dos leads`, 'pct'), c(`${k.id}_passo`, `${k.nome}: passo`, 'pct')])],
+          linhas,
+        },
+        avisos,
+      };
+    },
+  },
+  {
+    id: 'canais-conversoes',
+    pagina: 'canais',
+    titulo: 'Taxas de conversão por fonte',
+    pergunta: 'Que fonte converte melhor em cada passo do funil?',
+    como_ler: 'Cada célula é a taxa de um passo: dos negócios que chegaram na etapa da esquerda, que % chegou na da direita. A cor compara as fontes DENTRO de cada linha (mais escuro = melhor naquela conversão). "Lead → ganho" é o resultado final: ganhos ÷ leads.',
+    largura: 'cheia',
+    async rodar(db, f) {
+      const { colunas, avisos } = await funisPorFonte(db, f);
+      const linhas = colunas.length ? PASSOS.map((rotulo, i) => ({ rotulo, valores: colunas.map((k) => k.passos[i + 1] ?? null) })) : [];
+      if (colunas.length) linhas.push({ rotulo: 'Lead → ganho (resultado final)', valores: colunas.map((k) => razao(k.valores[5]!, k.leads)) });
+      return {
+        grafico: { tipo: 'matriz', colunas: colunas.map((k) => (k.total ? 'Total' : k.nome.replace(/^Marketing \[(.*)\]$/, '$1'))), linhas, formato: 'pct', escala: 'linha' },
+        tabela: { colunas: [c('passo', 'Conversão'), ...colunas.map((k) => c(k.id, k.total ? 'Total' : k.nome, 'pct'))], linhas: linhas.map((l) => ({ passo: l.rotulo, ...Object.fromEntries(colunas.map((k, i) => [k.id, l.valores[i] ?? null])) })) },
+        avisos,
+      };
+    },
+  },
   {
     id: 'canais-resumo',
     pagina: 'canais',

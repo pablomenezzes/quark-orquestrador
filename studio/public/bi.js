@@ -186,14 +186,36 @@ function matriz(g) {
   const todos = g.linhas.flatMap((l) => l.valores).filter((v) => v != null);
   const maxGlobal = Math.max(...todos, 1e-9);
   const maxCol = g.colunas.map((_, ci) => Math.max(...g.linhas.map((l) => l.valores[ci] ?? 0), 1e-9));
-  const cel = (v, ci) => {
+  const maxLinha = g.linhas.map((l) => Math.max(...l.valores.map((v) => v ?? 0), 1e-9));
+  const cel = (v, ci, li) => {
     if (v == null) return '<td class="cel vazia">—</td>';
-    const r = Math.min(1, v / (g.escala === 'coluna' ? maxCol[ci] : maxGlobal));
+    const base = g.escala === 'coluna' ? maxCol[ci] : g.escala === 'linha' ? maxLinha[li] : maxGlobal;
+    const r = Math.min(1, v / base);
     return `<td class="cel" style="background:color-mix(in srgb, var(--series-1) ${Math.round(10 + 52 * r)}%, transparent)">${esc(fmt('pct', v))}</td>`;
   };
   return `<div class="matriz-wrap"><table class="mz"><thead><tr><th class="rot"></th>${g.colunas.map((c) => `<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>${
-    g.linhas.map((l) => `<tr><td class="rot">${esc(l.rotulo)}${l.detalhe ? `<small>${esc(l.detalhe)}</small>` : ''}</td>${l.valores.map((v, ci) => cel(v, ci)).join('')}</tr>`).join('')
+    g.linhas.map((l, li) => `<tr><td class="rot">${esc(l.rotulo)}${l.detalhe ? `<small>${esc(l.detalhe)}</small>` : ''}</td>${l.valores.map((v, ci) => cel(v, ci, li)).join('')}</tr>`).join('')
   }</tbody></table></div>`;
+}
+
+/**
+ * Funis lado a lado: uma coluna por fonte, etapas alinhadas em linhas. A barra é a % dos leads da própria fonte que chegou na etapa
+ * (a dos leads é sempre cheia), na cor fixa da fonte; o número e o passo (conversão da etapa anterior) vão escritos.
+ */
+function funis(g) {
+  if (!g.colunas.length) return '<p class="muted">Nada para mostrar neste filtro.</p>';
+  const ncol = g.colunas.length;
+  const cab = g.colunas.map((k) => `<div class="fz-cab ${k.total ? 'total' : ''}"><i style="background:${k.total ? 'var(--viz-ink-2)' : COR(k.slot)}"></i><b>${esc(k.nome.replace(/^Marketing \[(.*)\]$/, '$1'))}</b><span>${nf.format(k.leads)} leads</span></div>`).join('');
+  const linhas = g.etapas.map((etapa, i) => {
+    const cels = g.colunas.map((k, ci) => {
+      const v = k.valores[i];
+      const pctLeads = k.leads > 0 ? v / k.leads : 0;
+      const passo = i > 0 && k.passos[i] != null ? `<div class="fz-passo" title="Dos que chegaram na etapa anterior, quantos chegaram nesta">passo ${esc(fmt('pct', k.passos[i]))}</div>` : i > 0 ? '<div class="fz-passo">passo —</div>' : '';
+      return `<div class="fz-cel" data-fz="${i}:${ci}">${passo}<div class="fz-linha"><div class="fz-bar" style="width:${Math.max(pctLeads * 100, v > 0 ? 1.5 : 0.4)}%;background:${k.total ? 'var(--viz-ink-2)' : COR(k.slot)}"></div></div><div class="fz-num"><b>${nf.format(v)}</b> <span>${esc(fmt('pct', pctLeads))} dos leads</span></div></div>`;
+    }).join('');
+    return `<div class="fz-rot">${esc(etapa)}</div>${cels}`;
+  }).join('');
+  return `<div class="funis-wrap"><div class="funis" style="grid-template-columns:minmax(120px,150px) repeat(${ncol}, minmax(150px,1fr))"><div></div>${cab}${linhas}</div></div>`;
 }
 
 function tabela(t) {
@@ -229,7 +251,7 @@ function corpo(a) {
   const { grafico, tabela: t, avisos } = r.resultado;
   const modo = S.modo[a.id] ?? 'grafico';
   const av = avisos.map((m) => `<div class="aviso">${esc(m)}</div>`).join('');
-  const vis = modo === 'tabela' || grafico.tipo === 'tabela' ? tabela(t) : grafico.tipo === 'kpis' ? tiles(grafico) : grafico.tipo === 'colunas' ? colunas(grafico) : grafico.tipo === 'matriz' ? matriz(grafico) : barras(grafico);
+  const vis = modo === 'tabela' || grafico.tipo === 'tabela' ? tabela(t) : grafico.tipo === 'kpis' ? tiles(grafico) : grafico.tipo === 'colunas' ? colunas(grafico) : grafico.tipo === 'matriz' ? matriz(grafico) : grafico.tipo === 'funis' ? funis(grafico) : barras(grafico);
   return `${vis}${av}`;
 }
 
@@ -386,6 +408,13 @@ document.addEventListener('mousemove', (ev) => {
   if (barra && g.tipo === 'barras') {
     const i = g.itens[Number(barra.dataset.i)];
     return mostrarTip(ev, `<b class="t">${esc(i.rotulo)}</b>${esc(fmt(g.formato, i.valor))}${i.detalhe ? `<br><span style="color:var(--viz-muted)">${esc(i.detalhe)}</span>` : ''}`);
+  }
+  const fz = ev.target.closest('.fz-cel');
+  if (fz && g.tipo === 'funis') {
+    const [i, ci] = fz.dataset.fz.split(':').map(Number);
+    const k = g.colunas[ci];
+    const v = k.valores[i];
+    return mostrarTip(ev, `<b class="t">${esc(k.nome)} › ${esc(g.etapas[i])}</b>${nf.format(v)} negócios (${esc(fmt('pct', k.leads > 0 ? v / k.leads : 0))} dos ${nf.format(k.leads)} leads)${i > 0 ? `<br><span style="color:var(--viz-muted)">Dos que chegaram em "${esc(g.etapas[i - 1])}": ${esc(fmt('pct', k.passos[i]))} chegaram aqui</span>` : ''}`);
   }
   const hit = ev.target.closest('.hit');
   if (hit && g.tipo === 'colunas') {

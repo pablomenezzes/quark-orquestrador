@@ -82,6 +82,20 @@
     table.mz td.rot small { display: block; font-weight: 400; color: var(--viz-muted); font-size: 11px; }
     table.mz td.cel { text-align: center; padding: 6px 4px; border-radius: 4px; font-variant-numeric: tabular-nums; color: var(--viz-ink); min-width: 58px; }
     table.mz td.vazia { color: var(--viz-muted); }
+    /* funis lado a lado */
+    .funis-wrap { overflow-x: auto; padding-bottom: 4px; }
+    .funis { display: grid; column-gap: 14px; row-gap: 0; align-items: end; min-width: 640px; }
+    .fz-cab { display: flex; flex-direction: column; gap: 1px; padding: 0 0 8px; border-bottom: 1px solid var(--viz-axis); }
+    .fz-cab i { width: 22px; height: 4px; border-radius: 2px; display: block; margin-bottom: 4px; }
+    .fz-cab b { font-size: 14px; color: var(--viz-ink); }
+    .fz-cab span { font-size: 12px; color: var(--viz-muted); }
+    .fz-rot { font-size: 13px; color: var(--viz-ink); align-self: end; padding: 0 0 8px; border-bottom: 1px solid var(--viz-grid); }
+    .fz-cel { padding: 6px 0 8px; border-bottom: 1px solid var(--viz-grid); min-width: 0; }
+    .fz-linha { height: 18px; }
+    .fz-bar { height: 18px; border-radius: 0 4px 4px 0; }
+    .fz-num { font-size: 13px; color: var(--viz-ink); margin-top: 2px; font-variant-numeric: tabular-nums; }
+    .fz-num span { color: var(--viz-muted); font-size: 11.5px; }
+    .fz-passo { font-size: 11.5px; color: var(--viz-ink-2); margin-bottom: 3px; font-variant-numeric: tabular-nums; }
     /* tabela */
     .tabela-wrap { overflow: auto; max-height: 440px; }
     table.t { width: 100%; border-collapse: collapse; font-size: 13px; }
