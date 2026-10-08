@@ -63,6 +63,15 @@ label.lbl { display: block; font-size: 13px; font-weight: 600; margin: 0 0 4px; 
 /* ---------- construtor ---------- */
 .top { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--surface); position: sticky; top: 0; z-index: 5; flex-wrap: wrap; }
 .top h1 { font-size: 17px; }
+/* Menu único (nav.js): Início, BI, Painel de Dados e, por último, Studio (testes) */
+.top .marca { font-size: 17px; font-weight: 700; letter-spacing: -0.01em; margin-right: 6px; }
+.menu { display: flex; gap: 4px; flex-wrap: wrap; }
+.menu a { padding: 6px 12px; border-radius: 8px; color: var(--text); text-decoration: none; font-weight: 500; font-size: 14px; }
+.menu a:hover { background: var(--surface-2); }
+.menu a[aria-current='page'] { background: var(--accent); color: var(--accent-ink); }
+.menu a.teste { color: var(--muted); }
+.menu a.teste[aria-current='page'] { color: var(--accent-ink); }
+.menu a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .top .spacer { flex: 1; }
 .layout { display: grid; grid-template-columns: 240px minmax(0, 1fr) 340px; gap: 20px; padding: 20px; max-width: 1500px; margin: 0 auto; align-items: start; }
 @media (max-width: 1150px) { .layout { grid-template-columns: 1fr; } .test-panel, .side { position: static !important; } }

@@ -17,6 +17,7 @@ beforeAll(async () => {
   mkdirSync(join(dir, 'public'));
   mkdirSync(join(dir, 'tracking'));
   writeFileSync(join(dir, 'public', 'index.html'), '<h1>builder</h1>');
+  writeFileSync(join(dir, 'public', 'inicio.html'), '<h1>inicio</h1>');
   writeFileSync(join(dir, 'public', 'form.html'), '<h1>form</h1>');
   writeFileSync(join(dir, 'public', 'app.js'), 'console.log(1)');
   writeFileSync(join(dir, 'tracking', 'attribution.js'), '/* attr */');
@@ -51,7 +52,8 @@ const form = (over: object = {}) => ({
 
 describe('páginas estáticas', () => {
   it('serve o construtor, o formulário e o script de atribuição', async () => {
-    expect(await (await fetch(`${base}/`)).text()).toContain('builder');
+    expect(await (await fetch(`${base}/`)).text()).toContain('inicio'); // a tela inicial
+    expect(await (await fetch(`${base}/studio`)).text()).toContain('builder'); // o construtor de testes passou para /studio
     expect(await (await fetch(`${base}/f/demo`)).text()).toContain('form');
     expect(await (await fetch(`${base}/s/app.js`)).text()).toContain('console.log');
     expect(await (await fetch(`${base}/attribution.js`)).text()).toContain('attr');

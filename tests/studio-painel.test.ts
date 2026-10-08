@@ -105,6 +105,7 @@ beforeAll(async () => {
   for (const d of ['forms', 'public', 'tracking']) mkdirSync(join(dir, d));
   writeFileSync(join(dir, 'public', 'painel.html'), '<h1>painel de dados</h1>');
   writeFileSync(join(dir, 'public', 'index.html'), '<h1>builder</h1>');
+  writeFileSync(join(dir, 'public', 'inicio.html'), '<h1>inicio</h1>');
   writeFileSync(join(dir, 'public', 'form.html'), '<h1>form</h1>');
   server = mkServer(repo);
   serverSem = mkServer(null);
@@ -296,7 +297,8 @@ describe('proteções e falhas', () => {
     expect(r.status).toBe(503);
     expect((await r.json()).error).toBe('painel_nao_configurado');
     expect(await (await fetch(`${baseSem}/painel`)).text()).toContain('painel de dados'); // a página abre e avisa
-    expect(await (await fetch(`${baseSem}/`)).text()).toContain('builder');
+    expect(await (await fetch(`${baseSem}/`)).text()).toContain('inicio'); // o Início abre e avisa
+    expect(await (await fetch(`${baseSem}/studio`)).text()).toContain('builder'); // o Studio de testes continua funcionando
   });
   it('erro do banco: 500 genérico, sem vazar a mensagem', async () => {
     failWith = new Error('senha=segredo postgresql://u:p@h/db');

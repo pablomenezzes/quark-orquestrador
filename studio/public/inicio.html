@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Início · Quark Dados</title>
+  <link rel="stylesheet" href="/s/studio.css">
+  <style>
+    .wrap { max-width: 980px; margin: 0 auto; padding: 24px 20px; }
+    .hero { padding: 26px 28px; margin-bottom: 18px; }
+    .hero .rot { color: var(--muted); font-size: 14px; }
+    .hero .hora { font-size: 54px; font-weight: 700; letter-spacing: -0.03em; line-height: 1.1; margin: 4px 0 6px; }
+    .hero .ha { font-size: 18px; color: var(--muted); }
+    .hero .estado { margin-top: 12px; }
+    table.t { width: 100%; border-collapse: collapse; font-size: 14px; }
+    table.t th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); padding: 8px 10px; border-bottom: 1px solid var(--border); }
+    table.t td { padding: 8px 10px; border-bottom: 1px solid var(--border); }
+    table.t tr:last-child td { border-bottom: 0; }
+    .atalhos { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; margin-top: 18px; }
+    .atalho { display: block; padding: 14px 16px; text-decoration: none; color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+    .atalho:hover { border-color: var(--accent); }
+    .atalho b { display: block; font-size: 15px; }
+    .atalho span { color: var(--muted); font-size: 13px; }
+    .secao { margin-top: 20px; }
+    .secao h2 { font-size: 15px; margin-bottom: 10px; }
+  </style>
+</head>
+<body>
+  <header class="top" data-pagina="inicio"></header>
+  <div class="wrap">
+    <div id="aviso"></div>
+    <section class="card hero" id="hero" aria-live="polite"><div class="rot">Última atualização dos dados</div><div class="hora">…</div></section>
+    <div id="alertas"></div>
+    <section class="card secao" style="padding:16px 18px">
+      <h2 style="margin-top:0">Cada parte dos dados</h2>
+      <table class="t"><thead><tr><th>Parte</th><th>Situação</th><th>Última atualização</th><th>Há quanto tempo</th></tr></thead><tbody id="partes"></tbody></table>
+    </section>
+    <div class="atalhos" id="atalhos"></div>
+  </div>
+  <script src="/s/nav.js"></script>
+  <script type="module" src="/s/inicio.js"></script>
+</body>
+</html>

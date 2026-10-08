@@ -1,4 +1,15 @@
-# Quark Studio
+# Quark Dados (menu único) e Quark Studio
+
+Um programa local com **um menu só**, igual em todas as telas, nesta ordem:
+
+| Menu | Endereço | Para que serve |
+|---|---|---|
+| **Início** | `/` | Mostra a **última hora de atualização** dos dados do Pipedrive (e de cada parte), com alerta se passar de 8 horas |
+| **BI** | `/bi` | Análises e KPIs, em 4 páginas: Visão geral, Safra, Canais e Qualidade |
+| **Painel de Dados** | `/painel` | Saúde da sincronização, configuração das regras, negócios, usuários e campos, conferência |
+| **Studio (testes)** | `/studio` | O construtor de formulários de teste do orquestrador (descrito abaixo) |
+
+## Quark Studio (testes)
 
 Ambiente de testes local do orquestrador: você **monta formulários**, abre numa **nova aba** (todas as perguntas na mesma tela, estilo Typeform) com os **UTMs** que quiser e vê **o que o orquestrador faria** com o envio.
 
@@ -9,7 +20,7 @@ cd C:\Users\Esig\Documents\quark-orquestrador
 npm run studio
 ```
 
-O navegador abre em `http://127.0.0.1:4310`. **Deixe a janela do PowerShell aberta**: fechar a janela (ou `Ctrl+C`) para o Studio. Os formulários ficam salvos em `studio/forms/` e não se perdem.
+O navegador abre em `http://127.0.0.1:4310` (a tela Início; o construtor de formulários fica em `/studio`). **Deixe a janela do PowerShell aberta**: fechar a janela (ou `Ctrl+C`) para o Studio. Os formulários ficam salvos em `studio/forms/` e não se perdem.
 
 Escuta só em `127.0.0.1`. Não é publicado na Vercel e não altera a Deployment Protection.
 
@@ -85,7 +96,7 @@ Confere o `Host` (anti DNS-rebinding), a `Origin` e o `Content-Type: application
 
 ## Painel de Dados (Data Hub do Pipedrive)
 
-Em http://127.0.0.1:4310/painel (ou pelo link "Painel de Dados" no topo do Studio). É uma área à parte do construtor de formulários e só aparece funcionando depois que a migration do Data Hub for aplicada e a PANEL_DB_URL existir no .env.local.
+Em http://127.0.0.1:4310/painel (item **Painel de Dados** do menu). É uma área à parte do construtor de formulários e só aparece funcionando depois que a migration do Data Hub for aplicada e a PANEL_DB_URL existir no .env.local.
 
 | Aba | Para que serve |
 |---|---|
@@ -100,16 +111,36 @@ O Painel usa um papel de banco próprio (orq_panel): lê só as visões de analy
 
 ## BI (análises e KPIs)
 
-Em http://127.0.0.1:4310/bi (link "BI →" no topo do Studio e do Painel de Dados). Gráficos, tabelas e KPIs sobre os negócios do Pipedrive, **só leitura**, com filtros de **período de criação**, **produto** e **pipeline** que valem para todas as análises. Cada análise tem **Gráfico**, **Tabela**, **CSV** (planilha para o Excel, com vírgula decimal) e um "Como ler" que diz o que ela mede.
+Em http://127.0.0.1:4310/bi (item **BI** do menu). Gráficos, tabelas e KPIs sobre os negócios do Pipedrive, **só leitura**, em **4 páginas** (abas): Visão geral, Safra, Canais e Qualidade.
 
-| Análise | Responde |
-|---|---|
-| Visão geral | Leads, MQL, % MQL, ganhos, taxa de ganho, valor ganho, abertos e perdidos |
-| Leads, MQL e ganhos por mês de criação | Como a entrada de leads evolui e quanto vira ganho |
-| Funil | Quantos chegaram em SQL, reunião e proposta (pelo histórico de etapas) e quantos ganharam |
-| Principais motivos de perda | Por que perdemos (nome e ID; marca os que tiram do MQL) |
-| Leads e conversão por origem | De onde vêm os leads (campo "Fonte do Lead") e quais viram ganho |
-| Tempo em cada etapa | Onde os negócios ficam parados (mediana em dias) |
-| Desempenho por responsável | Quem fecha mais |
+**Filtros (valem para todas as páginas, ficam à vista no topo e são lembrados):**
+- **Data de criação** do negócio: este ano, ano passado, 90 ou 30 dias, tudo, ou datas à escolha.
+- **Fonte do Lead**: começa com a seleção **fixa** Google ADS, Meta ADS, Orgânico e Social, e você pode marcar **outras** fontes (ou "em branco"). Botões: **Padrão** (volta à seleção fixa), **Todas** e **Fixar seleção atual** (passa a ser o seu padrão neste navegador). A seleção fixa de fábrica está em `PADRAO_FONTES` (`studio/lib/bi.ts`).
+- **Tipo do Lead**: começa fixo em **Marketing**, com a possibilidade de marcar outros (Indicação, Prospecção, Parceria, CX…). `PADRAO_TIPOS`.
+- **Produto** (RH ou Clínica) e **Pipeline**.
+
+Cada análise tem **Gráfico** (ou **Mapa**), **Tabela**, **CSV** (planilha para o Excel, com vírgula decimal) e um "Como ler" que diz o que ela mede.
+
+| Página | Análise | Responde |
+|---|---|---|
+| Visão geral | Visão geral | Leads, MQL, % MQL, ganhos, taxa de ganho, valor ganho, abertos e perdidos |
+| | Leads, MQL e ganhos por mês | Como a entrada de leads evolui e quanto vira ganho |
+| | Funil | Quantos chegaram em SQL, reunião e proposta (pelo histórico de etapas) e quantos ganharam |
+| | Principais motivos de perda | Por que perdemos (nome e ID; marca os que tiram do MQL) |
+| | Tempo em cada etapa | Onde os negócios ficam parados (mediana em dias) |
+| | Desempenho por responsável | Quem fecha mais |
+| **Safra** | Resultado de cada safra | Por mês de criação: % MQL, % que chegou em SQL, reunião e proposta, ganhos, taxa, valor e ciclo mediano |
+| | Funil por safra | Mapa de calor do % de cada safra em cada marco |
+| | Curva de safra | % dos leads de cada safra ganhos até 1, 2… 13 meses depois (células sem a idade ficam vazias) |
+| **Canais** | Comparativo por fonte | Volume, % MQL, % inválidos, funil, ganhos, taxa, valor, ticket e ciclo por fonte |
+| | Leads por fonte, mês a mês | Evolução de cada fonte (cor fixa por fonte; as demais em "Outras fontes") |
+| | Canal de origem RD | De onde exatamente vêm os leads dentro das fontes escolhidas |
+| **Qualidade** | Indicadores | % MQL, % inválidos, % perdidos, % sem fonte, sem tipo, sem faixa (RH e Clínica), sem pessoa e sem organização |
+| | Qualidade por fonte | Quais fontes trazem leads melhores e mais bem preenchidos |
+| | Qualidade ao longo do tempo | % MQL, % inválidos e % com dado em branco, mês a mês |
+| | Por que os leads são inválidos | Motivos (nome e ID) que tiram do MQL |
+| | Dados em branco | % em branco por campo (Faixa de Colaboradores só em RH; Faixa de profissionais da saúde só em Clínica) |
+
+**Definições:** *inválido* = lead perdido por um motivo que a regra do Painel tira do MQL (hoje: Lead Invalido, Cliente em Busca de Suporte, Contato Inexistente, Oportunidade Duplicada). *Em branco* = campo do Pipedrive não preenchido.
 
 **Como acrescentar uma análise (peça para o Claude):** cada análise é um bloco independente em `studio/lib/bi.ts` (lista `BI_ANALISES`: id, título, pergunta, "como ler", largura e uma função que consulta **só visões de `analytics`**). Ao acrescentar um bloco, a análise ganha sozinha o filtro, o gráfico (KPIs, colunas, barras ou tabela), a tabela e o CSV. O navegador nunca manda SQL: escolhe a análise e os filtros, validados no servidor e passados ao banco sempre como parâmetros. Testes provam os números com negócios fictícios (`tests/integration/bi.int.test.ts`) e a segurança (`tests/studio-bi.test.ts`).

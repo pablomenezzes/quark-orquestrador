@@ -30,12 +30,8 @@
   </style>
 </head>
 <body>
-  <header class="top">
-    <h1>Painel de Dados</h1>
+  <header class="top" data-pagina="painel">
     <span class="chip accent">Data Hub · Pipedrive</span>
-    <span class="spacer"></span>
-    <a href="/bi" style="font-size:14px;font-weight:600">BI →</a>
-    <a href="/" class="muted" style="font-size:14px">← Quark Studio (formulários)</a>
   </header>
 
   <div class="wrap">
@@ -51,6 +47,7 @@
     <div id="view"></div>
   </div>
   <div id="toast" class="toast" hidden></div>
+  <script src="/s/nav.js"></script>
   <script type="module" src="/s/painel.js"></script>
 </body>
 </html>

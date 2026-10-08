@@ -102,8 +102,7 @@ export function createStudioServer(opts: StudioOptions): Server {
     const path = url.pathname;
     const method = req.method ?? 'GET';
 
-    if (method === 'GET' && path === '/') return sendFile(res, join(opts.publicDir, 'index.html'));
-    if (method === 'GET' && path === '/attribution.js') return sendFile(res, join(opts.trackingDir, 'attribution.js'));
+    if (method === 'GET' && path === '/') return sendFile(res, join(opts.publicDir, 'inicio.html'));    if (method === 'GET' && path === '/attribution.js') return sendFile(res, join(opts.trackingDir, 'attribution.js'));
 
     const page = /^\/f\/([^/]+)$/.exec(path);
     if (method === 'GET' && page) {
@@ -124,6 +123,8 @@ export function createStudioServer(opts: StudioOptions): Server {
       return sendFile(res, abs);
     }
 
+    // Menu único: Início (última atualização), BI, Painel de Dados e, por último, Studio (testes).
+    if (method === 'GET' && path === '/studio') return sendFile(res, join(opts.publicDir, 'index.html'));
     if (method === 'GET' && path === '/painel') return sendFile(res, join(opts.publicDir, 'painel.html'));
 
     // BI: só leitura. O navegador escolhe a análise e os filtros; nunca manda SQL.
@@ -157,6 +158,18 @@ export function createStudioServer(opts: StudioOptions): Server {
           if (!/^\d{1,15}$/.test(pipeline)) throw new HttpError(400, 'pipeline_invalido');
           f.pipeline_id = Number(pipeline);
         }
+        // Fonte e Tipo do Lead: lista de IDs de opção (dígitos) e/ou "branco" (campo não preenchido), separados por vírgula.
+        const lista = (nome: 'fonte' | 'tipo'): string[] | undefined => {
+          const v = q.get(nome);
+          if (!v) return undefined;
+          const toks = v.split(',');
+          if (toks.length > 40 || toks.some((t) => !/^(\d{1,9}|branco)$/.test(t))) throw new HttpError(400, `${nome}_invalido`);
+          return [...new Set(toks)];
+        };
+        const fontes = lista('fonte');
+        const tipos = lista('tipo');
+        if (fontes) f.fontes = fontes;
+        if (tipos) f.tipos = tipos;
         return send(res, 200, await bi.rodar(one[1]!, f));
       }
       return send(res, 404, { error: 'not_found' });
