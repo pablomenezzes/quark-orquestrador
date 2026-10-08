@@ -655,7 +655,25 @@ Expande o projeto com a camada de dados de CRM para análise: todo o histórico 
 | 4 | Atividades | pendente |
 | 5 | Histórico de etapas (a mais importante). **Prioridade do Pablo (2026-10-08): negócios criados em 2026 primeiro, depois 2025**; pessoas e empresas (Entrega 3) ficam para depois | **2026 entregue (2026-10-08), aguardando o "conferido" do Pablo; 2025 depois dele**: migration `0010` aplicada (dump `backups/dump-20261008-093517.sql`); **11.145 históricos lidos de 2026 (439.520 unidades, 24% de um dia), 0 falhas, 0 avisos**; 149 negócios sem mudança de etapa ganharam a linha da criação sem consulta; conferência `scripts/datahub-reconcile-history.ts`: cobertura 100%, 2 diferenças explicadas (mudaram de etapa depois da leitura), **amostra de 25 negócios relida no Pipedrive: 25 iguais**; aba Negócios com andamento da carga, funil por ano e linha do tempo na ficha; 492 testes passando. Os "chegou em SQL/reunião/proposta" ficam em 0 até o Pablo marcar as etapas na aba Configuração. **2025 (a pedido do Pablo, 2026-10-08): 5.420 de 11.297 lidos e 0 falhas; a carga parou sozinha ao atingir os 40% da cota diária (720.057 de 1.800.000 já usadas hoje por todos, inclusive o Make); restam 5.877 (~235 mil unidades) e continuam na próxima rodada, sem repetir o que foi lido.** Amostra de 25 negócios de 2025 relidos no Pipedrive: 25 iguais |
 | 6 | Sincronização automática a cada 4 horas, excluídos/mesclados, alerta de 8 horas | pendente |
-| 7 | Primeiras análises (funil, conversão, tempo por etapa, motivos de perda, origem, responsável) | pendente |
+| 7 | Primeiras análises (funil, conversão, tempo por etapa, motivos de perda, origem, responsável) | **em grande parte entregue pelo BI (2026-10-08)**: 19 análises em 4 páginas (Visão geral, Safra, Canais, Qualidade), menu único, Início com a última atualização e conector `quark-dados` para o Claude Desktop (D-42, D-43, D-44). Continua aberto: novas análises sob demanda do Pablo |
+
+### Cronograma proposto (2026-10-08)
+
+Estimativas em **dias de trabalho do Claude**, sem contar as esperas por decisão ou confirmação do Pablo, que são o que mais move as datas. Duas frentes em paralelo: **A) fechar o Data Hub** e **B) colocar o orquestrador no ar com leads reais**. Semanas (segunda a sexta): S1 12–16/out, S2 19–23/out, S3 26–30/out, S4 2–6/nov, S5 9–13/nov, S6 16–20/nov, S7 23–27/nov, S8 30/nov–4/dez, S9 7–11/dez, S10 14–18/dez (21/dez em diante: feriados, só folga).
+
+| Quando | Frente A: Data Hub | Frente B: Orquestrador | Depende do Pablo |
+|---|---|---|---|
+| 9/out | Terminar o histórico de 2025 (5.877 negócios, 1 rodada) e conferir | Item 5: proposta de LGPD (só texto) | "conferido" das Entregas 1, 2 e 5 e do BI; corrigir a etapa "Proposta Enviada" do QuarkClinic (#12) |
+| S1 | **Entrega 6: sincronização automática a cada 4 h** (GitHub Actions), cadastros diários, excluídos e mesclados, alerta de 8 h; 1 dia de observação (3 dias de trabalho) | Decisões **P-02** (plano da Vercel antes de leads reais) e regra de **firewall**; **item 6: primeiro lead real** (1 dia) | Aprovar a LGPD; decidir a Vercel; autorizar guardar os segredos no GitHub (Actions); enviar o lead real |
+| S2 | **Entrega 3: pessoas e empresas + vínculo negócio → lead do orquestrador** (2 dias) | **Item 7: Fase 1 no mundo real** (GTM real, GA4, Pixel, fontes reais; 2 a 3 dias) e **Elementor pelo navegador** (1 a 2 dias) | Acesso ao GTM, GA4 e Pixel; "aprovo" do Elementor |
+| S3 | **Entrega 4: atividades** (1,5 dia) | Adaptadores de entrada **Lovable** e **Meta Lead Ads** (1 a 2 dias cada; Fillout só se confirmado) | Confirmar Fillout, Lovable e Meta |
+| S4 a S5 | Estabilização, novas análises do BI sob demanda | **Fase 4: motor de regras + adaptadores Pipedrive e Umbler** (6 a 8 dias) | IDs e regras do Pipedrive; credenciais Umbler |
+| S6 | Opcional: histórico de 2019 a 2024 (cota) | **Fase 5: diagnóstico como qualificador** (`lid`, 3 a 4 dias) | Fluxo do diagnóstico |
+| S7 a S9 | **Dados de mídia** (Meta Ads e Google Ads: custo por campanha, CPL e CAC no BI; 4 a 6 dias, comando à parte) | **Fase 6: migração gradual do Make**, fluxo a fluxo, em paralelo ao Make e comparando resultados (6 a 10 dias) | Lista de fluxos do Make e ordem de migração; tokens de Meta e Google Ads |
+| S9 a S10 | Fase 8: sincronizações de `mkt` e views para o dashboard | **Fase 7: CAPI (Meta) e conversões offline (Google Ads)** (4 a 6 dias) | Developer token do Google Ads; pixel e conta de anúncios |
+| depois | | **Fase 9: canvas visual de regras** (opcional, 3+ semanas) e **Fase 0: convenção de UTMs** em todos os anúncios (fora do código) | Decidir se vale a pena |
+
+Marcos: **fim de S1** = dados sempre atualizados sozinhos e primeiro lead real gravado; **fim de S3** = todas as fontes de lead entrando com atribuição; **fim de S6** = Pipedrive e Umbler ligados ao motor de regras; **fim de S10** = Make desligado por etapas e conversões voltando para Meta e Google. **Riscos:** (1) plano Hobby da Vercel para uso comercial (P-02); (2) cota diária do Pipedrive compartilhada com o Make (a sincronização já para sozinha em 40%); (3) a migração do Make é a etapa de maior risco e ficará em paralelo, nunca por substituição direta; (4) tudo depende da velocidade das confirmações.
 
 ## 16. Convenções de código
 
