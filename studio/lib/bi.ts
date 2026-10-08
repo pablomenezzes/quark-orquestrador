@@ -57,6 +57,10 @@ export type BiAnalise = {
 type Db = Pick<pg.Pool, 'query'>;
 type Row = Record<string, any>;
 const TZ = `'America/Sao_Paulo'`;
+/** Valores que dizem "não sei": "Desconhecido"/"Unknown" no Canal de origem RD; no UTM Source, modelos de link não preenchidos ({{...}}), undefined, unknown, null. */
+const CANAL_DESCONHECIDO = `'(desconhec|unknown)'`;
+const UTM_INVALIDO = `'^(\\{\\{.*\\}\\}|undefined|unknown|null)$'`;
+
 /** Nome da fonte; opção que o Pipedrive não oferece mais aparece pelo ID; em branco = "(sem fonte)". */
 const FONTE = `coalesce(d.fonte, d.fonte_id, '(sem fonte)')`;
 
@@ -532,7 +536,9 @@ export const BI_ANALISES: BiAnalise[] = [
                   count(*) filter (where d.fonte_id is null)::int as sem_fonte, count(*) filter (where d.tipo_id is null)::int as sem_tipo,
                   count(*) filter (where d.produto = 'rh')::int as rh, count(*) filter (where d.produto = 'rh' and d.faixa_colab_id is null)::int as rh_sem_faixa,
                   count(*) filter (where d.produto = 'clinic')::int as clinic, count(*) filter (where d.produto = 'clinic' and d.faixa_saude_id is null)::int as clinic_sem_faixa,
-                  count(*) filter (where d.sem_pessoa)::int as sem_pessoa, count(*) filter (where d.sem_organizacao)::int as sem_org, count(*)::int as total
+                  count(*) filter (where d.sem_pessoa)::int as sem_pessoa, count(*) filter (where d.sem_organizacao)::int as sem_org, count(*)::int as total,
+                  count(*) filter (where d.canal_rd ~* ${CANAL_DESCONHECIDO})::int as canal_desc,
+                  count(*) filter (where d.utm_source is not null)::int as utm_preench, count(*) filter (where d.utm_source ~* ${UTM_INVALIDO})::int as utm_inv
              from analytics.negocios_bi d where ${w.join(' and ')}`,
           p,
         )
@@ -547,6 +553,8 @@ export const BI_ANALISES: BiAnalise[] = [
         { id: 'pst', rotulo: '% sem tipo do lead', valor: razao(n(r.sem_tipo), total), formato: 'pct' as const, dica: '"Tipo do Lead" em branco' },
         { id: 'prh', rotulo: '% RH sem faixa de colaboradores', valor: razao(n(r.rh_sem_faixa), n(r.rh)), formato: 'pct' as const, dica: `${n(r.rh_sem_faixa)} de ${n(r.rh)} negócios de RH` },
         { id: 'pcl', rotulo: '% Clínica sem faixa de profissionais', valor: razao(n(r.clinic_sem_faixa), n(r.clinic)), formato: 'pct' as const, dica: `${n(r.clinic_sem_faixa)} de ${n(r.clinic)} negócios de Clínica` },
+        { id: 'pcd', rotulo: '% com canal de origem "Desconhecido"', valor: razao(n(r.canal_desc), total), formato: 'pct' as const, dica: `${n(r.canal_desc)} negócios com "Desconhecido"/"Unknown" no Canal de origem RD` },
+        { id: 'pui', rotulo: '% UTM Source inválido', valor: razao(n(r.utm_inv), n(r.utm_preench)), formato: 'pct' as const, dica: `${n(r.utm_inv)} de ${n(r.utm_preench)} com UTM preenchido: {{...}}, undefined ou unknown` },
         { id: 'ppe', rotulo: '% sem pessoa vinculada', valor: razao(n(r.sem_pessoa), total), formato: 'pct' as const },
         { id: 'por', rotulo: '% sem organização', valor: razao(n(r.sem_org), total), formato: 'pct' as const },
       ];
@@ -649,7 +657,7 @@ export const BI_ANALISES: BiAnalise[] = [
     pagina: 'qualidade',
     titulo: 'Dados em branco',
     pergunta: 'Quais campos estão mais vazios?',
-    como_ler: '% de negócios com o campo em branco. A faixa de colaboradores só conta negócios de RH e a faixa de profissionais da saúde só os de Clínica (cada produto tem a sua). Negócios sem produto definido não entram nas faixas.',
+    como_ler: '% de negócios com o campo em branco ou com valor "desconhecido". A faixa de colaboradores só conta negócios de RH e a faixa de profissionais da saúde só os de Clínica (cada produto tem a sua); negócios sem produto definido não entram nas faixas. "Desconhecido" no Canal de origem RD e valores como {{}}, {{GoogleAds}}, undefined ou unknown no UTM Source indicam link de campanha mal configurado.',
     largura: 'meia',
     async rodar(db, f) {
       const p: unknown[] = [];
@@ -661,6 +669,8 @@ export const BI_ANALISES: BiAnalise[] = [
                   count(*) filter (where d.produto = 'rh')::int as rh, count(*) filter (where d.produto = 'rh' and d.faixa_colab_id is null)::int as rh_sem,
                   count(*) filter (where d.produto = 'clinic')::int as cl, count(*) filter (where d.produto = 'clinic' and d.faixa_saude_id is null)::int as cl_sem,
                   count(*) filter (where d.canal_rd is null)::int as sem_canal, count(*) filter (where d.utm_source is null)::int as sem_utm,
+                  count(*) filter (where d.canal_rd ~* ${CANAL_DESCONHECIDO})::int as canal_desc,
+                  count(*) filter (where d.utm_source is not null)::int as utm_preench, count(*) filter (where d.utm_source ~* ${UTM_INVALIDO})::int as utm_inv,
                   count(*) filter (where d.sem_pessoa)::int as sem_pessoa, count(*) filter (where d.sem_organizacao)::int as sem_org
              from analytics.negocios_bi d where ${w.join(' and ')}`,
           p,
@@ -673,7 +683,9 @@ export const BI_ANALISES: BiAnalise[] = [
         { campo: 'Faixa de Colaboradores (só RH)', sem: n(r.rh_sem), base: n(r.rh) },
         { campo: 'Faixa de profissionais da saúde (só Clínica)', sem: n(r.cl_sem), base: n(r.cl) },
         { campo: 'Canal de origem RD', sem: n(r.sem_canal), base: t },
+        { campo: 'Canal de origem RD = "Desconhecido"', sem: n(r.canal_desc), base: t },
         { campo: 'UTM Source', sem: n(r.sem_utm), base: t },
+        { campo: 'UTM Source inválido ({{...}}, undefined, unknown), entre os preenchidos', sem: n(r.utm_inv), base: n(r.utm_preench) },
         { campo: 'Pessoa vinculada', sem: n(r.sem_pessoa), base: t },
         { campo: 'Organização', sem: n(r.sem_org), base: t },
       ];

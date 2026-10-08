@@ -44,15 +44,15 @@ run('BI (transação com rollback)', () => {
     await campo(K.canalRd, 'Canal de origem RD', 'varchar', null);
     await campo(K.utm, 'UTM Source', 'varchar', null);
 
-    type D = { id: number; st: string | null; del?: boolean; valor?: number; owner: number; mid?: number; mot?: string; fonte?: number; tipo?: number; faixa?: number; canal?: string; pessoa?: boolean; criado?: string; fechado?: string };
+    type D = { id: number; st: string | null; del?: boolean; valor?: number; owner: number; mid?: number; mot?: string; fonte?: number; tipo?: number; faixa?: number; canal?: string; utm?: string; pessoa?: boolean; criado?: string; fechado?: string };
     const D: D[] = [
-      { id: 97100001, st: 'open', owner: 960001, fonte: 901, tipo: 9001, faixa: 8001, canal: 'Busca orgânica', pessoa: true },
-      { id: 97100002, st: 'won', valor: 1000, owner: 960001, fonte: 901, tipo: 9001, faixa: 8001, canal: 'Busca orgânica', pessoa: true, fechado: '2099-03-20T12:00:00Z' },
-      { id: 97100003, st: 'lost', owner: 960001, mid: 398, mot: 'Lead Invalido', fonte: 901, tipo: 9001, faixa: 8001, canal: 'Anúncio', pessoa: true }, // inválido: 398 tira do MQL
+      { id: 97100001, st: 'open', owner: 960001, fonte: 901, tipo: 9001, faixa: 8001, canal: 'Busca orgânica', utm: 'google', pessoa: true },
+      { id: 97100002, st: 'won', valor: 1000, owner: 960001, fonte: 901, tipo: 9001, faixa: 8001, canal: 'Busca orgânica', utm: '{{}}', pessoa: true, fechado: '2099-03-20T12:00:00Z' }, // UTM com modelo não preenchido
+      { id: 97100003, st: 'lost', owner: 960001, mid: 398, mot: 'Lead Invalido', fonte: 901, tipo: 9001, faixa: 8001, canal: 'Anúncio', utm: 'undefined', pessoa: true }, // inválido: 398 tira do MQL
       { id: 97100004, st: 'lost', owner: 960001, mid: 24, mot: 'Achou o preço caro', fonte: 902, tipo: 9001, canal: 'Anúncio' },
       { id: 97100005, st: null, del: true, owner: 960001, fonte: 901, tipo: 9001 }, // excluído: fora dos leads (padrão)
       { id: 97100006, st: 'won', valor: 500, owner: 960002, fonte: 902, tipo: 9002, fechado: '2099-03-30T12:00:00Z' },
-      { id: 97100007, st: 'lost', owner: 960002, mid: 24, mot: 'Achou o preço caro' }, // sem fonte, sem tipo
+      { id: 97100007, st: 'lost', owner: 960002, mid: 24, mot: 'Achou o preço caro', canal: 'Desconhecido' }, // sem fonte, sem tipo, canal desconhecido
       // curva de safra: janeiro de 2025, só no pipeline fictício
       { id: 97200001, st: 'won', valor: 100, owner: 960001, fonte: 901, tipo: 9001, criado: '2025-01-10T12:00:00Z', fechado: '2025-01-15T12:00:00Z' }, // ganho em 5 dias (dentro de 1 mês)
       { id: 97200002, st: 'won', valor: 100, owner: 960001, fonte: 901, tipo: 9001, criado: '2025-01-10T12:00:00Z', fechado: '2025-02-24T12:00:00Z' }, // ganho em 45 dias (dentro de 2 meses)
@@ -64,7 +64,7 @@ run('BI (transação com rollback)', () => {
          values ($1, 940001, 950001, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)`,
         [d.id, d.owner, d.st, d.del ?? false, d.valor ?? 0, d.mid ?? null, d.mot ?? null, d.criado ?? '2099-03-10T12:00:00Z', d.fechado ?? null, d.pessoa ? 1 : null],
       );
-      const cf: Record<string, unknown> = { [K.fonte]: d.fonte ?? null, [K.tipo]: d.tipo ?? null, [K.faixaColab]: d.faixa ?? null, [K.canalRd]: d.canal ?? null, [K.utm]: null };
+      const cf: Record<string, unknown> = { [K.fonte]: d.fonte ?? null, [K.tipo]: d.tipo ?? null, [K.faixaColab]: d.faixa ?? null, [K.canalRd]: d.canal ?? null, [K.utm]: d.utm ?? null };
       await c().query(`insert into raw.pd_deals (source_id, payload, payload_hash) values ($1, $2::jsonb, 'h')`, [d.id, JSON.stringify({ id: d.id, custom_fields: cf })]);
     }
     // histórico: o 2 (ganho) passou por reunião e proposta; o 6 (ganho) só chegou em SQL
@@ -190,7 +190,8 @@ run('BI (transação com rollback)', () => {
   it('canais: detalhe por "Canal de origem RD"', async () => {
     const p = por(await exec('canais-rd'), 'canal');
     expect(p['Busca orgânica']).toMatchObject({ leads: 2, ganhos: 1 });
-    expect(p['(em branco)']!.leads).toBe(2); // 6 e 7
+    expect(p['(em branco)']!.leads).toBe(1); // só o 6
+    expect(p['Desconhecido']!.leads).toBe(1); // o 7
   });
 
   /* ---------- Qualidade ---------- */
@@ -205,6 +206,8 @@ run('BI (transação com rollback)', () => {
     expect(kpi(r, 'prh')).toBeCloseTo(4 / 7, 5); // RH: faixa de colaboradores em branco em 4 de 7
     expect(kpi(r, 'pcl')).toBeNull(); // não há negócio de Clínica neste cenário
     expect(kpi(r, 'ppe')).toBeCloseTo(4 / 7, 5);
+    expect(kpi(r, 'pcd')).toBeCloseTo(1 / 7, 5); // canal de origem "Desconhecido": só o 7
+    expect(kpi(r, 'pui')).toBeCloseTo(2 / 3, 5); // UTM inválido ({{}} e undefined) entre os 3 que têm UTM
   });
 
   it('qualidade: por fonte, por mês, inválidos e campos em branco', async () => {
@@ -222,6 +225,8 @@ run('BI (transação com rollback)', () => {
     expect(b['Fonte do Lead']).toMatchObject({ sem: 1, base: 7 });
     expect(b['Faixa de Colaboradores (só RH)']).toMatchObject({ sem: 4, base: 7 });
     expect(b['Faixa de profissionais da saúde (só Clínica)']).toMatchObject({ sem: 0, base: 0 });
+    expect(b['Canal de origem RD = "Desconhecido"']).toMatchObject({ sem: 1, base: 7 });
+    expect(b['UTM Source inválido ({{...}}, undefined, unknown), entre os preenchidos']).toMatchObject({ sem: 2, base: 3 });
   });
 
   /* ---------- Filtros gerais e catálogo ---------- */
