@@ -42,22 +42,25 @@ export class PgDatahubStore implements DatahubStore, DealsStore, HistoryStore {
   }
 
   async saveDealHistory(h: Parameters<HistoryStore['saveDealHistory']>[0]): Promise<void> {
+    // Ordem importa: as linhas da linha do tempo primeiro e o "já li" (raw.pd_deal_flow) por último. Se o processo for
+    // interrompido no meio, o negócio continua na fila e é relido; o contrário o daria como lido sem ter linhas.
+    if (h.rows.length) {
+      await this.q.query(
+        `insert into crm.stage_history (deal_id, estagio, entrou_em, stage_id, saiu_em, user_id, origem_dado)
+         select $1, coalesce(s.nome, x.stage_id::text), x.entrou_em, x.stage_id, x.saiu_em, x.user_id, x.origem_dado
+           from jsonb_to_recordset($2::jsonb) as x(stage_id bigint, entrou_em timestamptz, saiu_em timestamptz, user_id bigint, origem_dado text)
+           left join crm.stages s on s.stage_id = x.stage_id
+         on conflict (deal_id, stage_id, entrou_em) do update set estagio = excluded.estagio, saiu_em = excluded.saiu_em,
+           user_id = excluded.user_id, origem_dado = excluded.origem_dado`,
+        [h.deal_id, JSON.stringify(h.rows)],
+      );
+    }
     await this.q.query(
       `insert into raw.pd_deal_flow (deal_id, items, items_hash, stage_change_time_vista, lido_em)
        values ($1, $2::jsonb, $3, $4, now())
        on conflict (deal_id) do update set items = excluded.items, items_hash = excluded.items_hash,
          stage_change_time_vista = excluded.stage_change_time_vista, lido_em = now()`,
       [h.deal_id, JSON.stringify(h.items), h.items_hash, h.stage_change_time],
-    );
-    if (!h.rows.length) return;
-    await this.q.query(
-      `insert into crm.stage_history (deal_id, estagio, entrou_em, stage_id, saiu_em, user_id, origem_dado)
-       select $1, coalesce(s.nome, x.stage_id::text), x.entrou_em, x.stage_id, x.saiu_em, x.user_id, x.origem_dado
-         from jsonb_to_recordset($2::jsonb) as x(stage_id bigint, entrou_em timestamptz, saiu_em timestamptz, user_id bigint, origem_dado text)
-         left join crm.stages s on s.stage_id = x.stage_id
-       on conflict (deal_id, stage_id, entrou_em) do update set estagio = excluded.estagio, saiu_em = excluded.saiu_em,
-         user_id = excluded.user_id, origem_dado = excluded.origem_dado`,
-      [h.deal_id, JSON.stringify(h.rows)],
     );
   }
 

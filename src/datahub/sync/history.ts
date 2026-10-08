@@ -30,6 +30,8 @@ export async function syncHistory(args: {
   origem?: 'agendada' | 'manual';
   /** Para depois de N negócios (carga gradual). */
   maxDeals?: number;
+  /** Consultas simultâneas ao Pipedrive (padrão 1). */
+  concurrency?: number;
   now: () => Date;
   onProgress?: (feitos: number, total: number) => void;
 }): Promise<HistoryResult> {
@@ -51,35 +53,55 @@ export async function syncHistory(args: {
     const tasks = args.maxDeals != null ? fila.slice(0, args.maxDeals) : fila;
     let seguidas = 0;
     let parouPorCota: string | null = null;
+    let fatal: unknown = null;
+    let proximo = 0;
+    let feitos = 0;
 
-    for (const [i, t] of tasks.entries()) {
-      let flow: unknown[];
-      try {
-        flow = await client.getDealFlow(t.deal_id);
-        seguidas = 0;
-      } catch (e) {
-        if (e instanceof PipedriveError && e.kind === 'budget') {
-          parouPorCota = e.message;
-          break;
+    // Consultas em paralelo (padrão 1; o script usa mais): a API aguenta, e a espera da rede é o que custa tempo.
+    // Cada trabalhador pega o próximo negócio da fila; a gravação no banco é feita em seguida, pela mesma conexão.
+    const trabalhador = async () => {
+      while (!parouPorCota && !fatal) {
+        const i = proximo++;
+        if (i >= tasks.length) return;
+        const t = tasks[i]!;
+        let flow: unknown[];
+        try {
+          flow = await client.getDealFlow(t.deal_id);
+          seguidas = 0;
+        } catch (e) {
+          if (e instanceof PipedriveError && e.kind === 'budget') {
+            parouPorCota = parouPorCota ?? e.message;
+            return;
+          }
+          if (e instanceof PipedriveError && (e.kind === 'auth' || e.kind === 'rate_limited')) {
+            fatal = fatal ?? e;
+            return;
+          }
+          counts.falhas++;
+          await store.recordError({ job_id: jobId, entity: HISTORY_ENTITY, source_id: t.deal_id, mensagem: scrubMessage(e instanceof Error ? e.message : String(e)) });
+          if (++seguidas >= 10) fatal = fatal ?? new Error('10 falhas seguidas ao ler históricos; parei para não gastar a cota à toa.');
+          continue;
         }
-        if (e instanceof PipedriveError && (e.kind === 'auth' || e.kind === 'rate_limited')) throw e;
-        counts.falhas++;
-        await store.recordError({ job_id: jobId, entity: HISTORY_ENTITY, source_id: t.deal_id, mensagem: scrubMessage(e instanceof Error ? e.message : String(e)) });
-        if (++seguidas >= 10) throw new Error('10 falhas seguidas ao ler históricos; parei para não gastar a cota à toa.');
-        continue;
+        try {
+          counts.lidos++;
+          const items = trimFlowItems(flow);
+          const built = buildStageHistory(t.created_at, t.stage_id, items);
+          for (const a of built.avisos) {
+            avisos++;
+            await store.recordError({ job_id: jobId, entity: HISTORY_ENTITY, source_id: t.deal_id, mensagem: `aviso: ${a}` });
+          }
+          await store.saveDealHistory({ deal_id: t.deal_id, items, items_hash: payloadHash(items), stage_change_time: t.stage_change_time, rows: built.rows });
+          counts.gravados++;
+          args.onProgress?.(++feitos, tasks.length);
+        } catch (e) {
+          fatal = fatal ?? e; // erro de banco: para tudo
+          return;
+        }
       }
-      counts.lidos++;
-      const items = trimFlowItems(flow);
-      const built = buildStageHistory(t.created_at, t.stage_id, items);
-      for (const a of built.avisos) {
-        avisos++;
-        await store.recordError({ job_id: jobId, entity: HISTORY_ENTITY, source_id: t.deal_id, mensagem: `aviso: ${a}` });
-      }
-      await store.saveDealHistory({ deal_id: t.deal_id, items, items_hash: payloadHash(items), stage_change_time: t.stage_change_time, rows: built.rows });
-      counts.gravados++;
-      args.onProgress?.(i + 1, tasks.length);
-    }
-    restantes = pendentesAntes - counts.lidos - counts.falhas;
+    };
+    await Promise.all(Array.from({ length: Math.max(1, args.concurrency ?? 1) }, trabalhador));
+    if (fatal) throw fatal;
+    restantes = pendentesAntes - counts.gravados - counts.falhas;
 
     const tokens_gastos = client.usage.tokens - before.tokens;
     const completo = restantes <= 0 && !parouPorCota;

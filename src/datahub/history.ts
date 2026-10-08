@@ -61,9 +61,18 @@ export type BuiltHistory = { rows: StageHistoryRow[]; avisos: string[] };
 /** Monta a linha do tempo. `createdAt` e `currentStageId` vêm do negócio (crm.deals). */
 export function buildStageHistory(createdAt: string | null, currentStageId: number | null, items: FlowItem[]): BuiltHistory {
   const avisos: string[] = [];
-  const changes = items
+  const sorted = items
     .filter((i) => i.field_key === 'stage_id' && i.log_time && intOrNull(i.new_value) !== null)
     .sort((a, b) => Date.parse(a.log_time!) - Date.parse(b.log_time!) || (a.id ?? 0) - (b.id ?? 0));
+  // O Pipedrive às vezes registra a MESMA mudança duas vezes no mesmo segundo (visto em integrações via API: dois itens
+  // 1 -> 3 com o mesmo log_time). Itens idênticos em origem, destino e momento viram um só; o JSON original em raw guarda os dois.
+  const vistos = new Set<string>();
+  const changes = sorted.filter((i) => {
+    const k = `${intOrNull(i.old_value)}|${intOrNull(i.new_value)}|${i.log_time}`;
+    if (vistos.has(k)) return false;
+    vistos.add(k);
+    return true;
+  });
 
   if (!changes.length) {
     if (!createdAt || currentStageId === null) return { rows: [], avisos: ['sem data de criação ou sem etapa atual: nada a registrar'] };
@@ -86,6 +95,15 @@ export function buildStageHistory(createdAt: string | null, currentStageId: numb
       origem_dado: 'flow',
     });
   });
+  // Trava final: o banco exige (negócio, etapa, momento) único. Se ainda restar repetição (ex.: duas mudanças para a mesma etapa
+  // no mesmo segundo, vindas de etapas de origem diferentes), fica a última e o fato é avisado; o JSON original em raw guarda tudo.
+  const porChave = new Map<string, StageHistoryRow>();
+  for (const r of rows) porChave.set(`${r.stage_id}|${r.entrou_em}`, r);
+  if (porChave.size !== rows.length) {
+    avisos.push(`${rows.length - porChave.size} linha(s) repetida(s) na mesma etapa e no mesmo segundo foram unidas`);
+    rows.length = 0;
+    rows.push(...porChave.values());
+  }
   const last = rows.at(-1)!;
   if (currentStageId !== null && last.stage_id !== currentStageId) {
     avisos.push(`o histórico termina na etapa ${last.stage_id}, mas o negócio está hoje na etapa ${currentStageId}`);

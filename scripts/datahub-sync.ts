@@ -114,7 +114,7 @@ try {
   }
   if (wantsHistory) {
     const h = await syncHistory({
-      client, store, year: createdYear!, modo: 'backfill', origem: 'manual', maxDeals, now: () => new Date(),
+      client, store, year: createdYear!, modo: 'backfill', origem: 'manual', maxDeals, concurrency: Number(opt('--concurrency') ?? 6), now: () => new Date(),
       onProgress: (feitos, total) => { if (feitos % 250 === 0) console.log(`  histórico: ${feitos}/${total} negócios lidos (${client.usage.tokens} unidades até agora)`); },
     });
     results.push({ ...h, extra: `criados em ${createdYear}: ${h.semMudanca} sem mudança de etapa (sem consultar), ${h.pendentesAntes} com mudança, ${h.restantes} ainda na fila, ${h.avisos} aviso(s)` });

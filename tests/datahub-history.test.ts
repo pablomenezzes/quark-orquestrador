@@ -52,6 +52,30 @@ describe('buildStageHistory', () => {
     expect(b.avisos).toEqual([]);
   });
 
+  it('a mesma mudança registrada duas vezes no mesmo segundo (visto no Pipedrive) vira uma só, sem linha duplicada', () => {
+    const b = buildStageHistory(CRIADO, 4, [
+      it_(1211060, 15, 2, '2026-03-01T10:00:00.000Z', 22), it_(1211125, 2, 1, '2026-03-01T10:05:00.000Z', 22),
+      it_(1211130, 1, 3, '2026-03-01T10:06:00.000Z', 22), it_(1211132, 1, 3, '2026-03-01T10:06:00.000Z', 22), // duplicata
+      it_(1212291, 3, 4, '2026-03-02T10:00:00.000Z', 21),
+    ]);
+    expect(b.rows.map((r) => r.stage_id)).toEqual([15, 2, 1, 3, 4]);
+    const chaves = b.rows.map((r) => `${r.stage_id}|${r.entrou_em}`);
+    expect(new Set(chaves).size).toBe(chaves.length); // nenhuma chave repetida: o banco não reclama
+    expect(b.rows[3]).toMatchObject({ stage_id: 3, entrou_em: '2026-03-01T10:06:00.000Z', saiu_em: '2026-03-02T10:00:00.000Z' });
+  });
+
+  it('duas mudanças diferentes para a mesma etapa no mesmo segundo: trava final une e avisa (o banco nunca recebe chave repetida)', () => {
+    const b = buildStageHistory(CRIADO, 3, [it_(1, 1, 3, '2026-03-02T10:00:00.000Z'), it_(2, 2, 3, '2026-03-02T10:00:00.000Z')]);
+    const chaves = b.rows.map((r) => `${r.stage_id}|${r.entrou_em}`);
+    expect(new Set(chaves).size).toBe(chaves.length);
+    expect(b.avisos.join(' ')).toMatch(/repetida/);
+  });
+
+  it('negócio que sai de uma etapa e volta no mesmo segundo mantém as duas passagens (momentos diferentes não são duplicata)', () => {
+    const b = buildStageHistory(CRIADO, 4, [it_(1, 6, 4, '2026-03-02T14:09:11.000Z'), it_(2, 4, 6, '2026-03-02T14:09:09.000Z')]);
+    expect(b.rows.map((r) => [r.stage_id, r.entrou_em])).toEqual([[4, CRIADO], [6, '2026-03-02T14:09:09.000Z'], [4, '2026-03-02T14:09:11.000Z']]);
+  });
+
   it('volta para uma etapa anterior vira uma linha nova (a mesma etapa em dois momentos)', () => {
     const b = buildStageHistory(CRIADO, 3, [it_(1, 3, 1, '2026-03-02T10:00:00.000Z'), it_(2, 1, 3, '2026-03-03T10:00:00.000Z')]);
     expect(b.rows.filter((r) => r.stage_id === 3)).toHaveLength(2);
@@ -208,6 +232,36 @@ describe('sincronização do histórico', () => {
     const r = await run(store, fake({ 50: [change(1, 1, 3, '2026-03-02 10:00:00')] }).client);
     expect(r).toMatchObject({ status: 'ok', avisos: 1, falhas: 0 });
     expect(store.errors[0]!.mensagem).toMatch(/^aviso:/);
+  });
+
+  it('com consultas em paralelo o resultado é o mesmo: todos lidos, cada um gravado uma vez', async () => {
+    const store = new MemoryDatahubStore();
+    const ids = [200, 201, 202, 203, 204, 205, 206];
+    const flows: Record<number, unknown[]> = {};
+    for (const id of ids) {
+      addDeal(store, id, { status: 'open', stage_id: 3, stage_change_time: '2026-03-02T10:00:00.000Z' });
+      flows[id] = [change(id, 1, 3, '2026-03-02 10:00:00')];
+    }
+    const f = fake(flows);
+    const r = await run(store, f.client, { concurrency: 3 });
+    expect(r).toMatchObject({ status: 'ok', lidos: 7, gravados: 7, restantes: 0, tokens_gastos: 280 });
+    expect([...f.calls].sort()).toEqual([...ids].sort());
+    expect(store.dealFlow.size).toBe(7);
+  });
+
+  it('em paralelo, a cota acabando para a rodada sem erro e o que ficou continua na fila', async () => {
+    const store = new MemoryDatahubStore();
+    const ids = [210, 211, 212, 213, 214, 215];
+    for (const id of ids) addDeal(store, id, { status: 'open', stage_id: 3, stage_change_time: '2026-03-02T10:00:00.000Z' });
+    const flows = Object.fromEntries(ids.map((id) => [id, [change(id, 1, 3, '2026-03-02 10:00:00')]]));
+    const a = fake(flows, { stopAfter: 3 });
+    const r = await run(store, a.client, { concurrency: 3 });
+    expect(r.status).toBe('parcial');
+    expect(r.gravados).toBe(3);
+    expect(r.restantes).toBe(3);
+    const b = fake(flows);
+    expect(await run(store, b.client, { concurrency: 3 })).toMatchObject({ status: 'ok', lidos: 3 });
+    expect(store.dealFlow.size).toBe(6);
   });
 
   it('limite de negócios por rodada (carga gradual)', async () => {
