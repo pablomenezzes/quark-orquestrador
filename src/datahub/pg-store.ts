@@ -18,7 +18,7 @@ export class PgDatahubStore implements DatahubStore, DealsStore, HistoryStore {
   async seedNoChangeHistory(range: { from: string; to: string }): Promise<number> {
     const r = await this.q.query(
       `insert into crm.stage_history (deal_id, estagio, entrou_em, stage_id, origem_dado)
-       select d.pipedrive_id, coalesce(s.nome, d.stage_id::text), d.created_at, d.stage_id, 'criacao'
+       select d.pipedrive_id, coalesce(s.nome || ' #' || d.stage_id, d.stage_id::text), d.created_at, d.stage_id, 'criacao'
          from crm.deals d left join crm.stages s on s.stage_id = d.stage_id
         where d.stage_change_time is null and d.created_at >= $1 and d.created_at < $2
           and d.created_at is not null and d.stage_id is not null and not d.is_deleted
@@ -42,12 +42,14 @@ export class PgDatahubStore implements DatahubStore, DealsStore, HistoryStore {
   }
 
   async saveDealHistory(h: Parameters<HistoryStore['saveDealHistory']>[0]): Promise<void> {
+    // `estagio` guarda "nome #ID" (ID e nome juntos): a chave antiga (negócio, nome, momento) colidia quando uma automação
+    // passava o negócio, no mesmo segundo, por duas etapas de pipelines diferentes com o mesmo nome (ex.: "Conexão [Prospect]").
     // Ordem importa: as linhas da linha do tempo primeiro e o "já li" (raw.pd_deal_flow) por último. Se o processo for
     // interrompido no meio, o negócio continua na fila e é relido; o contrário o daria como lido sem ter linhas.
     if (h.rows.length) {
       await this.q.query(
         `insert into crm.stage_history (deal_id, estagio, entrou_em, stage_id, saiu_em, user_id, origem_dado)
-         select $1, coalesce(s.nome, x.stage_id::text), x.entrou_em, x.stage_id, x.saiu_em, x.user_id, x.origem_dado
+         select $1, coalesce(s.nome || ' #' || x.stage_id, x.stage_id::text), x.entrou_em, x.stage_id, x.saiu_em, x.user_id, x.origem_dado
            from jsonb_to_recordset($2::jsonb) as x(stage_id bigint, entrou_em timestamptz, saiu_em timestamptz, user_id bigint, origem_dado text)
            left join crm.stages s on s.stage_id = x.stage_id
          on conflict (deal_id, stage_id, entrou_em) do update set estagio = excluded.estagio, saiu_em = excluded.saiu_em,

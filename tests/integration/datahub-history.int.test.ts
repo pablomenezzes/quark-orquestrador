@@ -86,15 +86,31 @@ run('histórico de etapas (transação com rollback)', () => {
   it('a linha do tempo fica correta e o JSON guardado é só o essencial (sem user agent)', async () => {
     const h = await c().query(`select deal_id, estagio, stage_id, entrou_em, saiu_em, user_id, origem_dado from crm.stage_history where deal_id >= 97000000 order by deal_id, entrou_em`);
     expect(h.rows.map((x) => [x.deal_id, x.estagio, x.saiu_em ? 'fechada' : 'aberta', x.origem_dado])).toEqual([
-      ['97000001', 'Lead fictício', 'aberta', 'criacao'],
-      ['97000002', 'Lead fictício', 'fechada', 'criacao'],
-      ['97000002', 'Reunião fictícia', 'fechada', 'flow'],
-      ['97000002', 'Proposta fictícia', 'aberta', 'flow'],
+      ['97000001', 'Lead fictício #950001', 'aberta', 'criacao'],
+      ['97000002', 'Lead fictício #950001', 'fechada', 'criacao'],
+      ['97000002', 'Reunião fictícia #950002', 'fechada', 'flow'],
+      ['97000002', 'Proposta fictícia #950003', 'aberta', 'flow'],
     ]);
     expect(h.rows[2].user_id).toBe('960001');
     const raw = await c().query(`select items, stage_change_time_vista from raw.pd_deal_flow where deal_id = 97000002`);
     expect(raw.rows[0].items).toHaveLength(2);
     expect(JSON.stringify(raw.rows[0].items)).not.toContain('texto longo');
+  });
+
+  it('duas etapas de pipelines diferentes com o MESMO NOME no mesmo segundo (automação) não colidem: nome e ID juntos', async () => {
+    await c().query(`insert into crm.pipelines (pipeline_id, nome) values (940002, 'Outro Funil Fictício')`);
+    await c().query(`insert into crm.stages (stage_id, pipeline_id, nome) values (950011, 940001, 'Conexão fictícia'), (950012, 940002, 'Conexão fictícia'), (950013, 940002, 'Contratação fictícia')`);
+    await c().query(`insert into crm.deals (pipedrive_id, pipeline_id, stage_id, status, created_at, stage_change_time) values (97000003, 940002, 950013, 'open', '2099-04-01T09:00:00Z', '2099-04-01T09:00:09Z')`);
+    await c().query('set local role orq_sync');
+    const client: HistoryClient = {
+      usage: { tokens: 0, requests: 0, rateLimited: 0 },
+      getDealFlow: async () => [flow(1, 950099, 950011, '2099-04-01 09:00:05'), flow(2, 950011, 950012, '2099-04-01 09:00:05'), flow(3, 950012, 950013, '2099-04-01 09:00:09')],
+    };
+    const r = await syncHistory({ client, store: new PgDatahubStore(c()), year: 2099, now: () => NOW });
+    expect(r.status).toBe('ok');
+    await c().query('reset role');
+    const h = await c().query(`select estagio, stage_id from crm.stage_history where deal_id = 97000003 and entrou_em = '2099-04-01T09:00:05Z' order by stage_id`);
+    expect(h.rows.map((x) => x.estagio)).toEqual(['Conexão fictícia #950011', 'Conexão fictícia #950012']);
   });
 
   it('o Painel lê o histórico, os marcos e o andamento, só por views', async () => {
@@ -107,7 +123,7 @@ run('histórico de etapas (transação com rollback)', () => {
     const m = await c().query(`select marco from analytics.negocios_marcos where deal_id = 97000002`);
     expect(m.rows).toEqual([{ marco: 'proposta' }]); // ganho dado em Proposta também "chegou em proposta"
     const p = await c().query(`select negocios, sem_mudanca_de_etapa, historico_lido, pendentes from analytics.historico_progresso where ano_criacao = 2099`);
-    expect(p.rows[0]).toEqual({ negocios: 2, sem_mudanca_de_etapa: 1, historico_lido: 1, pendentes: 0 });
+    expect(p.rows[0]).toEqual({ negocios: 3, sem_mudanca_de_etapa: 1, historico_lido: 2, pendentes: 0 });
     const repo = new PgPainelRepo(c() as never);
     const ficha = await repo.negocio(97000002);
     expect((ficha as { historico: unknown[] }).historico).toHaveLength(3);
