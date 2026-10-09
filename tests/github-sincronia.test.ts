@@ -37,8 +37,11 @@ describe('.github/workflows/sincronia.yml: sincronia automática segura', () => 
 describe('scripts/github-segredos.ps1: segredos sem aparecer na tela', () => {
   const s = ler('scripts/github-segredos.ps1');
   it('passa o valor pela entrada padrão (nunca na linha de comando) e recusa papel que não seja o orq_sync', () => {
-    expect(s).toContain('$env_[$n] | & $gh secret set $n');
+    expect(s).toContain('secret set $n --repo $repo < ');
+    expect(s).toContain('WriteAllText($tmp, $env_[$n]'); // sem CRLF no fim do valor
+    expect(s).not.toMatch(/\$env_\[\$n\] \|/);
     expect(s).not.toMatch(/secret set[^\n]*(--body|-b )/);
+    expect(s).toContain('Remove-Item $tmp'); // o arquivo temporário não fica no disco
     expect(s).toContain('orq_sync');
   });
   it('sem -Apply só mostra os nomes', () => {

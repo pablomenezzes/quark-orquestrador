@@ -25,9 +25,17 @@ if (-not $Apply) { Write-Host 'Nada guardado (use -Apply).'; exit 0 }
 $gh = (Get-Command gh -ErrorAction SilentlyContinue).Source
 if (-not $gh -and (Test-Path "$env:ProgramFiles\GitHub CLI\gh.exe")) { $gh = "$env:ProgramFiles\GitHub CLI\gh.exe" }
 if (-not $gh) { throw 'gh nao instalado.' }
-foreach ($n in $nomes) {
-  $env_[$n] | & $gh secret set $n --repo $repo
-  if ($LASTEXITCODE -ne 0) { throw "Falhou ao guardar $n" }
-  Write-Host "  guardado: $n"
+# Enviar por pipe do PowerShell acrescentaria CRLF ao valor (e o ref do projeto deixaria de casar com a URL).
+# Por isso o valor vai de um arquivo temporario SEM quebra de linha, redirecionado para a entrada padrao do gh, e o arquivo e apagado.
+$tmp = Join-Path $env:TEMP ("seg-" + [guid]::NewGuid().ToString('N'))
+try {
+  foreach ($n in $nomes) {
+    [IO.File]::WriteAllText($tmp, $env_[$n], (New-Object Text.UTF8Encoding($false)))
+    cmd /c "`"$gh`" secret set $n --repo $repo < `"$tmp`""
+    if ($LASTEXITCODE -ne 0) { throw "Falhou ao guardar $n" }
+    Write-Host "  guardado: $n"
+  }
+} finally {
+  if (Test-Path $tmp) { [IO.File]::WriteAllBytes($tmp, [byte[]]::new(0)); Remove-Item $tmp -Force }
 }
 & $gh secret list --repo $repo
