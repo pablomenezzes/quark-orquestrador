@@ -1,11 +1,11 @@
-import { describe, it, expect } from 'vitest';
+﻿import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
- * Impõe as regras obrigatórias do banco (seção 4 do MD) sobre os arquivos de migration:
+ * ImpÃµe as regras obrigatÃ³rias do banco (seÃ§Ã£o 4 do MD) sobre os arquivos de migration:
  * - nada no schema public;
- * - somente aditivas: sem DROP, RENAME, mudança de tipo, TRUNCATE ou DELETE;
+ * - somente aditivas: sem DROP, RENAME, mudanÃ§a de tipo, TRUNCATE ou DELETE;
  * - todo objeto qualificado por schema;
  * - toda tabela criada tem RLS ativado.
  */
@@ -20,7 +20,7 @@ function strip(sql: string): string {
   return sql.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, ' ');
 }
 
-/** Divide em comandos respeitando corpos $$ ... $$ (funções). */
+/** Divide em comandos respeitando corpos $$ ... $$ (funÃ§Ãµes). */
 function statements(sql: string): string[] {
   const out: string[] = [];
   let cur = '';
@@ -51,7 +51,7 @@ const stmts = all.flatMap(({ file, raw }) =>
 );
 const bodyOnly = (s: string) => s.replace(/\$\$[\s\S]*?\$\$/g, ' ');
 
-describe('migrations (regras da seção 4)', () => {
+describe('migrations (regras da seÃ§Ã£o 4)', () => {
   it('existem migrations', () => {
     expect(files.length).toBeGreaterThan(0);
   });
@@ -60,7 +60,7 @@ describe('migrations (regras da seção 4)', () => {
     for (const f of files) expect(f).toMatch(/^\d{4}_[a-z0-9_]+\.sql$/);
   });
 
-  it('regra 1: não toca no schema public', () => {
+  it('regra 1: nÃ£o toca no schema public', () => {
     for (const { file, sql } of stmts) {
       expect(sql, file).not.toMatch(/\bpublic\./);
       expect(sql, file).not.toMatch(/\bschema\s+public\b/);
@@ -68,7 +68,7 @@ describe('migrations (regras da seção 4)', () => {
     }
   });
 
-  it('regra 3: sem DROP, RENAME, mudança de tipo, TRUNCATE ou DELETE', () => {
+  it('regra 3: sem DROP, RENAME, mudanÃ§a de tipo, TRUNCATE ou DELETE', () => {
     for (const { file, sql } of stmts) {
       const s = bodyOnly(sql);
       expect(s, `${file}: ${s.slice(0, 80)}`).not.toMatch(/\bdrop\b/);
@@ -80,7 +80,7 @@ describe('migrations (regras da seção 4)', () => {
     }
   });
 
-  it('tabelas, views e funções são criadas em schema próprio', () => {
+  it('tabelas, views e funÃ§Ãµes sÃ£o criadas em schema prÃ³prio', () => {
     const re = /^create (?:or replace )?(?:table|view|function)(?: if not exists)? ([a-z_]+)\./;
     for (const { file, sql } of stmts) {
       if (!/^create (?:or replace )?(?:table|view|function)\b/.test(sql)) continue;
@@ -90,7 +90,7 @@ describe('migrations (regras da seção 4)', () => {
     }
   });
 
-  it('índices apontam para tabelas de schema próprio', () => {
+  it('Ã­ndices apontam para tabelas de schema prÃ³prio', () => {
     for (const { file, sql } of stmts) {
       if (!/^create (?:unique )?index\b/.test(sql)) continue;
       const m = / on ([a-z_]+)\./.exec(sql);
@@ -99,7 +99,7 @@ describe('migrations (regras da seção 4)', () => {
     }
   });
 
-  it('schemas criados são apenas os do orquestrador', () => {
+  it('schemas criados sÃ£o apenas os do orquestrador', () => {
     for (const { sql } of stmts) {
       const m = /^create schema(?: if not exists)? ([a-z_]+)/.exec(sql);
       if (m) expect(OWN_SCHEMAS).toContain(m[1]);
@@ -108,18 +108,18 @@ describe('migrations (regras da seção 4)', () => {
 
   it('toda tabela criada tem RLS ativado', () => {
     const created = stmts
-      .map((s) => /^create table(?: if not exists)? ([a-z_]+\.[a-z_]+)/.exec(s.sql)?.[1])
+      .map((s) => /^create table(?: if not exists)? ([a-z0-9_]+\.[a-z0-9_]+)/.exec(s.sql)?.[1])
       .filter((x): x is string => !!x);
     expect(created.length).toBeGreaterThan(0);
     const enabled = new Set(
       stmts
-        .map((s) => /^alter table ([a-z_]+\.[a-z_]+) enable row level security$/.exec(s.sql)?.[1])
+        .map((s) => /^alter table ([a-z0-9_]+\.[a-z0-9_]+) enable row level security$/.exec(s.sql)?.[1])
         .filter((x): x is string => !!x),
     );
     for (const t of created) expect(enabled.has(t), `RLS ausente em ${t}`).toBe(true);
   });
 
-  it('orq.events é protegida contra UPDATE, DELETE e TRUNCATE por trigger', () => {
+  it('orq.events Ã© protegida contra UPDATE, DELETE e TRUNCATE por trigger', () => {
     const triggers = stmts.filter((s) => /^create trigger\b/.test(s.sql) && s.sql.includes(' on orq.events'));
     const joined = triggers.map((t) => t.sql).join(' | ');
     expect(joined).toMatch(/before update or delete/);

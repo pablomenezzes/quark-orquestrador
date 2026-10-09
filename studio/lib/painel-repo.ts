@@ -74,7 +74,30 @@ export interface PainelRepo {
   statusContagem(): Promise<StatusContagem[]>;
   setMotivoExcluiMql(reasonId: number, excluiMql: boolean): Promise<void>;
   setStatusContaComoLead(status: StatusNegocio, conta: boolean): Promise<void>;
+  /** Conversões do site (GA4): eventos que existem, URLs onde cada um aparece e as regras criadas no Painel. */
+  conversaoEventos(dias: number): Promise<unknown[]>;
+  conversaoEventoUrls(evento: string, dias: number): Promise<unknown[]>;
+  conversaoRegras(): Promise<unknown[]>;
+  criarConversaoRegra(r: ConversaoRegraEntrada): Promise<{ id: number }>;
+  atualizarConversaoRegra(id: number, r: Partial<ConversaoRegraEntrada> & { ativo?: boolean }): Promise<void>;
 }
+
+export const REGRA_TIPOS = ['lead', 'intermediaria', 'ignorar'] as const;
+export const REGRA_URL_MODOS = ['qualquer', 'igual', 'comeca', 'contem'] as const;
+export type ConversaoRegraEntrada = {
+  nome: string;
+  tipo: (typeof REGRA_TIPOS)[number];
+  evento: string;
+  url_modo: (typeof REGRA_URL_MODOS)[number];
+  url_valor: string | null;
+};
+
+/** Mesma comparação de URL da view analytics.site_conversoes_dia, aplicada à "URL de Conversão" dos negócios do Pipedrive. */
+const CASA_URL_NEGOCIO = `case r.url_modo
+  when 'igual'  then n.caminho_url = mkt.caminho_url(r.url_valor)
+  when 'comeca' then n.caminho_url like mkt.caminho_url(r.url_valor) || '%'
+  when 'contem' then n.caminho_url like '%' || lower(btrim(r.url_valor)) || '%'
+  else false end`;
 
 type Row = Record<string, any>;
 
@@ -243,6 +266,71 @@ export class PgPainelRepo implements PainelRepo {
   async setStatusContaComoLead(status: StatusNegocio, conta: boolean): Promise<void> {
     const r = await this.pool.query(`update ops.cfg_status_contagem set conta_como_lead = $2, atualizado_em = now() where status = $1`, [status, conta]);
     if (!r.rowCount) throw new PainelNotFound('status');
+  }
+
+  async conversaoEventos(dias: number) {
+    return (
+      await this.pool.query(
+        `select evento, sum(eventos)::int as eventos, sum(usuarios)::int as usuarios, count(distinct caminho)::int as urls,
+                max(dia)::text as ultimo_dia
+           from analytics.site_eventos_dia where dia >= current_date - $1::int
+          group by evento order by sum(eventos) desc, evento`,
+        [dias],
+      )
+    ).rows;
+  }
+
+  async conversaoEventoUrls(evento: string, dias: number) {
+    return (
+      await this.pool.query(
+        `select host, caminho, sum(eventos)::int as eventos, sum(usuarios)::int as usuarios, max(dia)::text as ultimo_dia
+           from analytics.site_eventos_dia where evento = $1 and dia >= current_date - $2::int
+          group by host, caminho order by sum(eventos) desc, caminho limit 200`,
+        [evento, dias],
+      )
+    ).rows;
+  }
+
+  /** Cada regra com o que ela pega nos últimos 30 dias: eventos do GA4 e negócios do Pipedrive com aquela URL de conversão. */
+  async conversaoRegras() {
+    return (
+      await this.pool.query(
+        `select r.id, r.nome, r.tipo, r.evento, r.url_modo, r.url_valor, r.ativo, r.atualizado_em,
+                coalesce(c.eventos, 0)::int as eventos_30d, coalesce(c.usuarios, 0)::int as usuarios_30d,
+                case when r.url_modo = 'qualquer' then null else (
+                  select count(*)::int from analytics.negocios_url n
+                   where n.criado_em >= now() - interval '30 days' and n.tem_url and ${CASA_URL_NEGOCIO}
+                ) end as negocios_30d
+           from analytics.conversao_regras r
+           left join lateral (
+             select sum(eventos) as eventos, sum(usuarios) as usuarios from analytics.site_conversoes_dia s
+              where s.regra_id = r.id and s.dia >= current_date - 30
+           ) c on true
+          order by r.ativo desc, r.id`,
+      )
+    ).rows;
+  }
+
+  async criarConversaoRegra(r: ConversaoRegraEntrada) {
+    const x = await this.pool.query(
+      `insert into mkt.conversao_regras (nome, tipo, evento, url_modo, url_valor) values ($1, $2, $3, $4, $5) returning id`,
+      [r.nome, r.tipo, r.evento, r.url_modo, r.url_modo === 'qualquer' ? null : r.url_valor],
+    );
+    return { id: Number(x.rows[0].id) };
+  }
+
+  async atualizarConversaoRegra(id: number, r: Partial<ConversaoRegraEntrada> & { ativo?: boolean }) {
+    const sets: string[] = [];
+    const vals: unknown[] = [id];
+    for (const k of ['nome', 'tipo', 'evento', 'url_modo', 'url_valor', 'ativo'] as const) {
+      if (k in r) {
+        vals.push(k === 'url_valor' && r.url_modo === 'qualquer' ? null : r[k]);
+        sets.push(`${k} = $${vals.length}`);
+      }
+    }
+    if (!sets.length) return;
+    const x = await this.pool.query(`update mkt.conversao_regras set ${sets.join(', ')}, atualizado_em = now() where id = $1`, vals);
+    if (!x.rowCount) throw new PainelNotFound('regra');
   }
 
   async setStageMarco(stageId: number, marco: Marco | null): Promise<void> {

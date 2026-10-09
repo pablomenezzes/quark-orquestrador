@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "studio": "tsx studio/main.ts --open",
     "datahub:sync": "tsx scripts/datahub-sync.ts",
+    "ga4:sync": "tsx scripts/ga4-sync.ts",
     "backup": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/backup-local.ps1",
     "sincronia": "node scripts/sincronia.mjs",
     "mcp:build": "node scripts/build-mcp.mjs"

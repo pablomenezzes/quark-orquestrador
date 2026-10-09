@@ -4,7 +4,7 @@ import { extname, join, normalize, resolve, sep } from 'node:path';
 import { FormsStore, StoreError } from './lib/forms-store.js';
 import { FORM_ID_RE } from './lib/form-schema.js';
 import { BI_PRODUTOS, BiNotFound, type BiFiltros, type BiProduto, type BiRepo } from './lib/bi.js';
-import { MARCOS, PRODUTOS, STATUS_NEGOCIO, PainelNotFound, type Marco, type NegociosFiltro, type PainelRepo, type Produto, type StatusNegocio } from './lib/painel-repo.js';
+import { MARCOS, PRODUTOS, REGRA_TIPOS, REGRA_URL_MODOS, STATUS_NEGOCIO, PainelNotFound, type Marco, type NegociosFiltro, type PainelRepo, type Produto, type StatusNegocio } from './lib/painel-repo.js';
 
 export type SubmitFn = (formId: string, mode: 'dry' | 'real', payload: unknown, ctx: { userAgent: string | null }) => Promise<{ status: number; body: unknown }>;
 
@@ -232,6 +232,49 @@ export function createStudioServer(opts: StudioOptions): Server {
       }
       if (method === 'GET' && path === '/api/painel/motivos-perda') return send(res, 200, await repo.motivosPerda());
       if (method === 'GET' && path === '/api/painel/status-contagem') return send(res, 200, await repo.statusContagem());
+
+      // Conversões do site (GA4): eventos, URLs onde aparecem e regras (evento + URL) que o Painel grava.
+      const diasConv = (): number => {
+        const d = url.searchParams.get('dias');
+        if (d == null) return 30;
+        if (!/^\d{1,3}$/.test(d) || Number(d) < 1 || Number(d) > 730) throw new HttpError(400, 'dias_invalido');
+        return Number(d);
+      };
+      if (method === 'GET' && path === '/api/painel/conversoes/eventos') return send(res, 200, await repo.conversaoEventos(diasConv()));
+      if (method === 'GET' && path === '/api/painel/conversoes/eventos/urls') {
+        const ev = url.searchParams.get('evento') ?? '';
+        if (!ev || ev.length > 200) throw new HttpError(400, 'evento_invalido');
+        return send(res, 200, await repo.conversaoEventoUrls(ev, diasConv()));
+      }
+      if (method === 'GET' && path === '/api/painel/conversoes/regras') return send(res, 200, await repo.conversaoRegras());
+      const regraId = /^\/api\/painel\/conversoes\/regras\/([^/]+)$/.exec(path);
+      if ((method === 'POST' && path === '/api/painel/conversoes/regras') || (method === 'PUT' && regraId)) {
+        const b = await readJson(req);
+        const parcial = method === 'PUT' && b && Object.keys(b).length === 1 && 'ativo' in b; // ligar/desligar
+        if (parcial) {
+          if (typeof b.ativo !== 'boolean') throw new HttpError(400, 'ativo_invalido', { validos: [true, false] });
+        } else {
+          if (typeof b?.nome !== 'string' || !b.nome.trim() || b.nome.length > 80) throw new HttpError(400, 'nome_invalido');
+          if (!(REGRA_TIPOS as readonly unknown[]).includes(b?.tipo)) throw new HttpError(400, 'tipo_invalido', { validos: [...REGRA_TIPOS] });
+          if (typeof b?.evento !== 'string' || !b.evento.trim() || b.evento.length > 200) throw new HttpError(400, 'evento_invalido');
+          if (!(REGRA_URL_MODOS as readonly unknown[]).includes(b?.url_modo)) throw new HttpError(400, 'url_modo_invalido', { validos: [...REGRA_URL_MODOS] });
+          if (b.url_modo !== 'qualquer' && (typeof b.url_valor !== 'string' || !b.url_valor.trim() || b.url_valor.length > 300)) throw new HttpError(400, 'url_valor_invalido');
+          if (b.ativo !== undefined && typeof b.ativo !== 'boolean') throw new HttpError(400, 'ativo_invalido', { validos: [true, false] });
+        }
+        if (method === 'POST') {
+          const nova = await repo.criarConversaoRegra({ nome: b.nome.trim(), tipo: b.tipo, evento: b.evento.trim(), url_modo: b.url_modo, url_valor: b.url_modo === 'qualquer' ? null : b.url_valor.trim() });
+          return send(res, 201, nova);
+        }
+        const rid = decodeURIComponent(regraId![1]!);
+        if (!/^\d{1,15}$/.test(rid)) throw new HttpError(400, 'id_invalido');
+        await repo.atualizarConversaoRegra(
+          Number(rid),
+          parcial
+            ? { ativo: b.ativo }
+            : { nome: b.nome.trim(), tipo: b.tipo, evento: b.evento.trim(), url_modo: b.url_modo, url_valor: b.url_modo === 'qualquer' ? null : b.url_valor.trim(), ...(b.ativo !== undefined ? { ativo: b.ativo } : {}) },
+        );
+        return send(res, 200, { ok: true });
+      }
 
       // Regras de contagem: motivo de perda que tira do MQL, e status que conta (ou não) como lead.
       const motivo = /^\/api\/painel\/config\/motivo-perda\/([^/]+)$/.exec(path);

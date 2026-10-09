@@ -17,7 +17,7 @@ const all = readdirSync(DIR)
 const grantsTo = (role: string) => all.filter((s) => /^grant /.test(s.sql) && new RegExp(`\\bto ${role}\\b`).test(s.sql));
 const policiesFor = (role: string) => all.filter((s) => /^create policy /.test(s.sql) && new RegExp(`\\bto ${role}\\b`).test(s.sql));
 const tablesIn = (stmts: Array<{ sql: string }>) =>
-  new Set(stmts.flatMap((s) => [...s.sql.matchAll(/\b(?:raw|crm|ops|core|orq|analytics)\.[a-z_]+/g)].map((m) => m[0])));
+  new Set(stmts.flatMap((s) => [...s.sql.matchAll(/\b(?:raw|crm|ops|core|orq|mkt|analytics)\.[a-z0-9_]+/g)].map((m) => m[0])));
 
 describe.each(['orq_sync', 'orq_panel'])('papel %s', (role) => {
   it('é criado sem superusuário, sem criar banco/papéis, sem herdar, sem replicação e com limite de conexões', () => {
@@ -88,9 +88,10 @@ describe('orq_panel (Painel local)', () => {
     const writers = grantsTo('orq_panel').filter((s) => /^grant (insert|update|select, insert|select, insert, update|update \()/.test(s.sql));
     expect(writers.length).toBeGreaterThan(0);
     for (const s of writers) {
-      const tbl = [...s.sql.matchAll(/\bon ((?:ops)\.[a-z_]+(?:, ops\.[a-z_]+)*) to/g)].flatMap((m) => m[1]!.split(', '));
+      const tbl = [...s.sql.matchAll(/\bon ((?:ops|mkt)\.[a-z_]+(?:, (?:ops|mkt)\.[a-z_]+)*) to/g)].flatMap((m) => m[1]!.split(', '));
       expect(tbl.length, s.sql).toBeGreaterThan(0);
-      for (const t of tbl) expect(t, s.sql).toMatch(/^ops\.(cfg_[a-z_]+|sync_settings)$/);
+      // configuração: ops.cfg_*, frequência da sincronização e as regras de conversão do site (mkt.conversao_regras, sem delete)
+      for (const t of tbl) expect(t, s.sql).toMatch(/^(ops\.(cfg_[a-z_]+|sync_settings)|mkt\.conversao_regras)$/);
       if (tbl.includes('ops.sync_settings')) expect(s.sql).toMatch(/update \(/); // só colunas listadas
     }
   });

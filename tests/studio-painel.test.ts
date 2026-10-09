@@ -87,6 +87,25 @@ const repo: PainelRepo = {
   async setStatusContaComoLead(status, v) {
     calls.push(['status', [status, v]]);
   },
+  async conversaoEventos(dias) {
+    calls.push(['conv-eventos', [dias]]);
+    return [{ evento: 'form_fake', eventos: 5, usuarios: 4, urls: 2, ultimo_dia: '2026-10-08' }];
+  },
+  async conversaoEventoUrls(evento, dias) {
+    calls.push(['conv-urls', [evento, dias]]);
+    return [{ host: 'exemplo.test', caminho: '/lp-fake', eventos: 5, usuarios: 4, ultimo_dia: '2026-10-08' }];
+  },
+  async conversaoRegras() {
+    return [];
+  },
+  async criarConversaoRegra(r) {
+    calls.push(['conv-criar', [r]]);
+    return { id: 7 };
+  },
+  async atualizarConversaoRegra(id, r) {
+    calls.push(['conv-atualizar', [id, r]]);
+    if (id === 999) throw new PainelNotFound('regra');
+  },
 };
 
 const mkServer = (painel: PainelRepo | null) =>
@@ -200,6 +219,52 @@ describe('negócios (somente leitura)', () => {
       }
     }
     expect(calls).toEqual([]);
+  });
+});
+
+describe('conversões do site (GA4): eventos, URLs e regras', () => {
+  const post = (path: string, body: unknown) => fetch(`${base}${path}`, { method: 'POST', headers: J, body: JSON.stringify(body) });
+  const regra = { nome: ' Lead da LP ', tipo: 'lead', evento: ' form_fake ', url_modo: 'igual', url_valor: ' /lp-fake ' };
+  it('lista eventos e as URLs onde o evento aparece (nome com espaço vai por parâmetro)', async () => {
+    const e = await (await fetch(`${base}/api/painel/conversoes/eventos?dias=90`)).json();
+    expect(e[0]).toMatchObject({ evento: 'form_fake', urls: 2 });
+    const u = await (await fetch(`${base}/api/painel/conversoes/eventos/urls?evento=${encodeURIComponent('RD Formulario Embutido')}&dias=7`)).json();
+    expect(u[0]).toMatchObject({ caminho: '/lp-fake' });
+    expect(calls).toEqual([['conv-eventos', [90]], ['conv-urls', ['RD Formulario Embutido', 7]]]);
+  });
+  it('período e evento inválidos são recusados', async () => {
+    for (const d of ['0', '1000', 'abc', '-1']) expect((await fetch(`${base}/api/painel/conversoes/eventos?dias=${d}`)).status, d).toBe(400);
+    expect((await fetch(`${base}/api/painel/conversoes/eventos/urls`)).status).toBe(400);
+    expect(calls).toEqual([]);
+  });
+  it('cria regra (campos aparados) e responde 201 com o id', async () => {
+    const r = await post('/api/painel/conversoes/regras', regra);
+    expect(r.status).toBe(201);
+    expect(await r.json()).toEqual({ id: 7 });
+    expect(calls).toEqual([['conv-criar', [{ nome: 'Lead da LP', tipo: 'lead', evento: 'form_fake', url_modo: 'igual', url_valor: '/lp-fake' }]]]);
+  });
+  it('"qualquer URL" não guarda caminho', async () => {
+    await post('/api/painel/conversoes/regras', { ...regra, url_modo: 'qualquer', url_valor: '/ignorado' });
+    expect((calls[0]![1][0] as any).url_valor).toBeNull();
+  });
+  it('regra inválida é recusada e nada é gravado', async () => {
+    const ruins = [
+      { ...regra, nome: '' }, { ...regra, nome: 'x'.repeat(81) }, { ...regra, tipo: 'ganho' }, { ...regra, evento: '' },
+      { ...regra, url_modo: 'regex' }, { ...regra, url_modo: 'contem', url_valor: '  ' }, { ...regra, url_valor: 'x'.repeat(301) }, { ...regra, ativo: 'sim' }, {},
+    ];
+    for (const b of ruins) expect((await post('/api/painel/conversoes/regras', b)).status, JSON.stringify(b).slice(0, 60)).toBe(400);
+    expect(calls).toEqual([]);
+  });
+  it('edita e liga/desliga; regra inexistente dá 404; id estranho dá 400', async () => {
+    expect((await put('/api/painel/conversoes/regras/7', regra)).status).toBe(200);
+    expect((await put('/api/painel/conversoes/regras/7', { ativo: false })).status).toBe(200);
+    expect(calls[1]).toEqual(['conv-atualizar', [7, { ativo: false }]]);
+    expect((await put('/api/painel/conversoes/regras/7', { ativo: 'nao' })).status).toBe(400);
+    expect((await put('/api/painel/conversoes/regras/999', { ativo: true })).status).toBe(404);
+    expect((await put('/api/painel/conversoes/regras/abc', { ativo: true })).status).toBe(400);
+  });
+  it('não há como apagar regra pela API (desativa)', async () => {
+    expect((await fetch(`${base}/api/painel/conversoes/regras/7`, { method: 'DELETE' })).status).toBeGreaterThanOrEqual(400);
   });
 });
 

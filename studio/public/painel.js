@@ -64,6 +64,7 @@ async function load(tab) {
     S.saude = await api('/api/painel/saude');
   }
   if (tab === 'saude') S.saude = await api('/api/painel/saude');
+  if (tab === 'conversoes') await carregarConversoes();
   if (tab === 'config' || tab === 'explorar' || tab === 'conferencia') S.config = await api('/api/painel/config');
   if (tab === 'config' || tab === 'conferencia') {
     [S.motivos, S.statusCont] = await Promise.all([api('/api/painel/motivos-perda'), api('/api/painel/status-contagem')]);
@@ -278,7 +279,140 @@ function viewConferencia() {
     </tbody></table></section>`;
 }
 
-const VIEWS = { saude: viewSaude, config: viewConfig, explorar: viewExplorar, negocios: viewNegocios, usuarios: viewUsuarios, conferencia: viewConferencia };
+/* ---------- Conversões do site (GA4) ---------- */
+const TIPOS_REGRA = [['lead', 'Lead do site'], ['intermediaria', 'Conversão intermediária'], ['ignorar', 'Ignorar']];
+const URL_MODOS = [['qualquer', 'Qualquer URL'], ['igual', 'É igual a'], ['comeca', 'Começa com'], ['contem', 'Contém']];
+const CV = { dias: 30, eventos: null, regras: null, evSel: '', urls: null, form: { id: null, nome: '', tipo: 'lead', evento: '', url_modo: 'qualquer', url_valor: '' } };
+
+async function carregarConversoes() {
+  [CV.eventos, CV.regras] = await Promise.all([api(`/api/painel/conversoes/eventos?dias=${CV.dias}`), api('/api/painel/conversoes/regras')]);
+  CV.urls = CV.evSel ? await api(`/api/painel/conversoes/eventos/urls?evento=${encodeURIComponent(CV.evSel)}&dias=${CV.dias}`) : null;
+}
+const rotulo = (lista, v) => lista.find(([k]) => k === v)?.[1] ?? v;
+
+function viewConversoes() {
+  const f = CV.form;
+  const evOpts = [...new Set([f.evento, ...CV.eventos.map((e) => e.evento)].filter(Boolean))];
+  const semDados = !CV.eventos.length;
+  const urlsHtml = CV.evSel && CV.urls
+    ? `<section class="card section" style="margin-top:16px"><h2>Em quais URLs o evento “${esc(CV.evSel)}” aparece <span class="muted" style="font-weight:400">(últimos ${CV.dias} dias)</span></h2>
+        <table class="t"><thead><tr><th>URL</th><th class="num">Ocorrências</th><th class="num">Usuários</th><th>Último dia</th><th></th></tr></thead><tbody>
+        ${CV.urls.map((u) => `<tr><td>${esc(u.caminho)} <span class="muted">${esc(u.host)}</span></td><td class="num">${nf.format(u.eventos)}</td><td class="num">${nf.format(u.usuarios)}</td><td class="muted">${esc(u.ultimo_dia)}</td><td><button class="btn" data-act="usar-url" data-url="${esc(u.caminho)}" data-evento="${esc(CV.evSel)}">Usar esta URL</button></td></tr>`).join('') || '<tr><td colspan="5" class="empty">Nenhuma URL no período.</td></tr>'}
+        </tbody></table></section>`
+    : '';
+  return `
+    <div class="banner ok" style="margin-bottom:14px">Aqui você define <strong>o que conta como conversão no site</strong>: um <strong>evento</strong> do Google Analytics, em <strong>qualquer URL</strong> ou só em algumas. Veja onde cada evento aparece, crie a regra e confira quantos negócios do Pipedrive têm aquela URL em “URL de Conversão”.
+      <span class="muted">O GA4 marca até <em>page_view</em> como evento-chave, então a regra que vale é a sua.</span></div>
+    <div class="row" style="margin-bottom:12px"><label class="muted">Período dos números</label>
+      <select class="sel" id="cv-dias">${[7, 30, 90, 365].map((d) => `<option value="${d}" ${CV.dias === d ? 'selected' : ''}>últimos ${d} dias</option>`).join('')}</select></div>
+    ${semDados ? '<div class="banner warn" style="margin-bottom:12px">Nenhum evento do GA4 carregado ainda. Rode <code>npx tsx scripts/ga4-sync.ts --apply</code>.</div>' : ''}
+    <section class="card section"><h2>Eventos do site</h2>
+      <p class="muted" style="margin-top:0">Eventos automáticos de alto volume (<em>page_view, session_start, first_visit, user_engagement, scroll, click</em>) não são guardados aqui: já estão nas sessões e páginas.</p>
+      <table class="t"><thead><tr><th>Evento</th><th class="num">Ocorrências</th><th class="num">Usuários</th><th class="num">URLs</th><th>Último dia</th><th></th></tr></thead><tbody>
+      ${CV.eventos.map((e) => `<tr ${e.evento === CV.evSel ? 'style="background:var(--surface-2, rgba(127,127,127,.08))"' : ''}><td>${esc(e.evento)}</td><td class="num">${nf.format(e.eventos)}</td><td class="num">${nf.format(e.usuarios)}</td><td class="num">${e.urls}</td><td class="muted">${esc(e.ultimo_dia)}</td>
+        <td style="white-space:nowrap"><button class="btn" data-act="ver-urls" data-evento="${esc(e.evento)}">Ver URLs</button> <button class="btn" data-act="nova-regra" data-evento="${esc(e.evento)}">Criar regra</button></td></tr>`).join('') || '<tr><td colspan="6" class="empty">Sem eventos no período.</td></tr>'}
+      </tbody></table></section>
+    ${urlsHtml}
+    <section class="card section" style="margin-top:16px" id="cv-form"><h2>${f.id ? `Editar regra #${f.id}` : 'Nova regra'}</h2>
+      <div class="row" style="flex-wrap:wrap;gap:10px;align-items:end">
+        <label>Nome<br><input class="field-input" id="cv-nome" value="${esc(f.nome)}" placeholder="Ex.: Lead da calculadora" maxlength="80" style="min-width:220px"></label>
+        <label>Tipo<br><select class="sel" id="cv-tipo">${opts(TIPOS_REGRA, f.tipo)}</select></label>
+        <label>Evento<br><select class="sel" id="cv-evento"><option value="">Escolha…</option>${evOpts.map((e) => `<option value="${esc(e)}" ${e === f.evento ? 'selected' : ''}>${esc(e)}</option>`).join('')}</select></label>
+        <label>URL<br><select class="sel" id="cv-modo">${opts(URL_MODOS, f.url_modo)}</select></label>
+        <label ${f.url_modo === 'qualquer' ? 'hidden' : ''}>Caminho<br><input class="field-input" id="cv-url" value="${esc(f.url_valor)}" placeholder="/lp-sistema-rh-dp" maxlength="300" style="min-width:240px"></label>
+        <button class="btn" data-act="salvar-regra">${f.id ? 'Salvar alterações' : 'Criar regra'}</button>
+        ${f.id ? '<button class="btn" data-act="cancelar-regra">Cancelar</button>' : ''}
+      </div>
+      <p class="muted" style="margin-bottom:0">O domínio, a barra final e o que vem depois do “?” são ignorados na comparação. Uma regra “Ignorar” tira o evento da contagem.</p></section>
+    <section class="card section" style="margin-top:16px"><h2>Regras de conversão</h2>
+      <table class="t"><thead><tr><th>Regra</th><th>Evento</th><th>URL</th><th class="num">Eventos no GA4 (30 dias)</th><th class="num">Negócios no Pipedrive com essa URL (30 dias)</th><th>Ativa</th><th></th></tr></thead><tbody>
+      ${CV.regras.map((r) => `<tr ${r.ativo ? '' : 'class="muted"'}><td>${esc(r.nome)}<br><span class="chip ${r.tipo === 'lead' ? 'ok' : ''}">${esc(rotulo(TIPOS_REGRA, r.tipo))}</span></td><td>${esc(r.evento)}</td>
+        <td>${r.url_modo === 'qualquer' ? '<span class="muted">qualquer URL</span>' : `${esc(rotulo(URL_MODOS, r.url_modo).toLowerCase())} <code>${esc(r.url_valor)}</code>`}</td>
+        <td class="num">${nf.format(r.eventos_30d)}</td><td class="num">${r.negocios_30d == null ? '<span class="muted" title="Regra sem URL: não dá para ligar ao campo URL de Conversão">—</span>' : nf.format(r.negocios_30d)}</td>
+        <td><select class="sel" data-regra-ativo="${r.id}">${SIM_NAO(r.ativo)}</select></td><td><button class="btn" data-act="editar-regra" data-id="${r.id}">Editar</button></td></tr>`).join('') || '<tr><td colspan="7" class="empty">Nenhuma regra ainda. Escolha um evento acima e clique em “Criar regra”.</td></tr>'}
+      </tbody></table>
+      <p class="muted" style="margin-bottom:0">Cobertura do lado do Pipedrive: só uma parte dos negócios tem “URL de Conversão” preenchida; a ligação por campanha (UTM) complementa nos relatórios do BI.</p></section>`;
+}
+
+function lerFormConversao() {
+  CV.form.nome = $('#cv-nome')?.value ?? CV.form.nome;
+  CV.form.tipo = $('#cv-tipo')?.value ?? CV.form.tipo;
+  CV.form.evento = $('#cv-evento')?.value ?? CV.form.evento;
+  CV.form.url_modo = $('#cv-modo')?.value ?? CV.form.url_modo;
+  CV.form.url_valor = $('#cv-url')?.value ?? CV.form.url_valor;
+}
+const redesenharConversoes = () => { $('#view').innerHTML = viewConversoes(); };
+
+document.addEventListener('click', async (ev) => {
+  const b = ev.target.closest?.('[data-act]');
+  if (!b || S.tab !== 'conversoes') return;
+  const act = b.dataset.act;
+  try {
+    if (act === 'ver-urls') {
+      lerFormConversao();
+      CV.evSel = b.dataset.evento;
+      CV.urls = await api(`/api/painel/conversoes/eventos/urls?evento=${encodeURIComponent(CV.evSel)}&dias=${CV.dias}`);
+      redesenharConversoes();
+    } else if (act === 'nova-regra') {
+      CV.form = { id: null, nome: '', tipo: 'lead', evento: b.dataset.evento, url_modo: 'qualquer', url_valor: '' };
+      redesenharConversoes();
+      $('#cv-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } else if (act === 'usar-url') {
+      lerFormConversao();
+      Object.assign(CV.form, { evento: b.dataset.evento, url_modo: 'igual', url_valor: b.dataset.url });
+      redesenharConversoes();
+      $('#cv-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } else if (act === 'editar-regra') {
+      const r = CV.regras.find((x) => String(x.id) === b.dataset.id);
+      CV.form = { id: r.id, nome: r.nome, tipo: r.tipo, evento: r.evento, url_modo: r.url_modo, url_valor: r.url_valor ?? '' };
+      redesenharConversoes();
+      $('#cv-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } else if (act === 'cancelar-regra') {
+      CV.form = { id: null, nome: '', tipo: 'lead', evento: '', url_modo: 'qualquer', url_valor: '' };
+      redesenharConversoes();
+    } else if (act === 'salvar-regra') {
+      lerFormConversao();
+      const f = CV.form;
+      if (!f.nome.trim()) return toast('Dê um nome à regra.');
+      if (!f.evento) return toast('Escolha o evento.');
+      if (f.url_modo !== 'qualquer' && !f.url_valor.trim()) return toast('Informe o caminho da URL.');
+      const body = { nome: f.nome, tipo: f.tipo, evento: f.evento, url_modo: f.url_modo, url_valor: f.url_modo === 'qualquer' ? null : f.url_valor };
+      if (f.id) await api(`/api/painel/conversoes/regras/${f.id}`, { method: 'PUT', body });
+      else await api('/api/painel/conversoes/regras', { method: 'POST', body });
+      CV.form = { id: null, nome: '', tipo: 'lead', evento: '', url_modo: 'qualquer', url_valor: '' };
+      await carregarConversoes();
+      redesenharConversoes();
+      toast('Regra salva');
+    }
+  } catch (e) {
+    toast(`Não consegui: ${e.message}`);
+  }
+});
+
+document.addEventListener('change', async (ev) => {
+  const el = ev.target;
+  if (S.tab !== 'conversoes') return;
+  try {
+    if (el.id === 'cv-dias') {
+      lerFormConversao();
+      CV.dias = Number(el.value);
+      await carregarConversoes();
+      redesenharConversoes();
+    } else if (el.id === 'cv-modo') {
+      lerFormConversao();
+      redesenharConversoes();
+    } else if (el.dataset?.regraAtivo) {
+      await api(`/api/painel/conversoes/regras/${el.dataset.regraAtivo}`, { method: 'PUT', body: { ativo: el.value === 'sim' } });
+      await carregarConversoes();
+      redesenharConversoes();
+      toast('Salvo');
+    }
+  } catch (e) {
+    toast(`Não consegui: ${e.message}`);
+  }
+});
+
+const VIEWS = { saude: viewSaude, config: viewConfig, conversoes: viewConversoes, explorar: viewExplorar, negocios: viewNegocios, usuarios: viewUsuarios, conferencia: viewConferencia };
 
 /* Negócios: filtros, paginação e ficha */
 async function recarregarNegocios(rolarParaFicha = false) {
