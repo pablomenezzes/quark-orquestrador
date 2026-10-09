@@ -1,0 +1,60 @@
+name: Sincronia (Pipedrive e GA4)
+
+# A cada 4 horas (UTC) traz SO o que mudou: cadastros, negocios, historico de etapas e GA4 (ultimos 7 dias).
+# Pipedrive e Google: somente leitura. Grava no banco pelo papel orq_sync (sem permissao de apagar).
+# Nenhum gatilho de pull request: segredos nunca ficam ao alcance de codigo de terceiros.
+on:
+  schedule:
+    - cron: '17 */4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sincronia
+  cancel-in-progress: false
+
+jobs:
+  sincronia:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PIPEDRIVE_DOMAIN: ${{ secrets.PIPEDRIVE_DOMAIN }}
+      PIPEDRIVE_API_TOKEN: ${{ secrets.PIPEDRIVE_API_TOKEN }}
+      SYNC_DB_URL: ${{ secrets.SYNC_DB_URL }}
+      SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+      GOOGLE_SA_CLIENT_EMAIL: ${{ secrets.GOOGLE_SA_CLIENT_EMAIL }}
+      GOOGLE_SA_PRIVATE_KEY: ${{ secrets.GOOGLE_SA_PRIVATE_KEY }}
+      GA4_PROPERTY_ID: ${{ secrets.GA4_PROPERTY_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # Cada etapa roda mesmo se a anterior falhar, e o job termina vermelho (o GitHub avisa por e-mail).
+      - name: Cadastros (pipelines, etapas, usuarios e campos)
+        id: cadastros
+        continue-on-error: true
+        run: npx tsx scripts/datahub-sync.ts --apply
+      - name: Negocios (abertos, arquivados e excluidos)
+        id: negocios
+        continue-on-error: true
+        run: npx tsx scripts/datahub-sync.ts --entities deals,deals_archived,deals_deleted --apply
+      - name: Historico de etapas (so os negocios sem historico)
+        id: historico
+        continue-on-error: true
+        run: |
+          npx tsx scripts/datahub-sync.ts --entities deal_history --created-year 2026 --apply
+          npx tsx scripts/datahub-sync.ts --entities deal_history --created-year 2025 --apply
+      - name: GA4 (ultimos 7 dias)
+        id: ga4
+        continue-on-error: true
+        run: npx tsx scripts/ga4-sync.ts --apply
+      - name: Falhar se alguma etapa falhou
+        if: ${{ steps.cadastros.outcome == 'failure' || steps.negocios.outcome == 'failure' || steps.historico.outcome == 'failure' || steps.ga4.outcome == 'failure' }}
+        run: |
+          echo "Etapa com falha: cadastros=${{ steps.cadastros.outcome }} negocios=${{ steps.negocios.outcome }} historico=${{ steps.historico.outcome }} ga4=${{ steps.ga4.outcome }}"
+          exit 1
