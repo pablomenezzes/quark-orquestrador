@@ -201,7 +201,8 @@ describe('catálogo de análises (definição)', () => {
   });
   it('as quatro páginas têm análises e cada análise pertence a uma página conhecida', () => {
     const paginas = new Set(BI_ANALISES.map((a) => a.pagina));
-    expect([...paginas].sort()).toEqual(['canais', 'geral', 'qualidade', 'safra', 'site']);
+    expect([...paginas].sort()).toEqual(['ads', 'canais', 'geral', 'qualidade', 'safra', 'site']);
+    expect(BI_ANALISES.filter((a) => a.pagina === 'ads').length).toBeGreaterThanOrEqual(5);
     expect(BI_ANALISES.filter((a) => a.pagina === 'site').length).toBeGreaterThanOrEqual(5);
     expect(BI_ANALISES.filter((a) => a.pagina === 'safra').length).toBeGreaterThanOrEqual(3);
     expect(BI_ANALISES.filter((a) => a.pagina === 'canais').length).toBeGreaterThanOrEqual(3);

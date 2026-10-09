@@ -7,8 +7,8 @@
  */
 import type pg from 'pg';
 import {
-  blocosDeDatas, mapDia, mapEventos, mapPaginas, mapSessoes, relatorio,
-  type EventoDia, type Ga4Client, type Ga4Entidade, type PaginaDia, type SessaoDia, type TotalDia,
+  blocosDeDatas, mapAds, mapDia, mapEventos, mapPaginas, mapSessoes, relatorio,
+  type AdsDia, type EventoDia, type Ga4Client, type Ga4Entidade, type PaginaDia, type SessaoDia, type TotalDia,
 } from './ga4.js';
 
 export const REVISAO_DIAS = 7;
@@ -78,6 +78,20 @@ export class Ga4Store {
          on conflict (property_id, dia, host, pagina) do update set
            visualizacoes = excluded.visualizacoes, usuarios_ativos = excluded.usuarios_ativos, atualizado_em = now()`,
         [c.map((r) => r.dia), c.map((r) => r.host), c.map((r) => r.pagina), c.map((r) => r.visualizacoes), c.map((r) => r.usuarios_ativos)],
+      );
+    }
+  }
+
+  async ads(rows: AdsDia[]): Promise<void> {
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      const c = rows.slice(i, i + CHUNK);
+      await upsert(
+        this.q,
+        `insert into mkt.ga4_ads_dia (property_id, dia, campanha_id, campanha, custo, cliques, impressoes)
+         select ${this.propertyId}, * from unnest($1::date[], $2::text[], $3::text[], $4::numeric[], $5::int[], $6::int[])
+         on conflict (property_id, dia, campanha_id, campanha) do update set custo = excluded.custo, cliques = excluded.cliques,
+           impressoes = excluded.impressoes, atualizado_em = now()`,
+        [c.map((r) => r.dia), c.map((r) => r.campanha_id), c.map((r) => r.campanha), c.map((r) => r.custo), c.map((r) => r.cliques), c.map((r) => r.impressoes)],
       );
     }
   }
@@ -155,7 +169,8 @@ export async function syncGa4Entidade(
       const rows = await client.runReportAll(relatorio(entidade, b.inicio, b.fim));
       lidos += rows.length;
       if (opts.apply) {
-        if (entidade === 'ga4_dia') { const m = mapDia(rows); await store.dias(m); gravados += m.length; }
+        if (entidade === 'ga4_ads') { const m = mapAds(rows); await store.ads(m); gravados += m.length; }
+        else if (entidade === 'ga4_dia') { const m = mapDia(rows); await store.dias(m); gravados += m.length; }
         else if (entidade === 'ga4_sessoes') { const m = mapSessoes(rows); await store.sessoes(m); gravados += m.length; }
         else if (entidade === 'ga4_eventos') { const m = mapEventos(rows); await store.eventos(m); gravados += m.length; }
         else { const m = mapPaginas(rows); await store.paginas(m); gravados += m.length; }

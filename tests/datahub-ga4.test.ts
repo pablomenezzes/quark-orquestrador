@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { generateKeyPairSync } from 'node:crypto';
 import {
   Ga4Client, PAGE_SIZE, SEM_HOST, SEM_PAGINA, blocosDeDatas, dataGa4, ga4CredentialsFromEnv,
-  mapDia, mapEventos, mapPaginas, mapSessoes, relatorio, EVENTOS_FORA, type FetchLike, type ReportRow,
+  mapAds, mapDia, mapEventos, mapPaginas, mapSessoes, relatorio, EVENTOS_FORA, type FetchLike, type ReportRow,
 } from '../src/datahub/google/ga4';
 import { intervalo, REVISAO_DIAS } from '../src/datahub/google/ga4-sync';
 
@@ -46,6 +46,21 @@ describe('GA4: mapeamento dos relatórios', () => {
     expect(r.dimensions).toEqual([{ name: 'date' }]);
     expect(r.metrics.map((m) => m.name)).toEqual(['sessions', 'activeUsers', 'newUsers', 'engagedSessions', 'screenPageViews']);
     expect(mapDia([row(['20261001'], [10, 8, 5, 6, 30])])).toEqual([{ dia: '2026-10-01', sessoes: 10, usuarios_ativos: 8, usuarios_novos: 5, sessoes_engajadas: 6, visualizacoes: 30 }]);
+  });
+  it('custo do Google Ads: usa as dimensões de campanha, soma duplicatas e não guarda linhas zeradas', () => {
+    const r = relatorio('ga4_ads', '2026-10-01', '2026-10-02');
+    expect(r.dimensions.map((d) => d.name)).toEqual(['date', 'sessionGoogleAdsCampaignId', 'sessionGoogleAdsCampaignName']);
+    expect(r.metrics.map((m) => m.name)).toEqual(['advertiserAdCost', 'advertiserAdClicks', 'advertiserAdImpressions']);
+    const m = mapAds([
+      row(['20261001', '123', 'Campanha A'], [10.456, 3, 100]),
+      row(['20261001', '123', 'Campanha A'], [1.004, 1, 10]),
+      row(['20261001', '(not set)', '(not set)'], [0, 0, 0]), // sem custo, cliques nem impressões: descartada
+      row(['20261002', '(not set)', '(not set)'], [0, 0, 7]), // só impressões: fica
+    ]);
+    expect(m).toEqual([
+      { dia: '2026-10-01', campanha_id: '123', campanha: 'Campanha A', custo: 11.46, cliques: 4, impressoes: 110 },
+      { dia: '2026-10-02', campanha_id: '', campanha: '', custo: 0, cliques: 0, impressoes: 7 },
+    ]);
   });
   it('o relatório de eventos deixa de fora os eventos automáticos de alto volume', () => {
     const r = relatorio('ga4_eventos', '2026-10-01', '2026-10-02');

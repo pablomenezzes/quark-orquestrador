@@ -121,11 +121,19 @@ export class Ga4Client {
 }
 
 /* ---------- relatorios e mapeamento ---------- */
-export type Ga4Entidade = 'ga4_dia' | 'ga4_sessoes' | 'ga4_eventos' | 'ga4_paginas';
-export const GA4_ENTIDADES: readonly Ga4Entidade[] = ['ga4_dia', 'ga4_sessoes', 'ga4_eventos', 'ga4_paginas'];
+export type Ga4Entidade = 'ga4_dia' | 'ga4_sessoes' | 'ga4_eventos' | 'ga4_paginas' | 'ga4_ads';
+export const GA4_ENTIDADES: readonly Ga4Entidade[] = ['ga4_dia', 'ga4_sessoes', 'ga4_eventos', 'ga4_paginas', 'ga4_ads'];
 
 export function relatorio(entidade: Ga4Entidade, inicio: string, fim: string): ReportRequest {
   const dateRanges = [{ startDate: inicio, endDate: fim }];
+  if (entidade === 'ga4_ads') {
+    // custo do Google Ads que o GA4 importa (conta vinculada). As métricas advertiser* só combinam com dimensões de campanha.
+    return {
+      dateRanges,
+      dimensions: ['date', 'sessionGoogleAdsCampaignId', 'sessionGoogleAdsCampaignName'].map((name) => ({ name })),
+      metrics: ['advertiserAdCost', 'advertiserAdClicks', 'advertiserAdImpressions'].map((name) => ({ name })),
+    };
+  }
   if (entidade === 'ga4_dia') {
     // total do dia, sem outras dimensoes: usuarios ativos NAO se somam entre paginas nem entre dias, por isso a consulta propria
     return { dateRanges, dimensions: [{ name: 'date' }], metrics: ['sessions', 'activeUsers', 'newUsers', 'engagedSessions', 'screenPageViews'].map((name) => ({ name })) };
@@ -215,6 +223,20 @@ export function mapPaginas(rows: ReportRow[]): PaginaDia[] {
     return { dia: dataGa4(d[0]!), host: host(d[1]!), pagina: pagina(d[2]!), visualizacoes: m[0]!, usuarios_ativos: m[1]! } satisfies PaginaDia;
   });
   return juntar(l, (x) => [x.dia, x.host, x.pagina].join('\u0001'), (a, b) => { a.visualizacoes += b.visualizacoes; a.usuarios_ativos += b.usuarios_ativos; });
+}
+
+export interface AdsDia { dia: string; campanha_id: string; campanha: string; custo: number; cliques: number; impressoes: number }
+
+/** Custo por campanha e dia. Linhas zeradas (sem custo, cliques nem impressões) não são guardadas: economia de espaço. */
+export function mapAds(rows: ReportRow[]): AdsDia[] {
+  const l = rows.map((r) => {
+    const d = r.dimensionValues.map((x) => x.value);
+    const m = r.metricValues.map((x) => Number(x.value) || 0);
+    return { dia: dataGa4(d[0]!), campanha_id: semNaoDefinido(d[1]!), campanha: semNaoDefinido(d[2]!), custo: Math.round(m[0]! * 100) / 100, cliques: Math.round(m[1]!), impressoes: Math.round(m[2]!) } satisfies AdsDia;
+  });
+  return juntar(l, (x) => [x.dia, x.campanha_id, x.campanha].join('\u0001'), (a, b) => {
+    a.custo = Math.round((a.custo + b.custo) * 100) / 100; a.cliques += b.cliques; a.impressoes += b.impressoes;
+  }).filter((x) => x.custo > 0 || x.cliques > 0 || x.impressoes > 0);
 }
 
 export interface TotalDia { dia: string; sessoes: number; usuarios_ativos: number; usuarios_novos: number; sessoes_engajadas: number; visualizacoes: number }

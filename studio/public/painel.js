@@ -66,6 +66,7 @@ async function load(tab) {
   }
   if (tab === 'saude') S.saude = await api('/api/painel/saude');
   if (tab === 'conversoes') await carregarConversoes();
+  if (tab === 'criativos') await carregarCriativos();
   if (tab === 'config' || tab === 'explorar' || tab === 'conferencia') S.config = await api('/api/painel/config');
   if (tab === 'config' || tab === 'conferencia') {
     [S.motivos, S.statusCont] = await Promise.all([api('/api/painel/motivos-perda'), api('/api/painel/status-contagem')]);
@@ -413,7 +414,214 @@ document.addEventListener('change', async (ev) => {
   }
 });
 
-const VIEWS = { saude: viewSaude, config: viewConfig, conversoes: viewConversoes, explorar: viewExplorar, negocios: viewNegocios, usuarios: viewUsuarios, conferencia: viewConferencia };
+/* ---------- Criativos do Meta Ads: DOR > Mensagem e Módulo de Interesse (campos virtuais) ---------- */
+const CR = { cfg: null, lista: null, busca: '', filtro: 'todos', pagina: 1, sel: new Set(), removidos: false, bulk: { dor: '', msg: '', mod: '' }, POR_PAGINA: 50 };
+const FILTROS_CR = [['todos', 'Todos os criativos'], ['branco', 'Sem nenhum mapeamento'], ['sem_dor', 'Sem DOR'], ['sem_mensagem', 'Sem Mensagem'], ['sem_modulo', 'Sem Módulo'], ['mapeado', 'Com algum mapeamento'], ['removido', 'Apontando para item removido']];
+
+async function carregarCriativos() {
+  [CR.cfg, CR.lista] = await Promise.all([api('/api/painel/criativos/config'), api('/api/painel/criativos')]);
+  const chaves = new Set(CR.lista.map((x) => x.termo_chave));
+  for (const k of [...CR.sel]) if (!chaves.has(k)) CR.sel.delete(k);
+}
+const dorAtiva = (id) => CR.cfg.dores.find((d) => d.ativo && String(d.id) === String(id));
+const optsCr = (itens, atual, vazio = '(em branco)') => `<option value="">${esc(vazio)}</option>${itens.map((i) => `<option value="${i.id}" ${String(atual ?? '') === String(i.id) ? 'selected' : ''}>${esc(i.nome)}</option>`).join('')}`;
+const removidoOpt = (atual, ok) => (atual != null && !ok ? `<option value="${atual}" selected>(item removido)</option>` : '');
+const filtrarCr = () => {
+  const q = CR.busca.trim().toLowerCase();
+  return CR.lista.filter((r) => {
+    if (q && !`${r.termo} ${r.dor ?? ''} ${r.mensagem ?? ''} ${r.modulo ?? ''}`.toLowerCase().includes(q)) return false;
+    const removido = (r.dor_id != null && !r.dor) || (r.mensagem_id != null && !r.mensagem) || (r.modulo_id != null && !r.modulo);
+    switch (CR.filtro) {
+      case 'branco': return !r.dor && !r.mensagem && !r.modulo;
+      case 'sem_dor': return !r.dor;
+      case 'sem_mensagem': return !r.mensagem;
+      case 'sem_modulo': return !r.modulo;
+      case 'mapeado': return !!(r.dor || r.mensagem || r.modulo);
+      case 'removido': return removido;
+      default: return true;
+    }
+  });
+};
+function cardItens(titulo, descricao, itens, tipo, extra = '') {
+  const ativos = itens.filter((i) => i.ativo);
+  const fora = itens.filter((i) => !i.ativo);
+  const linha = (i) => `<li ${i.ativo ? '' : 'class="muted"'}><span>${esc(i.nome)} <span class="muted">· ${i.criativos} criativo(s) · ${nf.format(i.leads)} lead(s)</span></span>
+    <span class="acoes"><button class="btn" data-cr="renomear" data-tipo="${tipo}" data-id="${i.id}" data-nome="${esc(i.nome)}">Renomear</button>
+    ${i.ativo ? `<button class="btn" data-cr="remover" data-tipo="${tipo}" data-id="${i.id}" data-nome="${esc(i.nome)}">Remover</button>` : `<button class="btn" data-cr="restaurar" data-tipo="${tipo}" data-id="${i.id}">Restaurar</button>`}</span></li>`;
+  return `<ul class="lista-cr">${ativos.map(linha).join('') || '<li class="muted">Nenhum ainda.</li>'}${CR.removidos ? fora.map(linha).join('') : ''}</ul>${extra}`;
+}
+function viewCriativos() {
+  const { dores, modulos } = CR.cfg;
+  const ativas = dores.filter((d) => d.ativo);
+  const f = filtrarCr();
+  const totalPag = Math.max(1, Math.ceil(f.length / CR.POR_PAGINA));
+  CR.pagina = Math.min(CR.pagina, totalPag);
+  const pag = f.slice((CR.pagina - 1) * CR.POR_PAGINA, CR.pagina * CR.POR_PAGINA);
+  const mapeados = CR.lista.filter((r) => r.dor || r.mensagem || r.modulo).length;
+  const todosFiltradosSel = f.length > 0 && f.every((r) => CR.sel.has(r.termo_chave));
+  const dorBulk = dorAtiva(CR.bulk.dor);
+  const msgsBulk = dorBulk ? dorBulk.mensagens.filter((m) => m.ativo) : [];
+  const nomesRemovidos = dores.some((d) => !d.ativo || d.mensagens.some((m) => !m.ativo)) || modulos.some((m) => !m.ativo);
+  const cadMsg = ativas.map((d) => `<div style="margin-bottom:10px"><b>${esc(d.nome)}</b>${cardItens('', '', d.mensagens, 'mensagem')}</div>`).join('') || '<p class="muted">Crie uma DOR primeiro: toda Mensagem pertence a uma DOR.</p>';
+  return `
+    <div class="banner ok" style="margin-bottom:14px">Os <strong>criativos</strong> são os valores do campo <strong>UTM Term</strong> dos leads da fonte <strong>Marketing [Meta ADS]</strong>. DOR, Mensagem e Módulo de Interesse <strong>não existem no Pipedrive</strong>: ficam só neste banco, criados e mapeados por você. Cada criativo recebe uma <strong>DOR</strong>, uma <strong>Mensagem</strong> (que pertence à DOR) e um <strong>Módulo de Interesse</strong>; qualquer um pode ficar <strong>em branco</strong> se não houver equivalente. Salva sozinho ao escolher. <span class="muted">Remover não apaga: o item some das listas e os criativos dele ficam em branco; dá para restaurar.</span></div>
+    <div class="row" style="margin-bottom:10px"><label class="muted"><input type="checkbox" id="cr-removidos" ${CR.removidos ? 'checked' : ''}> mostrar itens removidos${nomesRemovidos ? '' : ' (não há nenhum)'}</label></div>
+    <div class="grade-cr">
+      <section class="card section"><h2>DOR</h2><p class="muted" style="margin-top:0">A dor do cliente que o anúncio ataca.</p>
+        ${cardItens('DOR', '', dores, 'dor', `<form class="novo" data-cr-form="dor"><input class="field-input" name="nome" placeholder="Nova DOR" maxlength="120"><button class="btn" type="submit">Criar DOR</button></form>`)}</section>
+      <section class="card section"><h2>Mensagem</h2><p class="muted" style="margin-top:0">O ângulo de comunicação dentro de uma DOR.</p>
+        ${cadMsg}
+        <form class="novo" data-cr-form="mensagem"><select class="sel" name="dor_id">${optsCr(ativas, '', 'Escolha a DOR…')}</select><input class="field-input" name="nome" placeholder="Nova Mensagem" maxlength="160"><button class="btn" type="submit">Criar Mensagem</button></form></section>
+      <section class="card section"><h2>Módulo de Interesse</h2><p class="muted" style="margin-top:0">O módulo do produto que o criativo promove.</p>
+        ${cardItens('Módulo', '', modulos, 'modulo', `<form class="novo" data-cr-form="modulo"><input class="field-input" name="nome" placeholder="Novo Módulo de Interesse" maxlength="120"><button class="btn" type="submit">Criar Módulo</button></form>`)}</section>
+    </div>
+    <section class="card section" style="margin-top:16px"><h2>Criativos <span class="muted" style="font-weight:400">(${nf.format(mapeados)} de ${nf.format(CR.lista.length)} com algum mapeamento)</span></h2>
+      <div class="row" style="flex-wrap:wrap;gap:10px;margin-bottom:10px">
+        <input class="field-input search" id="cr-busca" placeholder="Buscar pelo nome do criativo, DOR, Mensagem ou Módulo…" value="${esc(CR.busca)}">
+        <select class="sel" id="cr-filtro">${opts(FILTROS_CR, CR.filtro)}</select>
+        <span class="muted">${nf.format(f.length)} criativo(s)</span>
+      </div>
+      <div class="banner" style="margin-bottom:10px"><strong>Aplicar a vários de uma vez:</strong> marque os criativos (ou "todos os filtrados"), escolha o que gravar e clique em aplicar. Escolher "(em branco)" e aplicar <strong>limpa</strong> o campo.
+        <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:8px">
+          <span class="muted">${CR.sel.size} marcado(s)</span>
+          <select class="sel" id="cr-b-dor">${optsCr(ativas, CR.bulk.dor, 'DOR: (não mexer)')}<option value="__branco" ${CR.bulk.dor === '__branco' ? 'selected' : ''}>DOR: deixar em branco</option></select>
+          <select class="sel" id="cr-b-msg" ${dorBulk ? '' : 'disabled'}>${optsCr(msgsBulk, CR.bulk.msg, 'Mensagem: (não mexer)')}<option value="__branco" ${CR.bulk.msg === '__branco' ? 'selected' : ''}>Mensagem: deixar em branco</option></select>
+          <select class="sel" id="cr-b-mod">${optsCr(modulos.filter((m) => m.ativo), CR.bulk.mod, 'Módulo: (não mexer)')}<option value="__branco" ${CR.bulk.mod === '__branco' ? 'selected' : ''}>Módulo: deixar em branco</option></select>
+          <button class="btn" id="cr-aplicar" ${CR.sel.size ? '' : 'disabled'}>Aplicar aos marcados</button>
+          <button class="btn" id="cr-limpar-sel" ${CR.sel.size ? '' : 'disabled'}>Desmarcar</button>
+        </div></div>
+      <div style="overflow:auto"><table class="t"><thead><tr><th style="width:30px"><input type="checkbox" id="cr-todos" title="Marcar todos os filtrados" ${todosFiltradosSel ? 'checked' : ''}></th><th>Criativo (UTM Term)</th><th class="num">Leads</th><th class="num">Ganhos</th><th>Último lead</th><th style="min-width:170px">DOR</th><th style="min-width:200px">Mensagem</th><th style="min-width:170px">Módulo de Interesse</th></tr></thead><tbody>
+      ${pag.map((r) => {
+        const i = CR.lista.indexOf(r);
+        const dor = dorAtiva(r.dor_id);
+        const msgs = dor ? dor.mensagens.filter((m) => m.ativo) : [];
+        return `<tr><td><input type="checkbox" data-cr-sel="${i}" ${CR.sel.has(r.termo_chave) ? 'checked' : ''}></td><td title="${esc(r.termo)}" style="max-width:420px;word-break:break-word">${esc(r.termo)}</td><td class="num">${nf.format(r.leads)}</td><td class="num">${nf.format(r.ganhos)}</td><td class="muted">${dia(r.ultimo_lead)}</td>
+          <td><select class="sel" data-cr-campo="dor" data-i="${i}">${optsCr(ativas, r.dor_id)}${removidoOpt(r.dor_id, !!r.dor)}</select></td>
+          <td><select class="sel" data-cr-campo="mensagem" data-i="${i}" ${dor ? '' : 'disabled'}>${optsCr(msgs, r.mensagem_id)}${removidoOpt(r.mensagem_id, !!r.mensagem)}</select></td>
+          <td><select class="sel" data-cr-campo="modulo" data-i="${i}">${optsCr(modulos.filter((m) => m.ativo), r.modulo_id)}${removidoOpt(r.modulo_id, !!r.modulo)}</select></td></tr>`;
+      }).join('') || '<tr><td colspan="8" class="empty">Nenhum criativo neste filtro.</td></tr>'}
+      </tbody></table></div>
+      <div class="row" style="margin-top:10px;gap:10px"><button class="btn" id="cr-ant" ${CR.pagina > 1 ? '' : 'disabled'}>← Anterior</button><span class="muted">Página ${CR.pagina} de ${totalPag}</span><button class="btn" id="cr-prox" ${CR.pagina < totalPag ? '' : 'disabled'}>Próxima →</button></div>
+    </section>
+    <style>.grade-cr{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}.lista-cr{list-style:none;margin:0 0 10px;padding:0}.lista-cr li{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)}.lista-cr .acoes{white-space:nowrap}.novo{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}</style>`;
+}
+const redesenharCr = () => { $('#view').innerHTML = viewCriativos(); };
+async function salvarMapaCr(termos, patch, recarregar = false) {
+  const r = await api('/api/painel/criativos/mapa', { method: 'PUT', body: { termos, ...patch } });
+  if (recarregar) await carregarCriativos();
+  return r;
+}
+document.addEventListener('click', async (ev) => {
+  if (S.tab !== 'criativos') return;
+  const t = ev.target;
+  try {
+    const b = t.closest?.('[data-cr]');
+    if (b) {
+      const { cr, tipo, id, nome } = b.dataset;
+      const rota = { dor: 'dores', mensagem: 'mensagens', modulo: 'modulos' }[tipo];
+      if (cr === 'renomear') {
+        const novo = prompt('Novo nome:', nome);
+        if (novo == null || !novo.trim() || novo.trim() === nome) return;
+        await api(`/api/painel/criativos/${rota}/${id}`, { method: 'PUT', body: { nome: novo } });
+      } else if (cr === 'remover') {
+        const extra = tipo === 'dor' ? ' As Mensagens dela também serão removidas.' : '';
+        if (!confirm(`Remover "${nome}"?${extra}\n\nOs criativos que usam este item ficam em branco nesse campo. Nada é apagado: dá para restaurar.`)) return;
+        await api(`/api/painel/criativos/${rota}/${id}`, { method: 'PUT', body: { ativo: false } });
+      } else if (cr === 'restaurar') {
+        await api(`/api/painel/criativos/${rota}/${id}`, { method: 'PUT', body: { ativo: true } });
+      }
+      await carregarCriativos();
+      redesenharCr();
+      return toast('Salvo');
+    }
+    if (t.id === 'cr-ant') { CR.pagina--; return redesenharCr(); }
+    if (t.id === 'cr-prox') { CR.pagina++; return redesenharCr(); }
+    if (t.id === 'cr-limpar-sel') { CR.sel.clear(); return redesenharCr(); }
+    if (t.id === 'cr-aplicar') {
+      const patch = {};
+      const val = (v) => (v === '__branco' ? null : v === '' ? undefined : Number(v));
+      const d = val(CR.bulk.dor), m = val(CR.bulk.msg), o = val(CR.bulk.mod);
+      if (d !== undefined) patch.dor_id = d;
+      if (m !== undefined) patch.mensagem_id = m;
+      if (o !== undefined) patch.modulo_id = o;
+      if (!Object.keys(patch).length) return toast('Escolha o que gravar (DOR, Mensagem ou Módulo).');
+      const r = await salvarMapaCr([...CR.sel], patch, true);
+      CR.sel.clear();
+      CR.bulk = { dor: '', msg: '', mod: '' };
+      redesenharCr();
+      toast(`Aplicado a ${r.atualizados} criativo(s)`);
+    }
+  } catch (e) {
+    toast(`Não consegui: ${e.message}`);
+  }
+});
+document.addEventListener('submit', async (ev) => {
+  const form = ev.target.closest?.('[data-cr-form]');
+  if (!form || S.tab !== 'criativos') return;
+  ev.preventDefault();
+  const tipo = form.dataset.crForm;
+  const nome = form.elements.nome.value;
+  if (!nome.trim()) return toast('Dê um nome.');
+  try {
+    const body = { nome };
+    if (tipo === 'mensagem') {
+      if (!form.elements.dor_id.value) return toast('Escolha a DOR da Mensagem.');
+      body.dor_id = Number(form.elements.dor_id.value);
+    }
+    const r = await api(`/api/painel/criativos/${{ dor: 'dores', mensagem: 'mensagens', modulo: 'modulos' }[tipo]}`, { method: 'POST', body });
+    await carregarCriativos();
+    redesenharCr();
+    toast(r.restaurado ? 'Já existia removido: restaurado' : 'Criado');
+  } catch (e) {
+    toast(`Não consegui: ${e.message}`);
+  }
+});
+document.addEventListener('input', (ev) => {
+  if (S.tab !== 'criativos' || ev.target.id !== 'cr-busca') return;
+  CR.busca = ev.target.value;
+  CR.pagina = 1;
+  const pos = ev.target.selectionStart;
+  redesenharCr();
+  const b = $('#cr-busca');
+  b.focus();
+  b.setSelectionRange(pos, pos);
+});
+document.addEventListener('change', async (ev) => {
+  if (S.tab !== 'criativos') return;
+  const el = ev.target;
+  try {
+    if (el.id === 'cr-filtro') { CR.filtro = el.value; CR.pagina = 1; return redesenharCr(); }
+    if (el.id === 'cr-removidos') { CR.removidos = el.checked; return redesenharCr(); }
+    if (el.id === 'cr-todos') {
+      for (const r of filtrarCr()) el.checked ? CR.sel.add(r.termo_chave) : CR.sel.delete(r.termo_chave);
+      return redesenharCr();
+    }
+    if (el.dataset?.crSel !== undefined) {
+      const k = CR.lista[Number(el.dataset.crSel)].termo_chave;
+      el.checked ? CR.sel.add(k) : CR.sel.delete(k);
+      return redesenharCr();
+    }
+    if (el.id === 'cr-b-dor') { CR.bulk.dor = el.value; CR.bulk.msg = ''; return redesenharCr(); }
+    if (el.id === 'cr-b-msg') { CR.bulk.msg = el.value; return redesenharCr(); }
+    if (el.id === 'cr-b-mod') { CR.bulk.mod = el.value; return redesenharCr(); }
+    const campo = el.dataset?.crCampo;
+    if (campo) {
+      const r = CR.lista[Number(el.dataset.i)];
+      const v = el.value === '' ? null : Number(el.value);
+      const patch = { [{ dor: 'dor_id', mensagem: 'mensagem_id', modulo: 'modulo_id' }[campo]]: v };
+      await salvarMapaCr([r.termo_chave], patch);
+      CR.lista = await api('/api/painel/criativos'); // traz os nomes já resolvidos pelo banco
+      redesenharCr();
+      toast('Salvo');
+    }
+  } catch (e) {
+    toast(`Não salvou: ${e.message}`);
+    await carregarCriativos().catch(() => undefined);
+    redesenharCr();
+  }
+});
+
+const VIEWS = { saude: viewSaude, config: viewConfig, conversoes: viewConversoes, criativos: viewCriativos, explorar: viewExplorar, negocios: viewNegocios, usuarios: viewUsuarios, conferencia: viewConferencia };
 
 /* Negócios: filtros, paginação e ficha */
 async function recarregarNegocios(rolarParaFicha = false) {

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import { createStudioServer } from '../studio/server';
-import { PainelNotFound, type PainelRepo } from '../studio/lib/painel-repo';
+import { PainelInvalido, PainelNotFound, type PainelRepo } from '../studio/lib/painel-repo';
 
 let server: Server;
 let serverSem: Server;
@@ -105,6 +105,26 @@ const repo: PainelRepo = {
   async atualizarConversaoRegra(id, r) {
     calls.push(['conv-atualizar', [id, r]]);
     if (id === 999) throw new PainelNotFound('regra');
+  },
+  async criativosConfig() {
+    return { dores: [{ id: 1, nome: 'DOR fictícia', ativo: true, criativos: 1, leads: 3, mensagens: [] }], modulos: [] };
+  },
+  async criativos() {
+    return [{ termo_chave: 'ad1 — cópia', termo: 'AD1 — Cópia', leads: 3, dor_id: null, mensagem_id: null, modulo_id: null }];
+  },
+  async criarCriativoItem(tipo, nome, paiId) {
+    calls.push(['cri-criar', [tipo, nome, paiId]]);
+    if (nome === 'repetida') throw new PainelInvalido('Já existe um item com esse nome.');
+    return { id: 5, restaurado: false };
+  },
+  async atualizarCriativoItem(tipo, id, patch) {
+    calls.push(['cri-atualizar', [tipo, id, patch]]);
+    if (id === 999) throw new PainelNotFound('DOR');
+  },
+  async mapearCriativos(termos, patch) {
+    calls.push(['cri-mapa', [termos, patch]]);
+    if (patch.mensagem_id === 13) throw new PainelInvalido('Essa Mensagem não pertence à DOR escolhida.');
+    return { atualizados: termos.length };
   },
 };
 
@@ -265,6 +285,50 @@ describe('conversões do site (GA4): eventos, URLs e regras', () => {
   });
   it('não há como apagar regra pela API (desativa)', async () => {
     expect((await fetch(`${base}/api/painel/conversoes/regras/7`, { method: 'DELETE' })).status).toBeGreaterThanOrEqual(400);
+  });
+});
+
+describe('criativos do Meta Ads: DOR > Mensagem e Módulo de Interesse', () => {
+  const post = (path: string, body: unknown) => fetch(`${base}${path}`, { method: 'POST', headers: J, body: JSON.stringify(body) });
+  it('lista a configuração e os criativos', async () => {
+    const c = await (await fetch(`${base}/api/painel/criativos/config`)).json();
+    expect(c.dores[0]).toMatchObject({ nome: 'DOR fictícia', leads: 3 });
+    const l = await (await fetch(`${base}/api/painel/criativos`)).json();
+    expect(l[0]).toMatchObject({ termo: 'AD1 — Cópia', dor_id: null });
+  });
+  it('cria DOR, Mensagem (dentro de uma DOR) e Módulo', async () => {
+    expect((await post('/api/painel/criativos/dores', { nome: 'Gestão manual' })).status).toBe(201);
+    expect((await post('/api/painel/criativos/mensagens', { nome: 'Planilha não escala', dor_id: 1 })).status).toBe(201);
+    expect((await post('/api/painel/criativos/modulos', { nome: 'Ponto' })).status).toBe(201);
+    expect(calls).toEqual([['cri-criar', ['dor', 'Gestão manual', undefined]], ['cri-criar', ['mensagem', 'Planilha não escala', 1]], ['cri-criar', ['modulo', 'Ponto', undefined]]]);
+  });
+  it('nome vazio, longo demais, Mensagem sem DOR e nome repetido são recusados', async () => {
+    for (const b of [{ nome: '' }, { nome: '   ' }, { nome: 'x'.repeat(121) }, {}, { nome: 5 }]) expect((await post('/api/painel/criativos/dores', b)).status, JSON.stringify(b)).toBe(400);
+    expect((await post('/api/painel/criativos/mensagens', { nome: 'x' })).status).toBe(400);
+    expect((await post('/api/painel/criativos/mensagens', { nome: 'x', dor_id: 'a' })).status).toBe(400);
+    expect((await post('/api/painel/criativos/dores', { nome: 'repetida' })).status).toBe(400);
+  });
+  it('renomeia, remove e restaura (remover é desativar; não existe DELETE)', async () => {
+    expect((await put('/api/painel/criativos/dores/1', { nome: 'Novo nome' })).status).toBe(200);
+    expect((await put('/api/painel/criativos/mensagens/2', { ativo: false })).status).toBe(200);
+    expect((await put('/api/painel/criativos/modulos/3', { ativo: true })).status).toBe(200);
+    expect(calls).toEqual([['cri-atualizar', ['dor', 1, { nome: 'Novo nome' }]], ['cri-atualizar', ['mensagem', 2, { ativo: false }]], ['cri-atualizar', ['modulo', 3, { ativo: true }]]]);
+    for (const b of [{}, { ativo: 'nao' }, { nome: '' }]) expect((await put('/api/painel/criativos/dores/1', b)).status, JSON.stringify(b)).toBe(400);
+    expect((await put('/api/painel/criativos/dores/abc', { ativo: false })).status).toBe(400);
+    expect((await put('/api/painel/criativos/dores/999', { ativo: false })).status).toBe(404);
+    expect((await fetch(`${base}/api/painel/criativos/dores/1`, { method: 'DELETE', headers: J, body: '{}' })).status).toBe(405);
+  });
+  it('mapeia criativos (um ou vários) e aceita deixar em branco (null)', async () => {
+    expect((await put('/api/painel/criativos/mapa', { termos: ['ad1 — cópia', 'ad2'], dor_id: 1, mensagem_id: 2 })).status).toBe(200);
+    expect((await put('/api/painel/criativos/mapa', { termos: ['ad1 — cópia'], dor_id: null, mensagem_id: null, modulo_id: null })).status).toBe(200);
+    expect(calls).toEqual([['cri-mapa', [['ad1 — cópia', 'ad2'], { dor_id: 1, mensagem_id: 2 }]], ['cri-mapa', [['ad1 — cópia'], { dor_id: null, mensagem_id: null, modulo_id: null }]]]);
+  });
+  it('mapa inválido: sem criativos, sem campos, ids estranhos, Mensagem de outra DOR', async () => {
+    for (const b of [{ dor_id: 1 }, { termos: [] }, { termos: ['a'] }, { termos: [1], dor_id: 1 }, { termos: ['a'], dor_id: 'x' }, { termos: ['a'], dor_id: 0 }, { termos: ['a'], modulo_id: 1.5 }, { termos: Array(1001).fill('a'), dor_id: 1 }, { termos: ['a'.repeat(501)], dor_id: 1 }]) {
+      expect((await put('/api/painel/criativos/mapa', b)).status, JSON.stringify(b).slice(0, 60)).toBe(400);
+    }
+    expect((await put('/api/painel/criativos/mapa', { termos: ['a'], dor_id: 1, mensagem_id: 13 })).status).toBe(400);
+    expect((await fetch(`${base}/api/painel/criativos/mapa`, { method: 'POST', headers: J, body: '{}' })).status).toBe(405);
   });
 });
 

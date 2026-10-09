@@ -12,6 +12,7 @@ function fmt(tipo, v) {
   if (tipo === 'int') return nf.format(v);
   if (tipo === 'pct') return `${nf1.format(v * 100)}%`;
   if (tipo === 'brl') return brl.format(v);
+  if (tipo === 'brl2') return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v); // custos unitários (CPL, CAC...)
   if (tipo === 'dec') return new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
   if (tipo === 'dias') return `${nf1.format(v)} d`;
   return String(v);

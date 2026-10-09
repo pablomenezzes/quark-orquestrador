@@ -4,7 +4,7 @@ import { extname, join, normalize, resolve, sep } from 'node:path';
 import { FormsStore, StoreError } from './lib/forms-store.js';
 import { FORM_ID_RE } from './lib/form-schema.js';
 import { BI_PRODUTOS, BiNotFound, type BiFiltros, type BiProduto, type BiRepo } from './lib/bi.js';
-import { MARCOS, PRODUTOS, REGRA_TIPOS, REGRA_URL_MODOS, STATUS_NEGOCIO, PainelNotFound, type Marco, type NegociosFiltro, type PainelRepo, type Produto, type StatusNegocio } from './lib/painel-repo.js';
+import { MARCOS, PRODUTOS, REGRA_TIPOS, REGRA_URL_MODOS, STATUS_NEGOCIO, PainelInvalido, PainelNotFound, type CriativoItem, type CriativoMapaPatch, type Marco, type NegociosFiltro, type PainelRepo, type Produto, type StatusNegocio } from './lib/painel-repo.js';
 
 export type SubmitFn = (formId: string, mode: 'dry' | 'real', payload: unknown, ctx: { userAgent: string | null }) => Promise<{ status: number; body: unknown }>;
 
@@ -276,6 +276,61 @@ export function createStudioServer(opts: StudioOptions): Server {
         return send(res, 200, { ok: true });
       }
 
+      // Criativos do Meta Ads (UTM Term) agrupados em DOR > Mensagem e Módulo de Interesse (campos virtuais, só neste banco).
+      if (method === 'GET' && path === '/api/painel/criativos/config') return send(res, 200, await repo.criativosConfig());
+      if (method === 'GET' && path === '/api/painel/criativos') return send(res, 200, await repo.criativos());
+      const itemPlural: Record<string, CriativoItem> = { dores: 'dor', mensagens: 'mensagem', modulos: 'modulo' };
+      const itemRota = /^\/api\/painel\/criativos\/(dores|mensagens|modulos)(?:\/([^/]+))?$/.exec(path);
+      if (itemRota) {
+        const tipo = itemPlural[itemRota[1]!]!;
+        const maxNome = tipo === 'mensagem' ? 160 : 120;
+        const idParam = (s: string | undefined): number => {
+          if (!s || !/^\d{1,15}$/.test(decodeURIComponent(s))) throw new HttpError(400, 'id_invalido');
+          return Number(decodeURIComponent(s));
+        };
+        const nomeOk = (v: unknown): string => {
+          if (typeof v !== 'string' || !v.trim() || v.trim().length > maxNome) throw new HttpError(400, 'nome_invalido', { maximo: maxNome });
+          return v;
+        };
+        if (method === 'POST' && !itemRota[2]) {
+          const b = await readJson(req);
+          const nome = nomeOk(b?.nome);
+          let pai: number | undefined;
+          if (tipo === 'mensagem') {
+            if (!Number.isInteger(b?.dor_id) || b.dor_id < 1) throw new HttpError(400, 'dor_id_invalido');
+            pai = b.dor_id as number;
+          }
+          return send(res, 201, await repo.criarCriativoItem(tipo, nome, pai));
+        }
+        if (method === 'PUT' && itemRota[2]) {
+          const b = await readJson(req);
+          const patch: { nome?: string; ativo?: boolean } = {};
+          if (b && 'nome' in b) patch.nome = nomeOk(b.nome);
+          if (b && 'ativo' in b) {
+            if (typeof b.ativo !== 'boolean') throw new HttpError(400, 'ativo_invalido', { validos: [true, false] });
+            patch.ativo = b.ativo;
+          }
+          if (!Object.keys(patch).length) throw new HttpError(400, 'nada_para_gravar');
+          await repo.atualizarCriativoItem(tipo, idParam(itemRota[2]), patch);
+          return send(res, 200, { ok: true });
+        }
+        return send(res, 405, { error: 'method_not_allowed' }); // não há DELETE: remover é desativar
+      }
+      if (path === '/api/painel/criativos/mapa') {
+        if (method !== 'PUT') return send(res, 405, { error: 'method_not_allowed' });
+        const b = await readJson(req);
+        if (!Array.isArray(b?.termos) || !b.termos.length || b.termos.length > 1000 || !b.termos.every((t: unknown) => typeof t === 'string' && t.length > 0 && t.length <= 500)) throw new HttpError(400, 'termos_invalidos', { maximo: 1000 });
+        const patch: CriativoMapaPatch = {};
+        for (const k of ['dor_id', 'mensagem_id', 'modulo_id'] as const) {
+          if (k in b) {
+            if (b[k] !== null && !(Number.isInteger(b[k]) && b[k] > 0)) throw new HttpError(400, `${k}_invalido`, { validos: ['número', null] });
+            patch[k] = b[k];
+          }
+        }
+        if (!Object.keys(patch).length) throw new HttpError(400, 'nada_para_gravar');
+        return send(res, 200, await repo.mapearCriativos(b.termos, patch));
+      }
+
       // Regras de contagem: motivo de perda que tira do MQL, e status que conta (ou não) como lead.
       const motivo = /^\/api\/painel\/config\/motivo-perda\/([^/]+)$/.exec(path);
       const status = /^\/api\/painel\/config\/status\/([^/]+)$/.exec(path);
@@ -359,6 +414,7 @@ export function createStudioServer(opts: StudioOptions): Server {
       if (e instanceof HttpError) return send(res, e.status, { error: e.message, ...e.extra });
       if (e instanceof StoreError) return send(res, 400, { error: e.message, issues: e.issues });
       if (e instanceof PainelNotFound || e instanceof BiNotFound) return send(res, 404, { error: 'nao_encontrado', detail: e.message });
+      if (e instanceof PainelInvalido) return send(res, 400, { error: 'invalido', detail: e.message });
       console.error('studio:', e instanceof Error ? e.message : e);
       send(res, 500, { error: 'internal_error' });
     });

@@ -90,8 +90,8 @@ describe('orq_panel (Painel local)', () => {
     for (const s of writers) {
       const tbl = [...s.sql.matchAll(/\bon ((?:ops|mkt)\.[a-z_]+(?:, (?:ops|mkt)\.[a-z_]+)*) to/g)].flatMap((m) => m[1]!.split(', '));
       expect(tbl.length, s.sql).toBeGreaterThan(0);
-      // configuração: ops.cfg_*, frequência da sincronização e as regras de conversão do site (mkt.conversao_regras, sem delete)
-      for (const t of tbl) expect(t, s.sql).toMatch(/^(ops\.(cfg_[a-z_]+|sync_settings)|mkt\.conversao_regras)$/);
+      // configuração: ops.cfg_*, frequência da sincronização, regras de conversão do site e agrupamento de criativos (mkt.cri_*), sem delete
+      for (const t of tbl) expect(t, s.sql).toMatch(/^(ops\.(cfg_[a-z_]+|sync_settings)|mkt\.conversao_regras|mkt\.cri_(dor|mensagem|modulo|mapa))$/);
       if (tbl.includes('ops.sync_settings')) expect(s.sql).toMatch(/update \(/); // só colunas listadas
     }
   });

@@ -23,6 +23,7 @@ export const BI_PAGINAS = [
   { id: 'geral', rotulo: 'Visão geral' },
   { id: 'safra', rotulo: 'Safra' },
   { id: 'canais', rotulo: 'Canais' },
+  { id: 'ads', rotulo: 'Google Ads' },
   { id: 'site', rotulo: 'Site e páginas' },
   { id: 'qualidade', rotulo: 'Qualidade' },
 ] as const;
@@ -31,13 +32,14 @@ export type BiPagina = (typeof BI_PAGINAS)[number]['id'];
 /** `fontes` e `tipos`: IDs das opções do Pipedrive (texto de dígitos) e/ou 'branco' (campo não preenchido). Ausente = sem filtro. */
 export type BiFiltros = { de: string; ate: string; produto?: BiProduto; pipeline_id?: number; fontes?: string[]; tipos?: string[] };
 
-export type Coluna = { id: string; rotulo: string; tipo: 'texto' | 'int' | 'pct' | 'brl' | 'dias' };
+/** `brl2` = reais com centavos (custos unitários: CPL, CAC...); `dec` = número com 2 casas (ex.: ROAS). */
+export type Coluna = { id: string; rotulo: string; tipo: 'texto' | 'int' | 'pct' | 'brl' | 'brl2' | 'dec' | 'dias' };
 export type Tabela = { colunas: Coluna[]; linhas: Array<Record<string, string | number | null>> };
 export type Grafico =
-  | { tipo: 'kpis'; itens: Array<{ id: string; rotulo: string; valor: number | null; formato: 'int' | 'pct' | 'brl' | 'dec'; dica?: string }> }
+  | { tipo: 'kpis'; itens: Array<{ id: string; rotulo: string; valor: number | null; formato: 'int' | 'pct' | 'brl' | 'brl2' | 'dec'; dica?: string }> }
   /** `slot`: cor fixa da série (1 a 4 = paleta categórica; 0 = neutro, para "outras"). A cor segue a entidade, nunca a posição. */
-  | { tipo: 'colunas'; categorias: string[]; series: Array<{ id: string; nome: string; slot: number; valores: number[] }>; formato?: 'int' | 'pct' }
-  | { tipo: 'barras'; itens: Array<{ rotulo: string; valor: number; detalhe?: string }>; formato: 'int' | 'dias' | 'pct'; ordinal?: boolean }
+  | { tipo: 'colunas'; categorias: string[]; series: Array<{ id: string; nome: string; slot: number; valores: number[] }>; formato?: 'int' | 'pct' | 'brl' }
+  | { tipo: 'barras'; itens: Array<{ rotulo: string; valor: number; detalhe?: string }>; formato: 'int' | 'dias' | 'pct' | 'brl' | 'brl2'; ordinal?: boolean }
   /** Mapa de calor. `escala`: a cor é relativa ao maior valor de cada coluna ('coluna'), de cada linha ('linha') ou da matriz toda ('global', padrão). */
   | { tipo: 'matriz'; colunas: string[]; linhas: Array<{ rotulo: string; valores: Array<number | null>; detalhe?: string }>; formato: 'pct'; escala?: 'coluna' | 'linha' | 'global' }
   /**
@@ -124,9 +126,13 @@ const MARCOS_CTE = `m as (select deal_id, bool_or(marco in ('sql', 'reuniao', 'p
 const SEM_MARCOS = 'Nenhuma etapa foi marcada como SQL, Reunião Agendada ou proposta (ou ainda não há histórico lido): marque as etapas na aba Configuração do Painel de Dados.';
 
 /** Linhas por safra (mês de criação): base das análises de safra. */
-async function safras(db: Db, f: BiFiltros) {
+async function safras(db: Db, f: BiFiltros, soFonte?: string) {
   const p: unknown[] = [];
-  const w = filtroSql(f, 'd', p);
+  const w = filtroSql(soFonte ? { ...f, fontes: undefined } : f, 'd', p);
+  if (soFonte) {
+    p.push(soFonte);
+    w.push(`${FONTE} = $${p.length}`); // a página do Google Ads ignora o filtro de Fonte: é sempre a fonte do anúncio
+  }
   return q(
     db,
     `with b as (select d.deal_id, to_char(date_trunc('month', d.criado_em at time zone ${TZ}), 'YYYY-MM') as safra, d.conta_como_lead, d.is_mql, d.status, d.valor, d.criado_em, d.fechado_em
@@ -154,9 +160,13 @@ const PASSOS = ['Lead → MQL', 'MQL → SQL', 'SQL → Reunião Agendada', 'Reu
  * Os passos são CONDICIONAIS ("dos que chegaram em A, quantos chegaram em B"), por isso nunca passam de 100%, mesmo quando um ganho
  * foi dado antes de alguma etapa (o ganho vem do Status, não da etapa).
  */
-async function funisPorFonte(db: Db, f: BiFiltros, maxFontes = 6) {
+async function funisPorFonte(db: Db, f: BiFiltros, maxFontes = 6, soFonte?: string) {
   const p: unknown[] = [];
-  const w = filtroSql(f, 'd', p);
+  const w = filtroSql(soFonte ? { ...f, fontes: undefined } : f, 'd', p);
+  if (soFonte) {
+    p.push(soFonte);
+    w.push(`${FONTE} = $${p.length}`);
+  }
   const rows = await q(
     db,
     `with b as (select d.deal_id, ${FONTE} as fonte, d.fonte_id, d.is_mql, d.status from analytics.negocios_bi d where d.conta_como_lead and ${w.join(' and ')}), ${MARCOS_CTE},
@@ -250,6 +260,38 @@ async function resumoMrr(db: Db, f: BiFiltros, avisos: string[] = []): Promise<B
     avisos,
   };
 }
+
+/* ---------- Google Ads ---------- */
+const FONTE_GOOGLE_ADS = 'Marketing [Google ADS]';
+const AVISO_SEM_CUSTO = 'Não há custo do Google Ads neste período (a sincronização do GA4 traz de 2025-01-01 até ontem).';
+const NOTA_ADS =
+  'Investimento = custo do Google Ads dos dias do período (hoje vem do que o GA4 importa da conta de anúncios vinculada; quando a API do Google Ads entrar, ela passa a valer nos dias em que tiver dados). Leads e funil = negócios CRIADOS no período com Fonte do Lead "Marketing [Google ADS]": o filtro de Fonte não vale nesta página; tipo, produto e pipeline valem, mas o custo é da conta toda. Custo por etapa = investimento ÷ negócios que chegaram na etapa. Os leads de um mês nem sempre ganham no mesmo mês: compare meses de idade parecida. ROAS = MRR ganho ÷ investimento.';
+type Custo = { custo: number; cliques: number; impressoes: number };
+const somaCustos = (a: Custo, b: Custo): Custo => ({ custo: a.custo + b.custo, cliques: a.cliques + b.cliques, impressoes: a.impressoes + b.impressoes });
+
+/** Custo do Google Ads no período, por mês de calendário e no total. */
+async function custoAds(db: Db, f: BiFiltros): Promise<{ total: Custo; meses: Map<string, Custo>; origens: string[] }> {
+  const rows = await q(
+    db,
+    `select to_char(dia, 'YYYY-MM') as mes, sum(custo)::float8 as custo, sum(cliques)::float8 as cliques, sum(impressoes)::float8 as impressoes, array_agg(distinct origem) as origens
+       from analytics.ads_investimento_dia where dia between $1::date and $2::date group by 1 order by 1`,
+    [f.de, f.ate],
+  );
+  const meses = new Map<string, Custo>(rows.map((r) => [r.mes as string, { custo: n(r.custo), cliques: n(r.cliques), impressoes: n(r.impressoes) }]));
+  const total = [...meses.values()].reduce(somaCustos, { custo: 0, cliques: 0, impressoes: 0 });
+  return { total, meses, origens: [...new Set(rows.flatMap((r) => r.origens as string[]))] };
+}
+const SOMA_FUNIL = ['leads', 'mql', 'sql', 'reuniao', 'proposta', 'ganhos', 'perdidos', 'abertos', 'mrr_criado', 'mrr_ganho', 'mrr_perdido', 'mrr_aberto'] as const;
+const somarFunil = (rows: Row[]): Row => Object.fromEntries(SOMA_FUNIL.map((k) => [k, rows.reduce((s, r) => s + n(r[k]), 0)]));
+/** Custo por etapa: investimento ÷ negócios que chegaram na etapa (null se ninguém chegou). */
+const custosEtapa = (inv: number, r: Row) => ({
+  cpl: razao(inv, n(r.leads)), c_mql: razao(inv, n(r.mql)), c_sql: razao(inv, n(r.sql)), c_reuniao: razao(inv, n(r.reuniao)),
+  c_proposta: razao(inv, n(r.proposta)), cac: razao(inv, n(r.ganhos)), roas: razao(n(r.mrr_ganho), inv),
+});
+const COL_CUSTOS: Coluna[] = [
+  c('cpl', 'Custo por lead', 'brl2'), c('c_mql', 'Custo por MQL', 'brl2'), c('c_sql', 'Custo por SQL', 'brl2'), c('c_reuniao', 'Custo por Reunião Agendada', 'brl2'),
+  c('c_proposta', 'Custo por proposta', 'brl2'), c('cac', 'Custo por ganho (CAC)', 'brl2'), c('roas', 'ROAS (MRR ganho ÷ investimento)', 'dec'),
+];
 
 const ETAPAS_URL_COLUNAS: Coluna[] = [
   c('pagina', 'Página (URL de conversão)'),
@@ -923,6 +965,167 @@ export const BI_ANALISES: BiAnalise[] = [
       };
     },
   },
+  /* ===================== GOOGLE ADS (investimento + funil dos leads da fonte Google ADS) ===================== */
+  {
+    id: 'ads-resumo',
+    pagina: 'ads',
+    titulo: 'Google Ads: visão geral do período',
+    pergunta: 'Quanto foi investido e o que isso trouxe, do lead ao ganho?',
+    como_ler: `Resumo de todo o período filtrado. ${NOTA_ADS}`,
+    largura: 'cheia',
+    async rodar(db, f) {
+      const [rows, cu] = await Promise.all([safras(db, f, FONTE_GOOGLE_ADS), custoAds(db, f)]);
+      const t = somarFunil(rows);
+      const inv = cu.total.custo;
+      const k = custosEtapa(inv, t);
+      const itens = [
+        { id: 'invest', rotulo: 'Investimento', valor: inv, formato: 'brl' as const, dica: 'Custo do Google Ads no período' },
+        { id: 'cliques', rotulo: 'Cliques', valor: cu.total.cliques, formato: 'int' as const },
+        { id: 'impressoes', rotulo: 'Impressões', valor: cu.total.impressoes, formato: 'int' as const },
+        { id: 'cpc', rotulo: 'CPC médio', valor: razao(inv, cu.total.cliques), formato: 'brl2' as const, dica: 'Investimento ÷ cliques' },
+        { id: 'leads', rotulo: 'Leads', valor: n(t.leads), formato: 'int' as const, dica: 'Negócios da fonte Google ADS que contam como lead' },
+        { id: 'mql', rotulo: 'MQL', valor: n(t.mql), formato: 'int' as const },
+        { id: 'sql', rotulo: 'Chegou em SQL', valor: n(t.sql), formato: 'int' as const },
+        { id: 'reuniao', rotulo: 'Chegou em Reunião Agendada', valor: n(t.reuniao), formato: 'int' as const },
+        { id: 'proposta', rotulo: 'Chegou em proposta', valor: n(t.proposta), formato: 'int' as const },
+        { id: 'ganhos', rotulo: 'Ganhos', valor: n(t.ganhos), formato: 'int' as const },
+        { id: 'cpl', rotulo: 'Custo por lead', valor: k.cpl, formato: 'brl2' as const },
+        { id: 'c_mql', rotulo: 'Custo por MQL', valor: k.c_mql, formato: 'brl2' as const },
+        { id: 'c_sql', rotulo: 'Custo por SQL', valor: k.c_sql, formato: 'brl2' as const },
+        { id: 'c_reuniao', rotulo: 'Custo por Reunião Agendada', valor: k.c_reuniao, formato: 'brl2' as const },
+        { id: 'c_proposta', rotulo: 'Custo por proposta', valor: k.c_proposta, formato: 'brl2' as const },
+        { id: 'cac', rotulo: 'Custo por ganho (CAC)', valor: k.cac, formato: 'brl2' as const, dica: 'Investimento ÷ ganhos' },
+        { id: 'roas', rotulo: 'ROAS', valor: k.roas, formato: 'dec' as const, dica: 'MRR ganho ÷ investimento' },
+        ...mrrKpis(t),
+      ];
+      const avisos: string[] = [];
+      if (!cu.meses.size) avisos.push(AVISO_SEM_CUSTO);
+      if (f.produto) avisos.push('O custo do Google Ads é da conta toda: filtrado por produto, o custo por etapa mistura o custo de todos os produtos com os leads de um só.');
+      return {
+        grafico: { tipo: 'kpis', itens },
+        tabela: { colunas: [c('indicador', 'Indicador'), c('valor', 'Valor')], linhas: itens.map((i) => ({ indicador: i.rotulo, valor: i.valor == null ? '—' : i.formato === 'int' ? String(i.valor) : i.valor.toFixed(2) })) },
+        avisos,
+      };
+    },
+  },
+  {
+    id: 'ads-funil-custos',
+    pagina: 'ads',
+    titulo: 'Funil do Google Ads e custo de cada etapa',
+    pergunta: 'Em que etapa o funil perde força e quanto custa chegar em cada uma?',
+    como_ler: `Cada linha é uma etapa do funil dos leads da fonte Google ADS. "Passo" = dos negócios que chegaram na etapa anterior, quantos chegaram nesta (nunca passa de 100%); "% dos leads" = parte dos leads que chegou na etapa. Custo da etapa = investimento do período ÷ negócios que chegaram nela. "Chegou em X" inclui quem chegou em X ou além (negócios pulam etapas); ganhos vêm do Status do negócio. ${NOTA_ADS}`,
+    largura: 'cheia',
+    async rodar(db, f) {
+      const [{ colunas, avisos }, cu] = await Promise.all([funisPorFonte(db, f, 6, FONTE_GOOGLE_ADS), custoAds(db, f)]);
+      const k = colunas.find((x) => x.total);
+      const inv = cu.total.custo;
+      const linhas = k
+        ? ETAPAS_FUNIL.map((etapa, i) => ({ etapa, negocios: k.valores[i]!, pct_leads: razao(k.valores[i]!, k.leads), passo: k.passos[i] ?? null, custo: razao(inv, k.valores[i]!), acum: null as number | null }))
+        : [];
+      if (!cu.meses.size) avisos.push(AVISO_SEM_CUSTO);
+      return {
+        grafico: { tipo: 'barras', formato: 'brl2', itens: linhas.filter((l) => l.custo != null).map((l) => ({ rotulo: l.etapa, valor: l.custo!, detalhe: `${fmtInt(l.negocios)} negócios · ${pct(l.pct_leads)} dos leads` })) },
+        tabela: { colunas: [c('etapa', 'Etapa'), c('negocios', 'Negócios', 'int'), c('pct_leads', '% dos leads', 'pct'), c('passo', 'Passo (da etapa anterior)', 'pct'), c('custo', 'Custo da etapa', 'brl2')], linhas: linhas.map(({ acum: _a, ...l }) => l) },
+        avisos,
+      };
+    },
+  },
+  {
+    id: 'ads-por-mes',
+    pagina: 'ads',
+    titulo: 'Google Ads mês a mês: investimento e custo por etapa',
+    pergunta: 'Como o investimento e o custo por lead, MQL, SQL, Reunião Agendada, proposta e ganho evoluem a cada mês?',
+    como_ler: `O gráfico mostra o investimento de cada mês. A tabela traz, mês a mês, investimento, cliques, impressões, CPC, os negócios que chegaram em cada etapa (por mês de CRIAÇÃO do negócio), o custo por etapa, o ROAS e o MRR (criado, ganho, perdido, em aberto) com o ticket médio ganho. Meses recentes ainda têm negócios abertos: o custo por ganho deles tende a cair com o tempo. ${NOTA_ADS}`,
+    largura: 'cheia',
+    async rodar(db, f) {
+      const [rows, cu] = await Promise.all([safras(db, f, FONTE_GOOGLE_ADS), custoAds(db, f)]);
+      const porMes = new Map(rows.map((r) => [r.safra as string, r]));
+      const meses = [...new Set([...cu.meses.keys(), ...porMes.keys()])].sort();
+      const linha = (m: string) => {
+        const cc = cu.meses.get(m) ?? { custo: 0, cliques: 0, impressoes: 0 };
+        const r = porMes.get(m) ?? somarFunil([]);
+        return { m, cc, r, k: custosEtapa(cc.custo, r) };
+      };
+      const L = meses.map(linha);
+      const tot = { cc: cu.total, r: somarFunil(rows), k: custosEtapa(cu.total.custo, somarFunil(rows)) };
+      const cel = (m: string, x: { cc: Custo; r: Row; k: ReturnType<typeof custosEtapa> }) => ({
+        mes: m, invest: x.cc.custo, cliques: x.cc.cliques, impressoes: x.cc.impressoes, cpc: razao(x.cc.custo, x.cc.cliques),
+        leads: n(x.r.leads), mql: n(x.r.mql), sql: n(x.r.sql), reuniao: n(x.r.reuniao), proposta: n(x.r.proposta), ganhos: n(x.r.ganhos),
+        ...x.k, ...celulasMrr(x.r),
+      });
+      return {
+        grafico: { tipo: 'colunas', categorias: meses, formato: 'brl', series: [{ id: 'invest', nome: 'Investimento', slot: 1, valores: L.map((x) => x.cc.custo) }] },
+        tabela: {
+          colunas: [
+            c('mes', 'Mês'), c('invest', 'Investimento', 'brl'), c('cliques', 'Cliques', 'int'), c('impressoes', 'Impressões', 'int'), c('cpc', 'CPC médio', 'brl2'),
+            c('leads', 'Leads', 'int'), c('mql', 'MQL', 'int'), c('sql', 'Chegou em SQL', 'int'), c('reuniao', 'Chegou em Reunião Agendada', 'int'), c('proposta', 'Chegou em proposta', 'int'), c('ganhos', 'Ganhos', 'int'),
+            ...COL_CUSTOS, ...colunasMrr(),
+          ],
+          linhas: [...L.map((x) => cel(x.m, x)), cel('Total do período', tot)],
+        },
+        avisos: cu.meses.size ? [] : [AVISO_SEM_CUSTO],
+      };
+    },
+  },
+  {
+    id: 'ads-leads-mes',
+    pagina: 'ads',
+    titulo: 'Google Ads mês a mês: leads e funil',
+    pergunta: 'Quantos leads do Google Ads viram MQL, SQL, Reunião Agendada, proposta e ganho em cada mês?',
+    como_ler: `Negócios da fonte Google ADS agrupados pelo mês em que foram CRIADOS. As porcentagens são sobre os leads do mês. ${NOTA_ADS}`,
+    largura: 'cheia',
+    async rodar(db, f) {
+      const rows = await safras(db, f, FONTE_GOOGLE_ADS);
+      const avisos = await avisoHistorico(db, f);
+      if (rows.length && rows.every((r) => n(r.sql) + n(r.reuniao) + n(r.proposta) === 0)) avisos.unshift(SEM_MARCOS);
+      return {
+        grafico: {
+          tipo: 'colunas',
+          categorias: rows.map((r) => r.safra as string),
+          series: [
+            { id: 'leads', nome: 'Leads', slot: 1, valores: rows.map((r) => n(r.leads)) },
+            { id: 'mql', nome: 'MQL', slot: 2, valores: rows.map((r) => n(r.mql)) },
+            { id: 'ganhos', nome: 'Ganhos', slot: 3, valores: rows.map((r) => n(r.ganhos)) },
+          ],
+        },
+        tabela: {
+          colunas: [c('mes', 'Mês de criação'), c('leads', 'Leads', 'int'), c('mql', 'MQL', 'int'), c('sql', 'Chegou em SQL', 'int'), c('reuniao', 'Chegou em Reunião Agendada', 'int'), c('proposta', 'Chegou em proposta', 'int'), c('ganhos', 'Ganhos', 'int'), c('perdidos', 'Perdidos', 'int'), c('abertos', 'Abertos', 'int'), c('pmql', '% MQL', 'pct'), c('psql', '% chegou SQL', 'pct'), c('preun', '% chegou Reunião Agendada', 'pct'), c('pprop', '% chegou proposta', 'pct'), c('pganho', '% ganho', 'pct'), c('taxa', 'Taxa de ganho', 'pct')],
+          linhas: rows.map((r) => ({
+            mes: r.safra, leads: n(r.leads), mql: n(r.mql), sql: n(r.sql), reuniao: n(r.reuniao), proposta: n(r.proposta), ganhos: n(r.ganhos), perdidos: n(r.perdidos), abertos: n(r.abertos),
+            pmql: razao(n(r.mql), n(r.leads)), psql: razao(n(r.sql), n(r.leads)), preun: razao(n(r.reuniao), n(r.leads)), pprop: razao(n(r.proposta), n(r.leads)), pganho: razao(n(r.ganhos), n(r.leads)), taxa: razao(n(r.ganhos), n(r.ganhos) + n(r.perdidos)),
+          })),
+        },
+        avisos,
+      };
+    },
+  },
+  {
+    id: 'ads-campanhas',
+    pagina: 'ads',
+    titulo: 'Google Ads por campanha: investimento',
+    pergunta: 'Em quais campanhas o dinheiro foi gasto?',
+    como_ler: `Custo, cliques e impressões por campanha no período (as 25 com mais investimento). Os LEADS ainda não são ligados a cada campanha: o campo "UTM Campaign" do Pipedrive traz nomes soltos ("blindagem", "Institucional", "SoftwareDP"...) que não batem com o nome das campanhas do Google Ads; para ligar é preciso uma tabela de correspondência (nome da UTM → campanha), a ser definida com o Pablo. ${NOTA_ADS}`,
+    largura: 'cheia',
+    async rodar(db, f) {
+      const rows = await q(
+        db,
+        `select campanha_id, campanha, sum(custo)::float8 as custo, sum(cliques)::float8 as cliques, sum(impressoes)::float8 as impressoes
+           from analytics.ads_investimento_dia where dia between $1::date and $2::date and (custo > 0 or cliques > 0)
+          group by 1, 2 order by custo desc, 2 limit 25`,
+        [f.de, f.ate],
+      );
+      const total = rows.reduce((s, r) => s + n(r.custo), 0);
+      return {
+        grafico: { tipo: 'barras', formato: 'brl', itens: rows.slice(0, 10).map((r) => ({ rotulo: (r.campanha as string) || '(sem campanha)', valor: n(r.custo), detalhe: `${fmtInt(n(r.cliques))} cliques · CPC ${razao(n(r.custo), n(r.cliques)) == null ? '—' : `R$ ${razao(n(r.custo), n(r.cliques))!.toFixed(2).replace('.', ',')}`}` })) },
+        tabela: {
+          colunas: [c('campanha', 'Campanha'), c('id', 'ID'), c('custo', 'Investimento', 'brl'), c('part', '% do investimento', 'pct'), c('cliques', 'Cliques', 'int'), c('impressoes', 'Impressões', 'int'), c('cpc', 'CPC médio', 'brl2')],
+          linhas: rows.map((r) => ({ campanha: (r.campanha as string) || '(sem campanha)', id: r.campanha_id || null, custo: n(r.custo), part: razao(n(r.custo), total), cliques: n(r.cliques), impressoes: n(r.impressoes), cpc: razao(n(r.custo), n(r.cliques)) })),
+        },
+        avisos: rows.length ? [] : [AVISO_SEM_CUSTO],
+      };
+    },
+  },
+
   /* ===================== SITE E PÁGINAS (Google Analytics + funil por URL) ===================== */
   {
     id: 'site-resumo',

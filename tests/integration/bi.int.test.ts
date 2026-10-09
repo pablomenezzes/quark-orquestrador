@@ -327,6 +327,6 @@ run('BI (transação com rollback)', () => {
     expect(nomes(o.tipos)).toEqual(expect.arrayContaining(['Marketing'])); // seleção fixa do Tipo do Lead
     expect(o.fontes.every((x) => /^\d+$/.test(x.id))).toBe(true);
     expect(repo().catalogo().length).toBe(BI_ANALISES.length);
-    expect(o.paginas.map((p) => p.id)).toEqual(['geral', 'safra', 'canais', 'site', 'qualidade']);
+    expect(o.paginas.map((p) => p.id)).toEqual(['geral', 'safra', 'canais', 'ads', 'site', 'qualidade']);
   });
 });
