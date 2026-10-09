@@ -10,6 +10,7 @@ const ENTIDADES = [
   ['pipelines', 'Pipelines'], ['stages', 'Etapas'], ['users', 'Usuários'],
   ['deals', 'Negócios'], ['deals_archived', 'Negócios arquivados'], ['deals_deleted', 'Negócios excluídos'], ['deal_history', 'Histórico de etapas'],
   ['deal_fields', 'Campos de negócios'], ['person_fields', 'Campos de pessoas'], ['organization_fields', 'Campos de organizações'], ['activity_fields', 'Campos de atividades'],
+  ['ga4_dia', 'Google Analytics: totais por dia'], ['ga4_sessoes', 'Google Analytics: sessões por página'], ['ga4_eventos', 'Google Analytics: eventos'], ['ga4_paginas', 'Google Analytics: páginas vistas'],
 ];
 const ENTIDADE_CAMPO = { deal: 'Negócios', person: 'Pessoas', organization: 'Organizações', activity: 'Atividades' };
 const ALERTA_HORAS = 8;

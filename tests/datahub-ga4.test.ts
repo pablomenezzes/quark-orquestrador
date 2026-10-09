@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { generateKeyPairSync } from 'node:crypto';
 import {
   Ga4Client, PAGE_SIZE, SEM_HOST, SEM_PAGINA, blocosDeDatas, dataGa4, ga4CredentialsFromEnv,
-  mapEventos, mapPaginas, mapSessoes, relatorio, EVENTOS_FORA, type FetchLike, type ReportRow,
+  mapDia, mapEventos, mapPaginas, mapSessoes, relatorio, EVENTOS_FORA, type FetchLike, type ReportRow,
 } from '../src/datahub/google/ga4';
 import { intervalo, REVISAO_DIAS } from '../src/datahub/google/ga4-sync';
 
@@ -40,6 +40,12 @@ describe('GA4: mapeamento dos relatórios', () => {
     expect(mapEventos([row(['20261001', '(not set)', '(not set)', 'form_x'], [3, 2])])[0]).toMatchObject({ host: SEM_HOST, pagina: SEM_PAGINA, eventos: 3, usuarios: 2 });
     const p = mapPaginas([row(['20261001', 'h', '/a'], [4, 3]), row(['20261001', 'h', '/a'], [1, 1])]);
     expect(p).toEqual([{ dia: '2026-10-01', host: 'h', pagina: '/a', visualizacoes: 5, usuarios_ativos: 4 }]);
+  });
+  it('totais por dia: uma linha por dia, só com a dimensão data (usuários ativos não se somam entre páginas)', () => {
+    const r = relatorio('ga4_dia', '2026-10-01', '2026-10-02');
+    expect(r.dimensions).toEqual([{ name: 'date' }]);
+    expect(r.metrics.map((m) => m.name)).toEqual(['sessions', 'activeUsers', 'newUsers', 'engagedSessions', 'screenPageViews']);
+    expect(mapDia([row(['20261001'], [10, 8, 5, 6, 30])])).toEqual([{ dia: '2026-10-01', sessoes: 10, usuarios_ativos: 8, usuarios_novos: 5, sessoes_engajadas: 6, visualizacoes: 30 }]);
   });
   it('o relatório de eventos deixa de fora os eventos automáticos de alto volume', () => {
     const r = relatorio('ga4_eventos', '2026-10-01', '2026-10-02');

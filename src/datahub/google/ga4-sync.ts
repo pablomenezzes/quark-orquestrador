@@ -7,8 +7,8 @@
  */
 import type pg from 'pg';
 import {
-  blocosDeDatas, mapEventos, mapPaginas, mapSessoes, relatorio,
-  type EventoDia, type Ga4Client, type Ga4Entidade, type PaginaDia, type SessaoDia,
+  blocosDeDatas, mapDia, mapEventos, mapPaginas, mapSessoes, relatorio,
+  type EventoDia, type Ga4Client, type Ga4Entidade, type PaginaDia, type SessaoDia, type TotalDia,
 } from './ga4.js';
 
 export const REVISAO_DIAS = 7;
@@ -82,6 +82,21 @@ export class Ga4Store {
     }
   }
 
+  async dias(rows: TotalDia[]): Promise<void> {
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      const c = rows.slice(i, i + CHUNK);
+      await upsert(
+        this.q,
+        `insert into mkt.ga4_dia (property_id, dia, sessoes, usuarios_ativos, usuarios_novos, sessoes_engajadas, visualizacoes)
+         select ${this.propertyId}, * from unnest($1::date[], $2::int[], $3::int[], $4::int[], $5::int[], $6::int[])
+         on conflict (property_id, dia) do update set sessoes = excluded.sessoes, usuarios_ativos = excluded.usuarios_ativos,
+           usuarios_novos = excluded.usuarios_novos, sessoes_engajadas = excluded.sessoes_engajadas, visualizacoes = excluded.visualizacoes,
+           atualizado_em = now()`,
+        [c.map((r) => r.dia), c.map((r) => r.sessoes), c.map((r) => r.usuarios_ativos), c.map((r) => r.usuarios_novos), c.map((r) => r.sessoes_engajadas), c.map((r) => r.visualizacoes)],
+      );
+    }
+  }
+
   async marcaDagua(entidade: Ga4Entidade): Promise<string | null> {
     const r = await this.q.query(`select marca_dagua::date::text as d from ops.sync_checkpoints where entity = $1`, [entidade]);
     return r.rows[0]?.d ?? null;
@@ -140,7 +155,8 @@ export async function syncGa4Entidade(
       const rows = await client.runReportAll(relatorio(entidade, b.inicio, b.fim));
       lidos += rows.length;
       if (opts.apply) {
-        if (entidade === 'ga4_sessoes') { const m = mapSessoes(rows); await store.sessoes(m); gravados += m.length; }
+        if (entidade === 'ga4_dia') { const m = mapDia(rows); await store.dias(m); gravados += m.length; }
+        else if (entidade === 'ga4_sessoes') { const m = mapSessoes(rows); await store.sessoes(m); gravados += m.length; }
         else if (entidade === 'ga4_eventos') { const m = mapEventos(rows); await store.eventos(m); gravados += m.length; }
         else { const m = mapPaginas(rows); await store.paginas(m); gravados += m.length; }
         await store.salvarMarcaDagua(entidade, b.fim, jobId, b === blocos[blocos.length - 1]);

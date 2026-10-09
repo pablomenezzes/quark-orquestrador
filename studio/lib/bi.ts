@@ -23,6 +23,7 @@ export const BI_PAGINAS = [
   { id: 'geral', rotulo: 'Visão geral' },
   { id: 'safra', rotulo: 'Safra' },
   { id: 'canais', rotulo: 'Canais' },
+  { id: 'site', rotulo: 'Site e páginas' },
   { id: 'qualidade', rotulo: 'Qualidade' },
 ] as const;
 export type BiPagina = (typeof BI_PAGINAS)[number]['id'];
@@ -33,7 +34,7 @@ export type BiFiltros = { de: string; ate: string; produto?: BiProduto; pipeline
 export type Coluna = { id: string; rotulo: string; tipo: 'texto' | 'int' | 'pct' | 'brl' | 'dias' };
 export type Tabela = { colunas: Coluna[]; linhas: Array<Record<string, string | number | null>> };
 export type Grafico =
-  | { tipo: 'kpis'; itens: Array<{ id: string; rotulo: string; valor: number | null; formato: 'int' | 'pct' | 'brl'; dica?: string }> }
+  | { tipo: 'kpis'; itens: Array<{ id: string; rotulo: string; valor: number | null; formato: 'int' | 'pct' | 'brl' | 'dec'; dica?: string }> }
   /** `slot`: cor fixa da série (1 a 4 = paleta categórica; 0 = neutro, para "outras"). A cor segue a entidade, nunca a posição. */
   | { tipo: 'colunas'; categorias: string[]; series: Array<{ id: string; nome: string; slot: number; valores: number[] }>; formato?: 'int' | 'pct' }
   | { tipo: 'barras'; itens: Array<{ rotulo: string; valor: number; detalhe?: string }>; formato: 'int' | 'dias' | 'pct'; ordinal?: boolean }
@@ -188,6 +189,56 @@ async function funisPorFonte(db: Db, f: BiFiltros, maxFontes = 6) {
   if (mostradas > maxFontes) avisos.push(`Mostra as ${maxFontes} fontes com mais leads (de ${mostradas}); o total considera todas.`);
   return { colunas, avisos };
 }
+
+/* ---------- Site (Google Analytics) ---------- */
+const nDias = (f: BiFiltros) => Math.round((Date.parse(f.ate) - Date.parse(f.de)) / 86_400_000) + 1;
+const somaDias = (d: string, k: number) => new Date(Date.parse(d) + k * 86_400_000).toISOString().slice(0, 10);
+const AVISO_SEM_GA4 = 'Não há dados do Google Analytics neste período (a sincronização do GA4 traz de 2025-01-01 até ontem).';
+const NOTA_SITE = 'O tráfego do site NÃO muda com os filtros de fonte, tipo nem produto (o Google Analytics não conhece o Pipedrive): vale só o período.';
+/** Domínio + caminho; o GA4 às vezes devolve "www.", o Pipedrive não: os dois lados perdem o "www." para casar. */
+const HOST_GA4 = `regexp_replace(lower(s.host), '^www[.]', '')`;
+const paginaRotulo = (host: string, caminho: string) => (host ? `${host}${caminho === '/' ? '' : caminho}` : caminho);
+const fmtInt = (v: number) => new Intl.NumberFormat('pt-BR').format(Math.round(v));
+const variacao = (a: number, b: number): number | null => (b > 0 ? a / b - 1 : null);
+
+const ETAPAS_URL_COLUNAS: Coluna[] = [
+  c('pagina', 'Página (URL de conversão)'),
+  c('sessoes', 'Sessões que entraram pela página (GA4)', 'int'),
+  c('leads', 'Leads', 'int'),
+  c('visita_lead', 'Lead ÷ sessões', 'pct'),
+  c('mql', 'MQL', 'int'),
+  c('p_mql', 'Lead → MQL', 'pct'),
+  c('sql', 'Chegou em SQL', 'int'),
+  c('p_sql', 'MQL → SQL', 'pct'),
+  c('reuniao', 'Chegou em reunião', 'int'),
+  c('p_reuniao', 'SQL → reunião', 'pct'),
+  c('proposta', 'Chegou em proposta', 'int'),
+  c('p_proposta', 'Reunião → proposta', 'pct'),
+  c('ganhos', 'Ganhos', 'int'),
+  c('p_ganho', 'Proposta → ganho', 'pct'),
+  c('perdidos', 'Perdidos', 'int'),
+  c('lead_ganho', 'Lead → ganho', 'pct'),
+  c('taxa_ganho', 'Taxa de ganho (ganhos ÷ ganhos + perdidos)', 'pct'),
+];
+const linhaUrl = (pagina: string, r: Row, sessoes: number | null): Record<string, string | number | null> => ({
+  pagina,
+  sessoes,
+  leads: n(r.leads),
+  visita_lead: sessoes ? razao(n(r.leads), sessoes) : null,
+  mql: n(r.mql),
+  p_mql: razao(n(r.mql), n(r.leads)),
+  sql: n(r.sql),
+  p_sql: razao(n(r.mql_sql), n(r.mql)),
+  reuniao: n(r.reuniao),
+  p_reuniao: razao(n(r.sql_reuniao), n(r.sql)),
+  proposta: n(r.proposta),
+  p_proposta: razao(n(r.reuniao_proposta), n(r.reuniao)),
+  ganhos: n(r.ganhos),
+  p_ganho: razao(n(r.proposta_ganho), n(r.proposta)),
+  perdidos: n(r.perdidos),
+  lead_ganho: razao(n(r.ganhos), n(r.leads)),
+  taxa_ganho: razao(n(r.ganhos), n(r.ganhos) + n(r.perdidos)),
+});
 
 export const BI_ANALISES: BiAnalise[] = [
   /* ===================== VISÃO GERAL ===================== */
@@ -796,6 +847,234 @@ export const BI_ANALISES: BiAnalise[] = [
         tabela: { colunas: [c('campo', 'Campo'), c('sem', 'Em branco', 'int'), c('base', 'Negócios considerados', 'int'), c('pct', '% em branco', 'pct')], linhas: linhas.map((l) => ({ campo: l.campo, sem: l.sem, base: l.base, pct: razao(l.sem, l.base) })) },
         avisos: [],
       };
+    },
+  },
+  /* ===================== SITE E PÁGINAS (Google Analytics + funil por URL) ===================== */
+  {
+    id: 'site-resumo',
+    pagina: 'site',
+    titulo: 'Desempenho do site no período',
+    pergunta: 'Quanto tráfego o site recebeu e como isso se compara ao período anterior?',
+    como_ler: `Dados do Google Analytics 4 da propriedade do QuarkRH. Sessões = acessos. Novos usuários = pessoas que chegaram ao site pela primeira vez. Usuários ativos por dia = média dos usuários ativos de cada dia (usuários não se somam entre dias: a mesma pessoa que volta em 3 dias conta 3 vezes se somada, por isso o indicador é a média diária). Taxa de engajamento = sessões engajadas ÷ sessões. A comparação é com o período imediatamente anterior, do mesmo tamanho. ${NOTA_SITE}`,
+    largura: 'cheia',
+    async rodar(db, f) {
+      const k = nDias(f);
+      const dePrev = somaDias(f.de, -k);
+      const atePrev = somaDias(f.de, -1);
+      const soma = async (a: string, b: string) =>
+        (
+          await q(
+            db,
+            `select coalesce(sum(sessoes),0)::int as s, coalesce(sum(usuarios_novos),0)::int as nu, coalesce(avg(usuarios_ativos),0)::float8 as ua,
+                    coalesce(sum(visualizacoes),0)::int as v, coalesce(sum(sessoes_engajadas),0)::int as e, count(*)::int as dias
+               from analytics.site_dia where dia between $1::date and $2::date`,
+            [a, b],
+          )
+        )[0]!;
+      const [x, y] = [await soma(f.de, f.ate), await soma(dePrev, atePrev)];
+      const itens = [
+        { id: 'sessoes', rotulo: 'Sessões (acessos)', a: n(x.s), b: n(y.s), formato: 'int' as const },
+        { id: 'novos', rotulo: 'Novos usuários', a: n(x.nu), b: n(y.nu), formato: 'int' as const },
+        { id: 'ativos', rotulo: 'Usuários ativos por dia (média)', a: Math.round(n(x.ua)), b: Math.round(n(y.ua)), formato: 'int' as const },
+        { id: 'views', rotulo: 'Visualizações de página', a: n(x.v), b: n(y.v), formato: 'int' as const },
+        { id: 'engaj', rotulo: 'Taxa de engajamento', a: razao(n(x.e), n(x.s)), b: razao(n(y.e), n(y.s)), formato: 'pct' as const },
+        { id: 'pps', rotulo: 'Páginas por sessão', a: razao(n(x.v), n(x.s)), b: razao(n(y.v), n(y.s)), formato: 'num' as const },
+      ];
+      const txt = (v: number | null, formato: 'int' | 'pct' | 'num') => (v == null ? '—' : formato === 'int' ? fmtInt(v) : formato === 'pct' ? pct(v).replace('.', ',') : v.toFixed(2).replace('.', ','));
+      const dica = (i: (typeof itens)[number]) => {
+        const v = i.a != null && i.b != null ? variacao(i.a, i.b) : null;
+        return `Período anterior (${dePrev} a ${atePrev}): ${txt(i.b, i.formato)}${v == null ? '' : ` (${v >= 0 ? '+' : ''}${(v * 100).toFixed(1).replace('.', ',')}%)`}`;
+      };
+      return {
+        grafico: {
+          tipo: 'kpis',
+          itens: itens.map((i) => ({ id: i.id, rotulo: i.rotulo, valor: i.a, formato: i.formato === 'num' ? ('dec' as const) : i.formato, dica: dica(i) })),
+        },
+        tabela: {
+          colunas: [c('indicador', 'Indicador'), c('atual', 'Período'), c('anterior', 'Período anterior'), c('variacao', 'Variação', 'pct')],
+          linhas: itens.map((i) => ({ indicador: i.rotulo, atual: txt(i.a, i.formato), anterior: txt(i.b, i.formato), variacao: i.a != null && i.b != null ? variacao(i.a, i.b) : null })),
+        },
+        avisos: n(x.dias) === 0 ? [AVISO_SEM_GA4] : [],
+      };
+    },
+  },
+  {
+    id: 'site-acessos',
+    pagina: 'site',
+    titulo: 'Acessos ao longo do tempo',
+    pergunta: 'O tráfego do site está subindo ou caindo?',
+    como_ler: `Sessões (acessos) e novos usuários por dia (períodos de até 62 dias), por semana (até 200 dias) ou por mês (períodos maiores). A tabela traz também a média de usuários ativos por dia, as visualizações e a taxa de engajamento. ${NOTA_SITE}`,
+    largura: 'cheia',
+    async rodar(db, f) {
+      const k = nDias(f);
+      const g = k <= 62 ? 'day' : k <= 200 ? 'week' : 'month';
+      const rows = await q(
+        db,
+        `select to_char(date_trunc('${g}', dia::timestamp), '${g === 'month' ? 'YYYY-MM' : 'YYYY-MM-DD'}') as per, sum(sessoes)::int as s, sum(usuarios_novos)::int as nu,
+                avg(usuarios_ativos)::float8 as ua, sum(visualizacoes)::int as v, sum(sessoes_engajadas)::int as e
+           from analytics.site_dia where dia between $1::date and $2::date group by 1 order by 1`,
+        [f.de, f.ate],
+      );
+      return {
+        grafico: {
+          tipo: 'colunas',
+          categorias: rows.map((r) => r.per as string),
+          series: [
+            { id: 'sessoes', nome: 'Sessões', slot: 1, valores: rows.map((r) => n(r.s)) },
+            { id: 'novos', nome: 'Novos usuários', slot: 2, valores: rows.map((r) => n(r.nu)) },
+          ],
+        },
+        tabela: {
+          colunas: [c('periodo', g === 'day' ? 'Dia' : g === 'week' ? 'Semana (início na segunda)' : 'Mês'), c('sessoes', 'Sessões', 'int'), c('novos', 'Novos usuários', 'int'), c('ativos', 'Usuários ativos por dia (média)', 'int'), c('views', 'Visualizações', 'int'), c('engaj', 'Taxa de engajamento', 'pct')],
+          linhas: rows.map((r) => ({ periodo: r.per, sessoes: n(r.s), novos: n(r.nu), ativos: Math.round(n(r.ua)), views: n(r.v), engaj: razao(n(r.e), n(r.s)) })),
+        },
+        avisos: rows.length ? [] : [AVISO_SEM_GA4],
+      };
+    },
+  },
+  {
+    id: 'site-paginas',
+    pagina: 'site',
+    titulo: 'Páginas que mais trazem acessos',
+    pergunta: 'Por quais páginas as pessoas entram no site?',
+    como_ler: `Páginas de ENTRADA (a primeira página da sessão), com domínio e caminho; "(sem pagina)" são sessões em que o GA4 não informou a página. Mostra as 40 com mais sessões. Engajamento = sessões engajadas ÷ sessões. ${NOTA_SITE}`,
+    largura: 'cheia',
+    async rodar(db, f) {
+      const rows = await q(
+        db,
+        `select ${HOST_GA4} as host, s.caminho, sum(s.sessoes)::int as s, sum(s.usuarios_novos)::int as nu, sum(s.sessoes_engajadas)::int as e, sum(s.visualizacoes)::int as v
+           from analytics.site_sessoes_dia s where s.dia between $1::date and $2::date group by 1, 2 order by s desc, 1, 2 limit 40`,
+        [f.de, f.ate],
+      );
+      const tot = n((await q(db, `select coalesce(sum(sessoes),0)::int as s from analytics.site_dia where dia between $1::date and $2::date`, [f.de, f.ate]))[0]!.s);
+      return {
+        grafico: { tipo: 'barras', formato: 'int', itens: rows.slice(0, 10).map((r) => ({ rotulo: paginaRotulo(r.host, r.caminho), valor: n(r.s), detalhe: `${fmtInt(n(r.nu))} novos usuários · engajamento ${pct(razao(n(r.e), n(r.s)))}` })) },
+        tabela: {
+          colunas: [c('pagina', 'Página de entrada'), c('sessoes', 'Sessões', 'int'), c('part', '% das sessões do site', 'pct'), c('novos', 'Novos usuários', 'int'), c('engaj', 'Taxa de engajamento', 'pct'), c('views', 'Visualizações', 'int')],
+          linhas: rows.map((r) => ({ pagina: paginaRotulo(r.host, r.caminho), sessoes: n(r.s), part: razao(n(r.s), tot), novos: n(r.nu), engaj: razao(n(r.e), n(r.s)), views: n(r.v) })),
+        },
+        avisos: rows.length ? [] : [AVISO_SEM_GA4],
+      };
+    },
+  },
+  {
+    id: 'site-fontes',
+    pagina: 'site',
+    titulo: 'De onde vêm os acessos',
+    pergunta: 'Quais fontes e mídias trazem mais tráfego e com que qualidade?',
+    como_ler: `Fonte e mídia da sessão, como o GA4 as classifica (google / organic, google / cpc, instagram / social...). Mostra as 20 com mais sessões. É a origem do TRÁFEGO; a fonte do LEAD (campo do Pipedrive) está nas páginas Canais e Qualidade. ${NOTA_SITE}`,
+    largura: 'meia',
+    async rodar(db, f) {
+      const rows = await q(
+        db,
+        `select fonte, midia, sum(sessoes)::int as s, sum(usuarios_novos)::int as nu, sum(sessoes_engajadas)::int as e
+           from analytics.site_sessoes_dia where dia between $1::date and $2::date group by 1, 2 order by s desc, 1, 2 limit 20`,
+        [f.de, f.ate],
+      );
+      return {
+        grafico: { tipo: 'barras', formato: 'int', itens: rows.slice(0, 10).map((r) => ({ rotulo: `${r.fonte} / ${r.midia}`, valor: n(r.s), detalhe: `${fmtInt(n(r.nu))} novos usuários · engajamento ${pct(razao(n(r.e), n(r.s)))}` })) },
+        tabela: {
+          colunas: [c('fonte', 'Fonte'), c('midia', 'Mídia'), c('sessoes', 'Sessões', 'int'), c('novos', 'Novos usuários', 'int'), c('engaj', 'Taxa de engajamento', 'pct')],
+          linhas: rows.map((r) => ({ fonte: r.fonte, midia: r.midia, sessoes: n(r.s), novos: n(r.nu), engaj: razao(n(r.e), n(r.s)) })),
+        },
+        avisos: rows.length ? [] : [AVISO_SEM_GA4],
+      };
+    },
+  },
+  {
+    id: 'site-conversoes',
+    pagina: 'site',
+    titulo: 'Conversões do site (regras do Painel)',
+    pergunta: 'Quantas conversões cada regra (evento + URL) registrou?',
+    como_ler: `Cada linha é uma regra criada no Painel de Dados > Conversões do site (evento do GA4, em qualquer URL ou só em algumas). Eventos = quantas vezes o evento ocorreu; usuários = soma dos usuários de cada dia (não é a contagem de pessoas únicas). Regras desativadas ou do tipo "ignorar" não aparecem. ${NOTA_SITE}`,
+    largura: 'meia',
+    async rodar(db, f) {
+      const rows = await q(
+        db,
+        `select regra_id, regra, tipo, evento, sum(eventos)::int as e, sum(usuarios)::int as u
+           from analytics.site_conversoes_dia where dia between $1::date and $2::date group by 1, 2, 3, 4 order by e desc, regra_id`,
+        [f.de, f.ate],
+      );
+      const tipos: Record<string, string> = { lead: 'Lead do site', intermediaria: 'Conversão intermediária' };
+      const avisos: string[] = [];
+      if (!rows.length) avisos.push('Nenhuma regra ativa registrou eventos neste período. Crie as regras no Painel de Dados > Conversões do site.');
+      return {
+        grafico: { tipo: 'barras', formato: 'int', itens: rows.map((r) => ({ rotulo: r.regra as string, valor: n(r.e), detalhe: `${tipos[r.tipo as string] ?? r.tipo} · evento ${r.evento}` })) },
+        tabela: {
+          colunas: [c('regra', 'Regra'), c('tipo', 'Tipo'), c('evento', 'Evento no GA4'), c('eventos', 'Eventos', 'int'), c('usuarios', 'Usuários (soma dos dias)', 'int')],
+          linhas: rows.map((r) => ({ regra: r.regra, tipo: tipos[r.tipo as string] ?? r.tipo, evento: r.evento, eventos: n(r.e), usuarios: n(r.u) })),
+        },
+        avisos,
+      };
+    },
+  },
+  {
+    id: 'site-url-funil',
+    pagina: 'site',
+    titulo: 'Funil dos leads por página de conversão',
+    pergunta: 'Que páginas geram leads que viram MQL, SQL, reunião, proposta e ganho, e com que taxas?',
+    como_ler: `Só entram negócios que contam como lead e têm "URL de Conversão" preenchida com uma URL de verdade (domínio + caminho). Cada linha é uma página; a primeira é o total. As etapas seguem a regra do funil: "chegou em X" inclui quem chegou em X ou além; as taxas de passo são condicionais (dos que chegaram na etapa anterior, quantos chegaram nesta) e nunca passam de 100%. Ganhos e perdidos vêm do Status do negócio. "Lead ÷ sessões" compara os leads criados no período com as sessões que ENTRARAM pela mesma página no mesmo período no GA4: é uma aproximação (a URL de conversão é onde a pessoa converteu, não necessariamente onde entrou, e só vale para domínios que o GA4 mede). Os filtros de período, produto, pipeline, fonte e tipo valem aqui. Mostra as 40 páginas com mais leads.`,
+    largura: 'cheia',
+    async rodar(db, f) {
+      const p: unknown[] = [];
+      const w = filtroSql(f, 'd', p);
+      const rows = await q(
+        db,
+        `with b as (select d.deal_id, d.is_mql, d.status, u.host_url, u.caminho_url
+                      from analytics.negocios_bi d join analytics.negocios_url u on u.deal_id = d.deal_id
+                     where d.conta_como_lead and u.url_valida and ${w.join(' and ')}), ${MARCOS_CTE},
+              x as (select b.host_url, b.caminho_url, b.is_mql as mql, coalesce(m.sql, false) as sql, coalesce(m.reuniao, false) as reuniao,
+                           coalesce(m.proposta, false) as proposta, b.status
+                      from b left join m on m.deal_id = b.deal_id)
+         select grouping(x.host_url) as e_total, x.host_url, x.caminho_url, count(*)::int as leads, count(*) filter (where mql)::int as mql,
+                count(*) filter (where sql)::int as sql, count(*) filter (where reuniao)::int as reuniao, count(*) filter (where proposta)::int as proposta,
+                count(*) filter (where status = 'won')::int as ganhos, count(*) filter (where status = 'lost')::int as perdidos,
+                count(*) filter (where mql and sql)::int as mql_sql, count(*) filter (where sql and reuniao)::int as sql_reuniao,
+                count(*) filter (where reuniao and proposta)::int as reuniao_proposta, count(*) filter (where proposta and status = 'won')::int as proposta_ganho
+           from x group by grouping sets ((x.host_url, x.caminho_url), ()) order by e_total desc, leads desc, x.host_url, x.caminho_url`,
+        p,
+      );
+      const p2: unknown[] = [];
+      const w2 = filtroSql(f, 'd', p2);
+      const cob = (
+        await q(
+          db,
+          `select count(*)::int as leads, count(*) filter (where u.tem_url and u.url_valida)::int as valida, count(*) filter (where u.tem_url and not u.url_valida)::int as invalida
+             from analytics.negocios_bi d left join analytics.negocios_url u on u.deal_id = d.deal_id where d.conta_como_lead and ${w2.join(' and ')}`,
+          p2,
+        )
+      )[0]!;
+      const sess = new Map<string, number>();
+      for (const r of await q(
+        db,
+        `select ${HOST_GA4} as host, s.caminho, sum(s.sessoes)::int as sessoes from analytics.site_sessoes_dia s where s.dia between $1::date and $2::date group by 1, 2`,
+        [f.de, f.ate],
+      ))
+        sess.set(`${r.host}|${r.caminho}`, n(r.sessoes));
+      const total = rows.find((r) => n(r.e_total) === 1);
+      const paginas = rows.filter((r) => n(r.e_total) === 0);
+      const top = paginas.slice(0, 40);
+      const linhas: Array<Record<string, string | number | null>> = [];
+      if (total && n(total.leads) > 0) {
+        const sessTotal = top.reduce((a, r) => a + (sess.get(`${r.host_url}|${r.caminho_url}`) ?? 0), 0);
+        linhas.push(linhaUrl('Total (leads com URL de conversão válida)', total, sessTotal || null));
+        for (const r of top) linhas.push(linhaUrl(paginaRotulo(r.host_url, r.caminho_url), r, sess.has(`${r.host_url}|${r.caminho_url}`) ? sess.get(`${r.host_url}|${r.caminho_url}`)! : null));
+        const resto = paginas.slice(40);
+        if (resto.length) {
+          const soma = (k: string) => resto.reduce((a, r) => a + n(r[k]), 0);
+          linhas.push(linhaUrl(`(demais ${resto.length} páginas)`, Object.fromEntries(['leads', 'mql', 'sql', 'reuniao', 'proposta', 'ganhos', 'perdidos', 'mql_sql', 'sql_reuniao', 'reuniao_proposta', 'proposta_ganho'].map((k) => [k, soma(k)])), null));
+        }
+      }
+      const avisos = await avisoHistorico(db, f);
+      if (n(cob.leads) > 0) {
+        avisos.unshift(
+          `${fmtInt(n(cob.valida))} de ${fmtInt(n(cob.leads))} leads do filtro (${pct(razao(n(cob.valida), n(cob.leads)))}) têm uma URL de conversão válida e entram nesta tabela` +
+            (n(cob.invalida) ? `; ${fmtInt(n(cob.invalida))} têm um texto que não é URL no campo e ficam de fora` : '') +
+            '. O resto não tem o campo preenchido.',
+        );
+      }
+      if (linhas.length > 1 && linhas.slice(1).every((l) => l.sql === 0 && l.reuniao === 0 && l.proposta === 0)) avisos.push(SEM_MARCOS);
+      return { grafico: { tipo: 'tabela' }, tabela: { colunas: ETAPAS_URL_COLUNAS, linhas }, avisos };
     },
   },
 ];

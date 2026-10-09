@@ -12,6 +12,7 @@ function fmt(tipo, v) {
   if (tipo === 'int') return nf.format(v);
   if (tipo === 'pct') return `${nf1.format(v * 100)}%`;
   if (tipo === 'brl') return brl.format(v);
+  if (tipo === 'dec') return new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
   if (tipo === 'dias') return `${nf1.format(v)} d`;
   return String(v);
 }
@@ -147,7 +148,7 @@ function niceMax(v) {
   for (const m of [1, 2, 2.5, 5, 10]) if (v <= m * pot) return m * pot;
   return 10 * pot;
 }
-const rotuloMes = (c) => { const [a, m] = c.split('-'); return `${MESES[Number(m) - 1]}/${a.slice(2)}`; };
+const rotuloMes = (c) => { const p = c.split('-'); if (p.length === 3) return `${p[2]}/${p[1]}`; return `${MESES[Number(p[1]) - 1]}/${p[0].slice(2)}`; };
 
 function colunas(g) {
   const W = 960, H = 300, L = 50, R = 8, T = 10, B = 26;
@@ -163,7 +164,7 @@ function colunas(g) {
   const grupo = bw * k + 2 * (k - 1);
   const ticks = [0, 1, 2, 3, 4].map((i) => (maxV / 4) * i);
   const topo = (x, yy, w, h) => { const r = Math.min(4, w / 2, h); return h <= 0 ? '' : `M${x},${yy + h}L${x},${yy + r}Q${x},${yy} ${x + r},${yy}L${x + w - r},${yy}Q${x + w},${yy} ${x + w},${yy + r}L${x + w},${yy + h}Z`; };
-  const passo = n > 14 ? 2 : 1;
+  const passo = Math.max(1, Math.ceil(n / 14));
   const barrasSvg = g.categorias.map((c, ci) => {
     const x0 = L + band * ci + (band - grupo) / 2;
     return g.series.map((s, si) => `<path d="${topo(x0 + si * (bw + 2), y(s.valores[ci]), bw, (s.valores[ci] / maxV) * ih)}" fill="${COR(s.slot)}"/>`).join('');

@@ -121,11 +121,15 @@ export class Ga4Client {
 }
 
 /* ---------- relatorios e mapeamento ---------- */
-export type Ga4Entidade = 'ga4_sessoes' | 'ga4_eventos' | 'ga4_paginas';
-export const GA4_ENTIDADES: readonly Ga4Entidade[] = ['ga4_sessoes', 'ga4_eventos', 'ga4_paginas'];
+export type Ga4Entidade = 'ga4_dia' | 'ga4_sessoes' | 'ga4_eventos' | 'ga4_paginas';
+export const GA4_ENTIDADES: readonly Ga4Entidade[] = ['ga4_dia', 'ga4_sessoes', 'ga4_eventos', 'ga4_paginas'];
 
 export function relatorio(entidade: Ga4Entidade, inicio: string, fim: string): ReportRequest {
   const dateRanges = [{ startDate: inicio, endDate: fim }];
+  if (entidade === 'ga4_dia') {
+    // total do dia, sem outras dimensoes: usuarios ativos NAO se somam entre paginas nem entre dias, por isso a consulta propria
+    return { dateRanges, dimensions: [{ name: 'date' }], metrics: ['sessions', 'activeUsers', 'newUsers', 'engagedSessions', 'screenPageViews'].map((name) => ({ name })) };
+  }
   if (entidade === 'ga4_sessoes') {
     return {
       dateRanges,
@@ -211,6 +215,18 @@ export function mapPaginas(rows: ReportRow[]): PaginaDia[] {
     return { dia: dataGa4(d[0]!), host: host(d[1]!), pagina: pagina(d[2]!), visualizacoes: m[0]!, usuarios_ativos: m[1]! } satisfies PaginaDia;
   });
   return juntar(l, (x) => [x.dia, x.host, x.pagina].join('\u0001'), (a, b) => { a.visualizacoes += b.visualizacoes; a.usuarios_ativos += b.usuarios_ativos; });
+}
+
+export interface TotalDia { dia: string; sessoes: number; usuarios_ativos: number; usuarios_novos: number; sessoes_engajadas: number; visualizacoes: number }
+
+export function mapDia(rows: ReportRow[]): TotalDia[] {
+  const l = rows.map((r) => {
+    const m = r.metricValues.map((x) => num(x.value));
+    return { dia: dataGa4(r.dimensionValues[0]!.value), sessoes: m[0]!, usuarios_ativos: m[1]!, usuarios_novos: m[2]!, sessoes_engajadas: m[3]!, visualizacoes: m[4]! } satisfies TotalDia;
+  });
+  return juntar(l, (x) => x.dia, (a, b) => {
+    a.sessoes += b.sessoes; a.usuarios_ativos += b.usuarios_ativos; a.usuarios_novos += b.usuarios_novos; a.sessoes_engajadas += b.sessoes_engajadas; a.visualizacoes += b.visualizacoes;
+  });
 }
 
 /** Datas AAAA-MM-DD em blocos de ate `dias` dias (o relatorio de um intervalo grande e dividido para caber na memoria e retomar). */
