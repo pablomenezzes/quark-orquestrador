@@ -116,12 +116,12 @@ async function avisoHistorico(db: Db, f: BiFiltros): Promise<string[]> {
 
 /**
  * Subconsulta dos marcos para os negócios da CTE `b`. "Chegou em X" significa "chegou em X OU EM UMA ETAPA POSTERIOR": muitos negócios
- * pulam etapas (vão de Qualificação direto para Agendado), e quem chegou em reunião ou proposta passou, na prática, pelo SQL.
- * Assim o funil só diminui e as taxas de passo fazem sentido. Ordem dos marcos: sql < reunião < proposta.
+ * pulam etapas (vão de Qualificação direto para Agendado), e quem chegou em Reunião Agendada ou proposta passou, na prática, pelo SQL.
+ * Assim o funil só diminui e as taxas de passo fazem sentido. Ordem dos marcos: sql < Reunião Agendada < proposta.
  */
 const MARCOS_CTE = `m as (select deal_id, bool_or(marco in ('sql', 'reuniao', 'proposta')) as sql, bool_or(marco in ('reuniao', 'proposta')) as reuniao, bool_or(marco = 'proposta') as proposta
                           from analytics.negocios_marcos where deal_id in (select deal_id from b) group by deal_id)`;
-const SEM_MARCOS = 'Nenhuma etapa foi marcada como SQL, reunião ou proposta (ou ainda não há histórico lido): marque as etapas na aba Configuração do Painel de Dados.';
+const SEM_MARCOS = 'Nenhuma etapa foi marcada como SQL, Reunião Agendada ou proposta (ou ainda não há histórico lido): marque as etapas na aba Configuração do Painel de Dados.';
 
 /** Linhas por safra (mês de criação): base das análises de safra. */
 async function safras(db: Db, f: BiFiltros) {
@@ -136,7 +136,7 @@ async function safras(db: Db, f: BiFiltros) {
             count(*) filter (where b.conta_como_lead)::int as leads, count(*) filter (where b.is_mql)::int as mql,
             count(*) filter (where m.sql)::int as sql, count(*) filter (where m.reuniao)::int as reuniao, count(*) filter (where m.proposta)::int as proposta,
             count(*) filter (where b.status = 'won')::int as ganhos, count(*) filter (where b.status = 'lost')::int as perdidos, count(*) filter (where b.status = 'open')::int as abertos,
-            coalesce(sum(b.valor) filter (where b.status = 'won'), 0)::float8 as valor_ganho,
+            ${MRR_SQL('b')},
             (percentile_cont(0.5) within group (order by extract(epoch from b.fechado_em - b.criado_em) / 86400.0) filter (where b.status = 'won' and b.fechado_em is not null))::float8 as ciclo_dias
        from b left join m on m.deal_id = b.deal_id group by 1 order by 1`,
     p,
@@ -146,11 +146,11 @@ async function safras(db: Db, f: BiFiltros) {
 /** Cor fixa por fonte (a cor segue a entidade, nunca a posição): Google ADS 1, Meta ADS 2, Orgânico 3, Social 4; demais 0 (neutro). */
 const SLOT_FONTE: Record<string, number> = { 'Marketing [Google ADS]': 1, 'Marketing [Meta ADS]': 2, 'Marketing [Orgânico]': 3, 'Marketing [Social]': 4 };
 const slotDe = (fonte: string) => SLOT_FONTE[fonte] ?? 0;
-const ETAPAS_FUNIL = ['Leads', 'MQL', 'Chegou em SQL', 'Chegou em reunião', 'Chegou em proposta', 'Ganhos'];
-const PASSOS = ['Lead → MQL', 'MQL → SQL', 'SQL → reunião', 'Reunião → proposta', 'Proposta → ganho'];
+const ETAPAS_FUNIL = ['Leads', 'MQL', 'Chegou em SQL', 'Chegou em Reunião Agendada', 'Chegou em proposta', 'Ganhos'];
+const PASSOS = ['Lead → MQL', 'MQL → SQL', 'SQL → Reunião Agendada', 'Reunião Agendada → proposta', 'Proposta → ganho'];
 
 /**
- * Funil completo por fonte. Cada negócio que conta como lead tem 6 marcas (lead, MQL, chegou em SQL, reunião, proposta, ganho).
+ * Funil completo por fonte. Cada negócio que conta como lead tem 6 marcas (lead, MQL, chegou em SQL, Reunião Agendada, proposta, ganho).
  * Os passos são CONDICIONAIS ("dos que chegaram em A, quantos chegaram em B"), por isso nunca passam de 100%, mesmo quando um ganho
  * foi dado antes de alguma etapa (o ganho vem do Status, não da etapa).
  */
@@ -201,6 +201,56 @@ const paginaRotulo = (host: string, caminho: string) => (host ? `${host}${caminh
 const fmtInt = (v: number) => new Intl.NumberFormat('pt-BR').format(Math.round(v));
 const variacao = (a: number, b: number): number | null => (b > 0 ? a / b - 1 : null);
 
+/**
+ * KPIs de MRR, SEMPRE presentes (pedido do Pablo, 2026-10-09). MRR = o `valor` do negócio no Pipedrive: o campo MRR nativo do Pipedrive
+ * está zerado em todos os negócios e o time guarda a mensalidade em "Valor" (preços como 99,9, 199,9, 285). Moeda: BRL.
+ *  - MRR criado  = soma do valor dos negócios criados no período que contam como lead (qualquer status);
+ *  - MRR ganho   = status ganho; MRR perdido = status perdido; MRR em aberto = status aberto (pelo Status do negócio, D-36);
+ *  - Ticket médio ganho = MRR ganho ÷ ganhos.
+ * `a` é o alias da visão/CTE com as colunas valor, status e conta_como_lead.
+ */
+const MRR_SQL = (a: string) => `coalesce(sum(${a}.valor) filter (where ${a}.conta_como_lead), 0)::float8 as mrr_criado,
+                coalesce(sum(${a}.valor) filter (where ${a}.status = 'won'), 0)::float8 as mrr_ganho,
+                coalesce(sum(${a}.valor) filter (where ${a}.status = 'lost'), 0)::float8 as mrr_perdido,
+                coalesce(sum(${a}.valor) filter (where ${a}.status = 'open'), 0)::float8 as mrr_aberto`;
+const ticketMedio = (r: Row) => razao(n(r.mrr_ganho), n(r.ganhos));
+const MRR_DICAS = {
+  criado: 'Soma do valor (MRR) dos negócios criados no período que contam como lead',
+  ganho: 'Soma do valor dos negócios com status ganho',
+  perdido: 'Soma do valor dos negócios com status perdido',
+  aberto: 'Soma do valor dos negócios ainda em aberto',
+  ticket: 'MRR ganho ÷ número de ganhos',
+};
+const mrrKpis = (r: Row) => [
+  { id: 'mrr_criado', rotulo: 'MRR criado', valor: n(r.mrr_criado), formato: 'brl' as const, dica: MRR_DICAS.criado },
+  { id: 'valor_ganho', rotulo: 'MRR ganho', valor: n(r.mrr_ganho), formato: 'brl' as const, dica: MRR_DICAS.ganho },
+  { id: 'mrr_perdido', rotulo: 'MRR perdido', valor: n(r.mrr_perdido), formato: 'brl' as const, dica: MRR_DICAS.perdido },
+  { id: 'mrr_aberto', rotulo: 'MRR em aberto', valor: n(r.mrr_aberto), formato: 'brl' as const, dica: MRR_DICAS.aberto },
+  { id: 'ticket_ganho', rotulo: 'Ticket médio ganho', valor: ticketMedio(r), formato: 'brl' as const, dica: MRR_DICAS.ticket },
+];
+/** Colunas de tabela com o MRR (o id `valor` continua sendo o MRR ganho). */
+const colunasMrr = (): Coluna[] => [c('mrr_criado', 'MRR criado', 'brl'), c('valor', 'MRR ganho', 'brl'), c('mrr_perdido', 'MRR perdido', 'brl'), c('mrr_aberto', 'MRR em aberto', 'brl'), c('ticket', 'Ticket médio ganho', 'brl')];
+const celulasMrr = (r: Row) => ({ mrr_criado: n(r.mrr_criado), valor: n(r.mrr_ganho), mrr_perdido: n(r.mrr_perdido), mrr_aberto: n(r.mrr_aberto), ticket: ticketMedio(r) });
+/** Resumo de MRR do filtro inteiro (tiles no topo das páginas Safra e Canais). */
+async function resumoMrr(db: Db, f: BiFiltros, avisos: string[] = []): Promise<BiResultado> {
+  const p: unknown[] = [];
+  const w = filtroSql(f, 'd', p);
+  const r = (
+    await q(
+      db,
+      `select count(*) filter (where d.conta_como_lead)::int as leads, count(*) filter (where d.status = 'won')::int as ganhos, ${MRR_SQL('d')}
+         from analytics.negocios_bi d where ${w.join(' and ')}`,
+      p,
+    )
+  )[0]!;
+  const itens = [{ id: 'leads', rotulo: 'Leads', valor: n(r.leads), formato: 'int' as const, dica: 'Negócios que contam como lead' }, ...mrrKpis(r), { id: 'ganhos', rotulo: 'Ganhos', valor: n(r.ganhos), formato: 'int' as const, dica: 'Status ganho' }];
+  return {
+    grafico: { tipo: 'kpis', itens },
+    tabela: { colunas: [c('indicador', 'Indicador'), c('valor', 'Valor')], linhas: itens.map((i) => ({ indicador: i.rotulo, valor: i.valor == null ? '—' : i.formato === 'brl' ? `R$ ${i.valor.toFixed(2)}` : String(i.valor) })) },
+    avisos,
+  };
+}
+
 const ETAPAS_URL_COLUNAS: Coluna[] = [
   c('pagina', 'Página (URL de conversão)'),
   c('sessoes', 'Sessões que entraram pela página (GA4)', 'int'),
@@ -210,15 +260,16 @@ const ETAPAS_URL_COLUNAS: Coluna[] = [
   c('p_mql', 'Lead → MQL', 'pct'),
   c('sql', 'Chegou em SQL', 'int'),
   c('p_sql', 'MQL → SQL', 'pct'),
-  c('reuniao', 'Chegou em reunião', 'int'),
-  c('p_reuniao', 'SQL → reunião', 'pct'),
+  c('reuniao', 'Chegou em Reunião Agendada', 'int'),
+  c('p_reuniao', 'SQL → Reunião Agendada', 'pct'),
   c('proposta', 'Chegou em proposta', 'int'),
-  c('p_proposta', 'Reunião → proposta', 'pct'),
+  c('p_proposta', 'Reunião Agendada → proposta', 'pct'),
   c('ganhos', 'Ganhos', 'int'),
   c('p_ganho', 'Proposta → ganho', 'pct'),
   c('perdidos', 'Perdidos', 'int'),
   c('lead_ganho', 'Lead → ganho', 'pct'),
   c('taxa_ganho', 'Taxa de ganho (ganhos ÷ ganhos + perdidos)', 'pct'),
+  ...colunasMrr(),
 ];
 const linhaUrl = (pagina: string, r: Row, sessoes: number | null): Record<string, string | number | null> => ({
   pagina,
@@ -238,6 +289,7 @@ const linhaUrl = (pagina: string, r: Row, sessoes: number | null): Record<string
   perdidos: n(r.perdidos),
   lead_ganho: razao(n(r.ganhos), n(r.leads)),
   taxa_ganho: razao(n(r.ganhos), n(r.ganhos) + n(r.perdidos)),
+  ...celulasMrr(r),
 });
 
 export const BI_ANALISES: BiAnalise[] = [
@@ -257,7 +309,7 @@ export const BI_ANALISES: BiAnalise[] = [
           db,
           `select count(*) filter (where d.conta_como_lead)::int as leads, count(*) filter (where d.is_mql)::int as mql,
                   count(*) filter (where d.status = 'won')::int as ganhos, count(*) filter (where d.status = 'lost')::int as perdidos, count(*) filter (where d.status = 'open')::int as abertos,
-                  coalesce(sum(d.valor) filter (where d.status = 'won'), 0)::float8 as valor_ganho
+                  ${MRR_SQL('d')}
              from analytics.negocios_bi d where ${w.join(' and ')}`,
           p,
         )
@@ -269,9 +321,9 @@ export const BI_ANALISES: BiAnalise[] = [
         { id: 'pct_mql', rotulo: '% MQL', valor: razao(mql, leads), formato: 'pct' as const, dica: 'MQL ÷ leads' },
         { id: 'ganhos', rotulo: 'Ganhos', valor: ganhos, formato: 'int' as const, dica: 'Status ganho' },
         { id: 'taxa_ganho', rotulo: 'Taxa de ganho', valor: razao(ganhos, ganhos + perdidos), formato: 'pct' as const, dica: 'Ganhos ÷ (ganhos + perdidos)' },
-        { id: 'valor_ganho', rotulo: 'Valor ganho', valor: n(r.valor_ganho), formato: 'brl' as const, dica: 'Soma do valor dos negócios ganhos' },
         { id: 'abertos', rotulo: 'Em aberto', valor: abertos, formato: 'int' as const },
         { id: 'perdidos', rotulo: 'Perdidos', valor: perdidos, formato: 'int' as const },
+        ...mrrKpis(r),
       ];
       return {
         grafico: { tipo: 'kpis', itens },
@@ -294,7 +346,7 @@ export const BI_ANALISES: BiAnalise[] = [
         db,
         `select to_char(date_trunc('month', d.criado_em at time zone ${TZ}), 'YYYY-MM') as mes,
                 count(*) filter (where d.conta_como_lead)::int as leads, count(*) filter (where d.is_mql)::int as mql,
-                count(*) filter (where d.status = 'won')::int as ganhos, count(*) filter (where d.status = 'lost')::int as perdidos
+                count(*) filter (where d.status = 'won')::int as ganhos, count(*) filter (where d.status = 'lost')::int as perdidos, ${MRR_SQL('d')}
            from analytics.negocios_bi d where ${w.join(' and ')} group by 1 order by 1`,
         p,
       );
@@ -309,8 +361,8 @@ export const BI_ANALISES: BiAnalise[] = [
           ],
         },
         tabela: {
-          colunas: [c('mes', 'Mês de criação'), c('leads', 'Leads', 'int'), c('mql', 'MQL', 'int'), c('ganhos', 'Ganhos', 'int'), c('perdidos', 'Perdidos', 'int'), c('taxa', 'Taxa de ganho', 'pct')],
-          linhas: rows.map((r) => ({ mes: r.mes, leads: n(r.leads), mql: n(r.mql), ganhos: n(r.ganhos), perdidos: n(r.perdidos), taxa: razao(n(r.ganhos), n(r.ganhos) + n(r.perdidos)) })),
+          colunas: [c('mes', 'Mês de criação'), c('leads', 'Leads', 'int'), c('mql', 'MQL', 'int'), c('ganhos', 'Ganhos', 'int'), c('perdidos', 'Perdidos', 'int'), c('taxa', 'Taxa de ganho', 'pct'), ...colunasMrr()],
+          linhas: rows.map((r) => ({ mes: r.mes, leads: n(r.leads), mql: n(r.mql), ganhos: n(r.ganhos), perdidos: n(r.perdidos), taxa: razao(n(r.ganhos), n(r.ganhos) + n(r.perdidos)), ...celulasMrr(r) })),
         },
         avisos: [],
       };
@@ -321,7 +373,7 @@ export const BI_ANALISES: BiAnalise[] = [
     pagina: 'geral',
     titulo: 'Funil: até onde os negócios chegaram',
     pergunta: 'Quantos negócios chegam em cada marco do funil?',
-    como_ler: 'Negócios criados no período. "Chegou em SQL, reunião, proposta" vem do histórico de etapas (passou por uma etapa marcada na Configuração do Painel de Dados) e significa "chegou ali ou além": quem foi direto para reunião conta também como SQL. Ganhos vêm do Status, nunca da etapa. Um ganho dado em Proposta conta como ganho e também como "chegou em proposta".',
+    como_ler: 'Negócios criados no período. "Chegou em SQL, Reunião Agendada, proposta" vem do histórico de etapas (passou por uma etapa marcada na Configuração do Painel de Dados) e significa "chegou ali ou além": quem foi direto para Reunião Agendada conta também como SQL. Ganhos vêm do Status, nunca da etapa. Um ganho dado em Proposta conta como ganho e também como "chegou em proposta".',
     largura: 'meia',
     async rodar(db, f) {
       const p: unknown[] = [];
@@ -339,7 +391,7 @@ export const BI_ANALISES: BiAnalise[] = [
       )[0]!;
       const etapas = [
         { rotulo: 'Leads', valor: n(r.leads) }, { rotulo: 'MQL', valor: n(r.mql) }, { rotulo: 'Chegou em SQL', valor: n(r.sql) },
-        { rotulo: 'Chegou em reunião', valor: n(r.reuniao) }, { rotulo: 'Chegou em proposta', valor: n(r.proposta) }, { rotulo: 'Ganhos', valor: n(r.ganhos) },
+        { rotulo: 'Chegou em Reunião Agendada', valor: n(r.reuniao) }, { rotulo: 'Chegou em proposta', valor: n(r.proposta) }, { rotulo: 'Ganhos', valor: n(r.ganhos) },
       ];
       const avisos = await avisoHistorico(db, f);
       if (n(r.sql) + n(r.reuniao) + n(r.proposta) === 0) avisos.unshift(SEM_MARCOS);
@@ -427,7 +479,7 @@ export const BI_ANALISES: BiAnalise[] = [
         db,
         `select coalesce(d.responsavel, '(sem responsável)') as responsavel, d.owner_id as id, count(*) filter (where d.conta_como_lead)::int as leads,
                 count(*) filter (where d.status = 'won')::int as ganhos, count(*) filter (where d.status = 'lost')::int as perdidos, count(*) filter (where d.status = 'open')::int as abertos,
-                coalesce(sum(d.valor) filter (where d.status = 'won'), 0)::float8 as valor_ganho
+                ${MRR_SQL('d')}
            from analytics.negocios_bi d where ${w.join(' and ')} group by 1, 2 order by ganhos desc, leads desc limit 20`,
         p,
       );
@@ -435,8 +487,8 @@ export const BI_ANALISES: BiAnalise[] = [
       return {
         grafico: { tipo: 'barras', formato: 'int', itens: rows.filter((r) => n(r.ganhos) > 0).map((r) => ({ rotulo: r.responsavel, valor: n(r.ganhos), detalhe: `${n(r.leads)} leads · ${pct(taxa(r))}` })) },
         tabela: {
-          colunas: [c('responsavel', 'Responsável'), c('id', 'ID'), c('leads', 'Leads', 'int'), c('ganhos', 'Ganhos', 'int'), c('perdidos', 'Perdidos', 'int'), c('abertos', 'Abertos', 'int'), c('taxa', 'Taxa de ganho', 'pct'), c('valor', 'Valor ganho', 'brl')],
-          linhas: rows.map((r) => ({ responsavel: r.responsavel, id: r.id == null ? null : String(r.id), leads: n(r.leads), ganhos: n(r.ganhos), perdidos: n(r.perdidos), abertos: n(r.abertos), taxa: taxa(r), valor: n(r.valor_ganho) })),
+          colunas: [c('responsavel', 'Responsável'), c('id', 'ID'), c('leads', 'Leads', 'int'), c('ganhos', 'Ganhos', 'int'), c('perdidos', 'Perdidos', 'int'), c('abertos', 'Abertos', 'int'), c('taxa', 'Taxa de ganho', 'pct'), ...colunasMrr()],
+          linhas: rows.map((r) => ({ responsavel: r.responsavel, id: r.id == null ? null : String(r.id), leads: n(r.leads), ganhos: n(r.ganhos), perdidos: n(r.perdidos), abertos: n(r.abertos), taxa: taxa(r), ...celulasMrr(r) })),
         },
         avisos: rows.length === 20 ? ['Mostra os 20 responsáveis com mais ganhos.'] : [],
       };
@@ -445,11 +497,22 @@ export const BI_ANALISES: BiAnalise[] = [
 
   /* ===================== SAFRA ===================== */
   {
+    id: 'safra-kpis',
+    pagina: 'safra',
+    titulo: 'MRR e ticket médio das safras no período',
+    pergunta: 'Quanto de MRR as safras do período criaram, ganharam, perderam e ainda têm em aberto?',
+    como_ler: `Totais de todas as safras (meses de criação) do período filtrado. ${MRR_DICAS.criado}. MRR perdido e MRR em aberto são da mesma safra e mostram o que ainda pode virar ganho. MRR = valor do negócio no Pipedrive. O MRR por mês está na tabela "Safras: resultado de cada mês de criação".`,
+    largura: 'cheia',
+    async rodar(db, f) {
+      return resumoMrr(db, f);
+    },
+  },
+  {
     id: 'safra-resumo',
     pagina: 'safra',
     titulo: 'Safras: resultado de cada mês de criação',
     pergunta: 'Como cada safra de leads performou, do lead ao ganho?',
-    como_ler: 'Safra = mês em que o negócio foi criado. Cada linha mostra o que aconteceu com os negócios daquele mês até hoje: % que virou MQL, que chegou em SQL, reunião e proposta (pelo histórico de etapas), ganhos, taxa de ganho (ganhos ÷ ganhos + perdidos), valor ganho e ciclo de venda (mediana de dias da criação ao ganho). Safras recentes ainda têm muitos negócios abertos: compare safras de idade parecida.',
+    como_ler: 'Safra = mês em que o negócio foi criado. Cada linha mostra o que aconteceu com os negócios daquele mês até hoje: % que virou MQL, que chegou em SQL, Reunião Agendada e proposta (pelo histórico de etapas), ganhos, taxa de ganho (ganhos ÷ ganhos + perdidos), valor ganho e ciclo de venda (mediana de dias da criação ao ganho). Safras recentes ainda têm muitos negócios abertos: compare safras de idade parecida.',
     largura: 'cheia',
     async rodar(db, f) {
       const rows = await safras(db, f);
@@ -458,10 +521,10 @@ export const BI_ANALISES: BiAnalise[] = [
       return {
         grafico: { tipo: 'tabela' },
         tabela: {
-          colunas: [c('safra', 'Safra'), c('leads', 'Leads', 'int'), c('pmql', '% MQL', 'pct'), c('psql', '% chegou SQL', 'pct'), c('preun', '% chegou reunião', 'pct'), c('pprop', '% chegou proposta', 'pct'), c('ganhos', 'Ganhos', 'int'), c('perdidos', 'Perdidos', 'int'), c('abertos', 'Abertos', 'int'), c('taxa', 'Taxa de ganho', 'pct'), c('valor', 'Valor ganho', 'brl'), c('ciclo', 'Ciclo mediano', 'dias')],
+          colunas: [c('safra', 'Safra'), c('leads', 'Leads', 'int'), c('pmql', '% MQL', 'pct'), c('psql', '% chegou SQL', 'pct'), c('preun', '% chegou Reunião Agendada', 'pct'), c('pprop', '% chegou proposta', 'pct'), c('ganhos', 'Ganhos', 'int'), c('perdidos', 'Perdidos', 'int'), c('abertos', 'Abertos', 'int'), c('taxa', 'Taxa de ganho', 'pct'), ...colunasMrr(), c('ciclo', 'Ciclo mediano', 'dias')],
           linhas: rows.map((r) => ({
             safra: r.safra, leads: n(r.leads), pmql: razao(n(r.mql), n(r.leads)), psql: razao(n(r.sql), n(r.leads)), preun: razao(n(r.reuniao), n(r.leads)), pprop: razao(n(r.proposta), n(r.leads)),
-            ganhos: n(r.ganhos), perdidos: n(r.perdidos), abertos: n(r.abertos), taxa: razao(n(r.ganhos), n(r.ganhos) + n(r.perdidos)), valor: n(r.valor_ganho), ciclo: r.ciclo_dias == null ? null : Math.round(Number(r.ciclo_dias) * 10) / 10,
+            ganhos: n(r.ganhos), perdidos: n(r.perdidos), abertos: n(r.abertos), taxa: razao(n(r.ganhos), n(r.ganhos) + n(r.perdidos)), ...celulasMrr(r), ciclo: r.ciclo_dias == null ? null : Math.round(Number(r.ciclo_dias) * 10) / 10,
           })),
         },
         avisos,
@@ -473,13 +536,13 @@ export const BI_ANALISES: BiAnalise[] = [
     pagina: 'safra',
     titulo: 'Funil por safra',
     pergunta: 'Que parte de cada safra chegou em cada marco?',
-    como_ler: 'Percentual dos leads de cada safra que virou MQL, chegou em SQL, reunião e proposta e que foi ganho. Células mais escuras = maior percentual. Marcos de etapa dependem do histórico lido e das etapas marcadas na Configuração.',
+    como_ler: 'Percentual dos leads de cada safra que virou MQL, chegou em SQL, Reunião Agendada e proposta e que foi ganho. Células mais escuras = maior percentual. Marcos de etapa dependem do histórico lido e das etapas marcadas na Configuração.',
     largura: 'cheia',
     async rodar(db, f) {
       const rows = await safras(db, f);
       const avisos = await avisoHistorico(db, f);
       if (rows.length && rows.every((r) => n(r.sql) + n(r.reuniao) + n(r.proposta) === 0)) avisos.unshift(SEM_MARCOS);
-      const colunas = ['MQL', 'Chegou em SQL', 'Chegou em reunião', 'Chegou em proposta', 'Ganho'];
+      const colunas = ['MQL', 'Chegou em SQL', 'Chegou em Reunião Agendada', 'Chegou em proposta', 'Ganho'];
       const linhas = rows.map((r) => ({ rotulo: r.safra as string, detalhe: `${n(r.leads)} leads`, valores: [razao(n(r.mql), n(r.leads)), razao(n(r.sql), n(r.leads)), razao(n(r.reuniao), n(r.leads)), razao(n(r.proposta), n(r.leads)), razao(n(r.ganhos), n(r.leads))] }));
       return {
         grafico: { tipo: 'matriz', colunas, linhas, formato: 'pct', escala: 'coluna' },
@@ -530,11 +593,22 @@ export const BI_ANALISES: BiAnalise[] = [
 
   /* ===================== CANAIS ===================== */
   {
+    id: 'canais-kpis',
+    pagina: 'canais',
+    titulo: 'MRR e ticket médio das fontes selecionadas',
+    pergunta: 'Quanto de MRR as fontes selecionadas criaram, ganharam, perderam e ainda têm em aberto?',
+    como_ler: `Totais das fontes e tipos de lead escolhidos nos filtros, para os negócios criados no período. ${MRR_DICAS.criado}. O MRR de cada fonte está na tabela "Canais: comparativo por fonte". MRR = valor do negócio no Pipedrive.`,
+    largura: 'cheia',
+    async rodar(db, f) {
+      return resumoMrr(db, f);
+    },
+  },
+  {
     id: 'canais-funis',
     pagina: 'canais',
     titulo: 'Funis lado a lado: cada fonte, do lead ao ganho',
     pergunta: 'Em que etapa cada fonte perde força, comparando os funis inteiros?',
-    como_ler: 'Uma coluna por fonte (as 6 com mais leads) e o total, com as mesmas etapas alinhadas: Leads, MQL, chegou em SQL, reunião, proposta e Ganhos. A barra mostra a parte dos leads da PRÓPRIA fonte que chegou na etapa (a barra dos leads é sempre cheia), então dá para comparar a forma dos funis mesmo com volumes muito diferentes; o número é a quantidade. Em cada etapa, "passo" = dos negócios que chegaram na etapa anterior, quantos chegaram nesta (nunca passa de 100%). Só entram negócios que contam como lead. "Chegou em SQL" inclui quem foi direto para reunião ou proposta (chegou em X ou além), porque muitos negócios pulam etapas. As etapas vêm do histórico e das marcações na Configuração do Painel de Dados; ganhos vêm do Status do negócio (um ganho pode ter pulado etapas).',
+    como_ler: 'Uma coluna por fonte (as 6 com mais leads) e o total, com as mesmas etapas alinhadas: Leads, MQL, chegou em SQL, Reunião Agendada, proposta e Ganhos. A barra mostra a parte dos leads da PRÓPRIA fonte que chegou na etapa (a barra dos leads é sempre cheia), então dá para comparar a forma dos funis mesmo com volumes muito diferentes; o número é a quantidade. Em cada etapa, "passo" = dos negócios que chegaram na etapa anterior, quantos chegaram nesta (nunca passa de 100%). Só entram negócios que contam como lead. "Chegou em SQL" inclui quem foi direto para Reunião Agendada ou proposta (chegou em X ou além), porque muitos negócios pulam etapas. As etapas vêm do histórico e das marcações na Configuração do Painel de Dados; ganhos vêm do Status do negócio (um ganho pode ter pulado etapas).',
     largura: 'cheia',
     async rodar(db, f) {
       const { colunas, avisos } = await funisPorFonte(db, f);
@@ -592,7 +666,7 @@ export const BI_ANALISES: BiAnalise[] = [
                 count(*) filter (where b.conta_como_lead and not b.is_mql)::int as invalidos,
                 count(*) filter (where m.sql)::int as sql, count(*) filter (where m.reuniao)::int as reuniao, count(*) filter (where m.proposta)::int as proposta,
                 count(*) filter (where b.status = 'won')::int as ganhos, count(*) filter (where b.status = 'lost')::int as perdidos,
-                coalesce(sum(b.valor) filter (where b.status = 'won'), 0)::float8 as valor_ganho,
+                ${MRR_SQL('b')},
                 (percentile_cont(0.5) within group (order by extract(epoch from b.fechado_em - b.criado_em) / 86400.0) filter (where b.status = 'won' and b.fechado_em is not null))::float8 as ciclo_dias
            from b left join m on m.deal_id = b.deal_id group by 1, 2 order by leads desc limit 15`,
         p,
@@ -604,11 +678,11 @@ export const BI_ANALISES: BiAnalise[] = [
       return {
         grafico: { tipo: 'barras', formato: 'int', itens: rows.map((r) => ({ rotulo: r.fonte, valor: n(r.leads), detalhe: `${pct(razao(n(r.leads), total))} dos leads · ${pct(razao(n(r.mql), n(r.leads)))} MQL · ${n(r.ganhos)} ganhos (${pct(taxa(r))})` })) },
         tabela: {
-          colunas: [c('fonte', 'Fonte'), c('id', 'ID'), c('leads', 'Leads', 'int'), c('part', '% dos leads', 'pct'), c('pmql', '% MQL', 'pct'), c('pinv', '% inválidos', 'pct'), c('psql', '% chegou SQL', 'pct'), c('preun', '% chegou reunião', 'pct'), c('pprop', '% chegou proposta', 'pct'), c('ganhos', 'Ganhos', 'int'), c('taxa', 'Taxa de ganho', 'pct'), c('valor', 'Valor ganho', 'brl'), c('ticket', 'Ticket médio', 'brl'), c('ciclo', 'Ciclo mediano', 'dias')],
+          colunas: [c('fonte', 'Fonte'), c('id', 'ID'), c('leads', 'Leads', 'int'), c('part', '% dos leads', 'pct'), c('pmql', '% MQL', 'pct'), c('pinv', '% inválidos', 'pct'), c('psql', '% chegou SQL', 'pct'), c('preun', '% chegou Reunião Agendada', 'pct'), c('pprop', '% chegou proposta', 'pct'), c('ganhos', 'Ganhos', 'int'), c('taxa', 'Taxa de ganho', 'pct'), ...colunasMrr(), c('ciclo', 'Ciclo mediano', 'dias')],
           linhas: rows.map((r) => ({
             fonte: r.fonte, id: r.fonte_id, leads: n(r.leads), part: razao(n(r.leads), total), pmql: razao(n(r.mql), n(r.leads)), pinv: razao(n(r.invalidos), n(r.leads)),
             psql: razao(n(r.sql), n(r.leads)), preun: razao(n(r.reuniao), n(r.leads)), pprop: razao(n(r.proposta), n(r.leads)), ganhos: n(r.ganhos), taxa: taxa(r),
-            valor: n(r.valor_ganho), ticket: razao(n(r.valor_ganho), n(r.ganhos)), ciclo: r.ciclo_dias == null ? null : Math.round(Number(r.ciclo_dias) * 10) / 10,
+            ...celulasMrr(r), ciclo: r.ciclo_dias == null ? null : Math.round(Number(r.ciclo_dias) * 10) / 10,
           })),
         },
         avisos,
@@ -1012,7 +1086,7 @@ export const BI_ANALISES: BiAnalise[] = [
     id: 'site-url-funil',
     pagina: 'site',
     titulo: 'Funil dos leads por página de conversão',
-    pergunta: 'Que páginas geram leads que viram MQL, SQL, reunião, proposta e ganho, e com que taxas?',
+    pergunta: 'Que páginas geram leads que viram MQL, SQL, Reunião Agendada, proposta e ganho, e com que taxas?',
     como_ler: `Só entram negócios que contam como lead e têm "URL de Conversão" preenchida com uma URL de verdade (domínio + caminho). Cada linha é uma página; a primeira é o total. As etapas seguem a regra do funil: "chegou em X" inclui quem chegou em X ou além; as taxas de passo são condicionais (dos que chegaram na etapa anterior, quantos chegaram nesta) e nunca passam de 100%. Ganhos e perdidos vêm do Status do negócio. "Lead ÷ sessões" compara os leads criados no período com as sessões que ENTRARAM pela mesma página no mesmo período no GA4: é uma aproximação (a URL de conversão é onde a pessoa converteu, não necessariamente onde entrou, e só vale para domínios que o GA4 mede). Os filtros de período, produto, pipeline, fonte e tipo valem aqui. Mostra as 40 páginas com mais leads.`,
     largura: 'cheia',
     async rodar(db, f) {
@@ -1020,13 +1094,13 @@ export const BI_ANALISES: BiAnalise[] = [
       const w = filtroSql(f, 'd', p);
       const rows = await q(
         db,
-        `with b as (select d.deal_id, d.is_mql, d.status, u.host_url, u.caminho_url
+        `with b as (select d.deal_id, d.is_mql, d.status, d.valor, d.conta_como_lead, u.host_url, u.caminho_url
                       from analytics.negocios_bi d join analytics.negocios_url u on u.deal_id = d.deal_id
                      where d.conta_como_lead and u.url_valida and ${w.join(' and ')}), ${MARCOS_CTE},
               x as (select b.host_url, b.caminho_url, b.is_mql as mql, coalesce(m.sql, false) as sql, coalesce(m.reuniao, false) as reuniao,
-                           coalesce(m.proposta, false) as proposta, b.status
+                           coalesce(m.proposta, false) as proposta, b.status, b.valor, b.conta_como_lead
                       from b left join m on m.deal_id = b.deal_id)
-         select grouping(x.host_url) as e_total, x.host_url, x.caminho_url, count(*)::int as leads, count(*) filter (where mql)::int as mql,
+         select grouping(x.host_url) as e_total, x.host_url, x.caminho_url, ${MRR_SQL('x')}, count(*)::int as leads, count(*) filter (where mql)::int as mql,
                 count(*) filter (where sql)::int as sql, count(*) filter (where reuniao)::int as reuniao, count(*) filter (where proposta)::int as proposta,
                 count(*) filter (where status = 'won')::int as ganhos, count(*) filter (where status = 'lost')::int as perdidos,
                 count(*) filter (where mql and sql)::int as mql_sql, count(*) filter (where sql and reuniao)::int as sql_reuniao,
@@ -1062,7 +1136,7 @@ export const BI_ANALISES: BiAnalise[] = [
         const resto = paginas.slice(40);
         if (resto.length) {
           const soma = (k: string) => resto.reduce((a, r) => a + n(r[k]), 0);
-          linhas.push(linhaUrl(`(demais ${resto.length} páginas)`, Object.fromEntries(['leads', 'mql', 'sql', 'reuniao', 'proposta', 'ganhos', 'perdidos', 'mql_sql', 'sql_reuniao', 'reuniao_proposta', 'proposta_ganho'].map((k) => [k, soma(k)])), null));
+          linhas.push(linhaUrl(`(demais ${resto.length} páginas)`, Object.fromEntries(['leads', 'mql', 'sql', 'reuniao', 'proposta', 'ganhos', 'perdidos', 'mrr_criado', 'mrr_ganho', 'mrr_perdido', 'mrr_aberto', 'mql_sql', 'sql_reuniao', 'reuniao_proposta', 'proposta_ganho'].map((k) => [k, soma(k)])), null));
         }
       }
       const avisos = await avisoHistorico(db, f);

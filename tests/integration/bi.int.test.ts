@@ -46,10 +46,10 @@ run('BI (transação com rollback)', () => {
 
     type D = { id: number; st: string | null; del?: boolean; valor?: number; owner: number; mid?: number; mot?: string; fonte?: number; tipo?: number; faixa?: number; canal?: string; utm?: string; pessoa?: boolean; criado?: string; fechado?: string };
     const D: D[] = [
-      { id: 97100001, st: 'open', owner: 960001, fonte: 901, tipo: 9001, faixa: 8001, canal: 'Busca orgânica', utm: 'google', pessoa: true },
+      { id: 97100001, st: 'open', valor: 200, owner: 960001, fonte: 901, tipo: 9001, faixa: 8001, canal: 'Busca orgânica', utm: 'google', pessoa: true },
       { id: 97100002, st: 'won', valor: 1000, owner: 960001, fonte: 901, tipo: 9001, faixa: 8001, canal: 'Busca orgânica', utm: '{{}}', pessoa: true, fechado: '2099-03-20T12:00:00Z' }, // UTM com modelo não preenchido
-      { id: 97100003, st: 'lost', owner: 960001, mid: 398, mot: 'Lead Invalido', fonte: 901, tipo: 9001, faixa: 8001, canal: 'Anúncio', utm: 'undefined', pessoa: true }, // inválido: 398 tira do MQL
-      { id: 97100004, st: 'lost', owner: 960001, mid: 24, mot: 'Achou o preço caro', fonte: 902, tipo: 9001, canal: 'Anúncio' },
+      { id: 97100003, st: 'lost', valor: 300, owner: 960001, mid: 398, mot: 'Lead Invalido', fonte: 901, tipo: 9001, faixa: 8001, canal: 'Anúncio', utm: 'undefined', pessoa: true }, // inválido: 398 tira do MQL
+      { id: 97100004, st: 'lost', valor: 100, owner: 960001, mid: 24, mot: 'Achou o preço caro', fonte: 902, tipo: 9001, canal: 'Anúncio' },
       { id: 97100005, st: null, del: true, owner: 960001, fonte: 901, tipo: 9001 }, // excluído: fora dos leads (padrão)
       { id: 97100006, st: 'won', valor: 500, owner: 960002, fonte: 902, tipo: 9002, fechado: '2099-03-30T12:00:00Z' },
       { id: 97100007, st: 'lost', owner: 960002, mid: 24, mot: 'Achou o preço caro', canal: 'Desconhecido' }, // sem fonte, sem tipo, canal desconhecido
@@ -93,6 +93,32 @@ run('BI (transação com rollback)', () => {
     expect(kpi(r, 'valor_ganho')).toBe(1500);
   });
 
+  it('KPIs de MRR (criado, ganho, perdido, em aberto) e ticket médio ganho aparecem em todas as telas que pedem', async () => {
+    // valores: ganhos 1000 + 500; perdidos 300 + 100; aberto 200; o excluído (valor 0) não conta como lead
+    const esperado = { mrr_criado: 2100, valor_ganho: 1500, mrr_perdido: 400, mrr_aberto: 200, ticket_ganho: 750 };
+    for (const id of ['visao-geral', 'safra-kpis', 'canais-kpis']) {
+      const r = await exec(id);
+      for (const [k, v] of Object.entries(esperado)) expect(kpi(r, k), `${id}: ${k}`).toBe(v);
+    }
+    // tabelas com o MRR por mês, por safra, por fonte e por responsável
+    const cols = (r: Awaited<ReturnType<typeof exec>>) => r.tabela.colunas.map((x) => x.id);
+    for (const id of ['por-mes', 'por-responsavel', 'safra-resumo', 'canais-resumo']) {
+      expect(cols(await exec(id)), id).toEqual(expect.arrayContaining(['mrr_criado', 'valor', 'mrr_perdido', 'mrr_aberto', 'ticket']));
+    }
+    const m = (await exec('por-mes')).tabela.linhas[0]!;
+    expect(m).toMatchObject({ mrr_criado: 2100, valor: 1500, mrr_perdido: 400, mrr_aberto: 200, ticket: 750 });
+    const s = (await exec('safra-resumo')).tabela.linhas.find((l) => l.safra === '2099-03')!;
+    expect(s).toMatchObject({ mrr_criado: 2100, valor: 1500, mrr_perdido: 400, mrr_aberto: 200, ticket: 750 });
+    const a = (await exec('canais-resumo')).tabela.linhas.find((l) => l.id === '901')!; // Origem Fictícia A: negócios 1, 2, 3
+    expect(a).toMatchObject({ mrr_criado: 1500, valor: 1000, mrr_perdido: 300, mrr_aberto: 200, ticket: 1000 });
+  });
+
+  it('o marco "reuniao" aparece como "Reunião Agendada" em todo o BI', async () => {
+    const f = (await exec('funil')).grafico as { itens: Array<{ rotulo: string }> };
+    expect(f.itens.map((i) => i.rotulo)).toContain('Chegou em Reunião Agendada');
+    for (const a of BI_ANALISES) expect(JSON.stringify(a.como_ler + a.titulo + a.pergunta), a.id).not.toMatch(/[Rr]euni[ãa]o(?! Agendada)/);
+  });
+
   it('por mês: tudo cai no mês de criação (março de 2099)', async () => {
     const g = (await exec('por-mes')).grafico as { categorias: string[]; series: Array<{ id: string; valores: number[] }> };
     expect(g.categorias).toEqual(['2099-03']);
@@ -103,7 +129,7 @@ run('BI (transação com rollback)', () => {
     const r = await exec('funil');
     const v = Object.fromEntries((r.grafico as { itens: Array<{ rotulo: string; valor: number }> }).itens.map((i) => [i.rotulo, i.valor]));
     // "chegou em X ou além": o 2 foi direto para reunião e proposta (sem passar pela etapa SQL) e conta como SQL; o 6 chegou em SQL
-    expect(v).toEqual({ Leads: 6, MQL: 5, 'Chegou em SQL': 2, 'Chegou em reunião': 1, 'Chegou em proposta': 1, Ganhos: 2 });
+    expect(v).toEqual({ Leads: 6, MQL: 5, 'Chegou em SQL': 2, 'Chegou em Reunião Agendada': 1, 'Chegou em proposta': 1, Ganhos: 2 });
   });
 
   it('motivos de perda e por responsável', async () => {
@@ -138,7 +164,7 @@ run('BI (transação com rollback)', () => {
     for (const a of BI_ANALISES.filter((x) => x.pagina !== 'site' || x.id === 'site-url-funil')) {
       const r = await exec(a.id, { ...F, fontes: ['999999'], tipos: ['999999'] });
       const vazio = r.grafico.tipo === 'kpis'
-        ? r.grafico.itens.every((i) => (i.formato === 'pct' ? i.valor === null : i.valor === 0))
+        ? r.grafico.itens.every((i) => (i.valor === null || i.valor === 0))
         : r.grafico.tipo === 'colunas' ? r.grafico.categorias.length === 0
         : r.grafico.tipo === 'funis' ? r.grafico.colunas.length === 0
         : r.grafico.tipo === 'barras' ? r.grafico.itens.every((i) => i.valor === 0) || r.grafico.itens.length === 0 || a.id === 'qualidade-branco' || a.id === 'funil'
@@ -187,7 +213,7 @@ run('BI (transação com rollback)', () => {
   it('canais: funis lado a lado, com os passos condicionais (nunca passam de 100%)', async () => {
     const g = (await exec('canais-funis')).grafico as { tipo: string; etapas: string[]; colunas: Array<{ id: string; nome: string; slot: number; total?: boolean; leads: number; valores: number[]; passos: Array<number | null> }> };
     expect(g.tipo).toBe('funis');
-    expect(g.etapas).toEqual(['Leads', 'MQL', 'Chegou em SQL', 'Chegou em reunião', 'Chegou em proposta', 'Ganhos']);
+    expect(g.etapas).toEqual(['Leads', 'MQL', 'Chegou em SQL', 'Chegou em Reunião Agendada', 'Chegou em proposta', 'Ganhos']);
     expect(g.colunas.map((k) => k.nome)).toEqual(['Origem Fictícia A', '902', '(sem fonte)', 'Total das fontes do filtro']);
     const col = (nome: string) => g.colunas.find((k) => k.nome === nome)!;
     // Fonte A: negócios 1, 2, 3 (o 3 é inválido; o 2 passou por reunião e proposta e ganhou)
@@ -217,7 +243,7 @@ run('BI (transação com rollback)', () => {
     expect(g.tipo).toBe('matriz');
     expect(g.escala).toBe('linha');
     expect(g.colunas).toEqual(['Origem Fictícia A', '902', '(sem fonte)', 'Total']);
-    expect(g.linhas.map((l) => l.rotulo)).toEqual(['Lead → MQL', 'MQL → SQL', 'SQL → reunião', 'Reunião → proposta', 'Proposta → ganho', 'Lead → ganho (resultado final)']);
+    expect(g.linhas.map((l) => l.rotulo)).toEqual(['Lead → MQL', 'MQL → SQL', 'SQL → Reunião Agendada', 'Reunião Agendada → proposta', 'Proposta → ganho', 'Lead → ganho (resultado final)']);
     const final = g.linhas.at(-1)!.valores;
     expect(final[0]).toBeCloseTo(1 / 3, 5); // fonte A: 1 ganho em 3 leads
     expect(final[1]).toBeCloseTo(1 / 2, 5); // 902: 1 ganho em 2 leads

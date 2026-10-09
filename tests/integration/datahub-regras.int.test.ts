@@ -62,7 +62,8 @@ run('regras do funil (transação com rollback)', () => {
     await c().query('set local role orq_panel');
     const repo = new PgPainelRepo(c() as never);
     const m = await repo.motivosPerda();
-    expect(m.filter((x) => x.exclui_mql).map((x) => x.reason_id).sort((a, b) => a - b)).toEqual([184, 185, 398, 587]);
+    // os 4 motivos de nascença; o Pablo pode marcar outros na Configuração (ex.: 27, 36 e 621 em 2026-10-09), então não é igualdade exata
+    expect(m.filter((x) => x.exclui_mql).map((x) => x.reason_id)).toEqual(expect.arrayContaining([184, 185, 398, 587]));
     const s = await repo.statusContagem();
     expect(s.map((x) => x.status)).toEqual(['open', 'won', 'lost', 'deleted']);
     expect(s.find((x) => x.status === 'deleted')!.conta_como_lead).toBe(false);

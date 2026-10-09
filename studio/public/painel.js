@@ -3,7 +3,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 const PRODUTOS = [['', 'Não definido'], ['rh', 'RH (QuarkRH)'], ['clinic', 'Clínica (QuarkClinic)']];
 // Ganho/perdido/aberto/excluído vêm do Status do negócio e MQL é regra pelo motivo de perda: nenhum dos dois é marco de etapa.
-const MARCOS = [['', 'Nenhum'], ['sql', 'SQL'], ['reuniao', 'Reunião'], ['proposta', 'Proposta']];
+const MARCOS = [['', 'Nenhum'], ['sql', 'SQL'], ['reuniao', 'Reunião Agendada'], ['proposta', 'Proposta']];
 const STATUS = [['open', 'Aberto'], ['won', 'Ganho'], ['lost', 'Perdido'], ['deleted', 'Excluído']];
 const SIM_NAO = (v) => [['sim', 'Sim'], ['nao', 'Não']].map(([k, l]) => `<option value="${k}" ${(v ? 'sim' : 'nao') === k ? 'selected' : ''}>${l}</option>`).join('');
 const ENTIDADES = [
@@ -120,7 +120,7 @@ function viewConfig() {
   const semMarco = S.config.reduce((n, p) => n + p.etapas.filter((e) => !e.marco).length, 0);
   return `
     <div class="banner ${semProduto ? 'warn' : 'ok'}" style="margin-bottom:14px">
-      Ligue cada <strong>pipeline a um produto</strong>. Se quiser, marque nas etapas <strong>até onde o negócio chegou</strong> (SQL, reunião, proposta). Salva sozinho ao escolher.
+      Ligue cada <strong>pipeline a um produto</strong>. Se quiser, marque nas etapas <strong>até onde o negócio chegou</strong> (SQL, Reunião Agendada, proposta). Salva sozinho ao escolher.
       ${semProduto ? `Faltam ${semProduto} pipeline(s) sem produto.` : 'Todos os pipelines têm produto.'}
       <br><span class="muted">Ganho, perdido, aberto e excluído <strong>não dependem da etapa</strong>: vêm do Status do negócio. MQL <strong>não é etapa</strong>: é a regra dos motivos de perda, logo abaixo.</span>
     </div>
@@ -202,7 +202,7 @@ function viewNegocios() {
       </tbody></table></section>
     <section class="card section" style="margin-top:16px;overflow:auto"><h2>Funil dos negócios criados em ${sel('nf-ano', S.neg.ano, [2026, 2025].map((a) => [String(a), String(a)]))}</h2>
       <p class="muted" style="margin-top:0">Leads e MQL vêm das regras de contagem; "chegou em…" vem do histórico de etapas (só vale para quem já tem o histórico lido); ganhos e perdidos vêm do Status do negócio, nunca da etapa.</p>
-      <table class="t"><thead><tr><th>Pipeline</th><th>Produto</th><th class="num">Leads</th><th class="num">MQL</th><th class="num">Chegou em SQL</th><th class="num">Chegou em reunião</th><th class="num">Chegou em proposta</th><th class="num">Ganhos</th><th class="num">Perdidos</th></tr></thead><tbody>
+      <table class="t"><thead><tr><th>Pipeline</th><th>Produto</th><th class="num">Leads</th><th class="num">MQL</th><th class="num">Chegou em SQL</th><th class="num">Chegou em Reunião Agendada</th><th class="num">Chegou em proposta</th><th class="num">Ganhos</th><th class="num">Perdidos</th></tr></thead><tbody>
       ${S.neg.funil.map((r) => `<tr><td>${esc(r.pipeline ?? '—')} <span class="muted">#${r.pipeline_id ?? ''}</span></td><td>${r.produto ? esc(r.produto) : '<span class="muted">—</span>'}</td><td class="num">${nf.format(r.leads)}</td><td class="num">${nf.format(r.mql)}</td><td class="num">${nf.format(r.chegou_sql)}</td><td class="num">${nf.format(r.chegou_reuniao)}</td><td class="num">${nf.format(r.chegou_proposta)}</td><td class="num">${nf.format(r.ganhos)}</td><td class="num">${nf.format(r.perdidos)}</td></tr>`).join('') || '<tr><td colspan="9" class="empty">Nenhum negócio criado neste ano.</td></tr>'}
       </tbody></table></section>
     <section class="card section" style="margin-top:16px"><h2>Lista de negócios</h2>
