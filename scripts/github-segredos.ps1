@@ -22,10 +22,12 @@ $repo = 'pablomenezzes/quark-orquestrador'
 Write-Host "Repositorio: $repo"
 Write-Host "Segredos: $($nomes -join ', ')"
 if (-not $Apply) { Write-Host 'Nada guardado (use -Apply).'; exit 0 }
-if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { throw 'gh nao instalado.' }
+$gh = (Get-Command gh -ErrorAction SilentlyContinue).Source
+if (-not $gh -and (Test-Path "$env:ProgramFiles\GitHub CLI\gh.exe")) { $gh = "$env:ProgramFiles\GitHub CLI\gh.exe" }
+if (-not $gh) { throw 'gh nao instalado.' }
 foreach ($n in $nomes) {
-  $env_[$n] | gh secret set $n --repo $repo
+  $env_[$n] | & $gh secret set $n --repo $repo
   if ($LASTEXITCODE -ne 0) { throw "Falhou ao guardar $n" }
   Write-Host "  guardado: $n"
 }
-gh secret list --repo $repo
+& $gh secret list --repo $repo

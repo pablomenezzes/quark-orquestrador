@@ -37,8 +37,8 @@ describe('.github/workflows/sincronia.yml: sincronia automática segura', () => 
 describe('scripts/github-segredos.ps1: segredos sem aparecer na tela', () => {
   const s = ler('scripts/github-segredos.ps1');
   it('passa o valor pela entrada padrão (nunca na linha de comando) e recusa papel que não seja o orq_sync', () => {
-    expect(s).toContain('$env_[$n] | gh secret set $n');
-    expect(s).not.toMatch(/gh secret set[^\n]*(--body|-b )/);
+    expect(s).toContain('$env_[$n] | & $gh secret set $n');
+    expect(s).not.toMatch(/secret set[^\n]*(--body|-b )/);
     expect(s).toContain('orq_sync');
   });
   it('sem -Apply só mostra os nomes', () => {
