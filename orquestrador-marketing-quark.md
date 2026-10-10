@@ -849,7 +849,8 @@ Ordem vigente: **seção 15, itens 1 a 7**. As pendências abaixo apontam para o
 
 **Meta Ads em profundidade (D-52, 2026-10-09, aguardando o Pablo)**
 
-- [ ] **Aprovar o plano** `docs/datahub/meta-entrega-0-plano.md` (entregas M1 a M6) e responder: (1) **reaproveitar o token do projeto antigo** ou criar um de usuário de sistema; (2) **ID(s) da conta de anúncios** (QuarkRH e QuarkClinic são a mesma conta?); (3) período desde 2025-01-01; (4) definições das taxas (Connect, Hook, Hold, retenção); (5) se quer quebras por posicionamento, idade ou gênero (por padrão não).
+- [ ] **Aprovar o plano** `docs/datahub/meta-entrega-0-plano.md` (entregas M1 a M6) e responder: (3) período desde 2025-01-01; (4) definições das taxas (Connect, Hook, Hold, retenção); (5) se quer quebras por posicionamento, idade ou gênero (por padrão não). **Respondidos em 2026-10-10:** (1) o Pablo quer **criar um token novo** (usuário de sistema; o do projeto antigo NÃO será reaproveitado); (2) **duas contas de anúncios**: QuarkRH `287516640670266` e QuarkClinic `1390544329013540` (IDs guardados no `.env.local` como `META_AD_ACCOUNT_RH` e `META_AD_ACCOUNT_CLINIC`; não são segredo).
+- [ ] **Criar o token da Meta e guardá-lo** (roteiro de 5 passos entregue em 2026-10-10): `node scripts/guardar-token-meta.mjs "<arquivo.txt>" --apagar` e testar com `node scripts/meta-teste.mjs` (somente leitura).
 
 **Elementor pelo navegador (em espera)**
 
