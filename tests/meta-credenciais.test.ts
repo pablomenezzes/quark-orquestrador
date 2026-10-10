@@ -7,7 +7,9 @@ describe('scripts da Meta: o token nunca aparece na tela nem na URL', () => {
   const guardar = ler('scripts/guardar-token-meta.mjs');
   const teste = ler('scripts/meta-teste.mjs');
   it('guardar-token-meta só imprime nomes e IDs de conta, nunca o valor do token', () => {
-    expect(guardar).not.toMatch(/console\.(log|error)\([^)]*\btoken\b[^)]*\)/);
+    // nenhuma chamada de console recebe a variável do token (a palavra "token" em texto de aviso é permitida)
+    expect(guardar).not.toMatch(/console\.(log|error)\([^)]*(\$\{token\}|\$\{novos\.META_ACCESS_TOKEN\}|[(,]\s*token\s*[,)])/);
+    expect(guardar).toContain("if (k !== 'META_ACCESS_TOKEN') console.log"); // a listagem final pula o token
     expect(guardar).toContain('(o token nao e exibido)');
     expect(guardar).toContain('/^[A-Za-z0-9_-]{40,600}$/'); // formato mínimo: recusa arquivo que não parece token
     expect(guardar).toContain('/^\\d{6,20}$/'); // ID de conta: só números
@@ -16,6 +18,6 @@ describe('scripts da Meta: o token nunca aparece na tela nem na URL', () => {
     expect(teste).toContain('authorization: `Bearer ${token}`');
     expect(teste).not.toMatch(/searchParams\.set\(['"]access_token/);
     expect(teste).not.toMatch(/method:\s*['"](POST|PUT|PATCH|DELETE)/i);
-    expect(teste).not.toMatch(/console\.(log|error)\([^)]*\btoken\b/);
+    expect(teste).not.toMatch(/console\.(log|error)\([^)]*(\$\{token\}|[(,]\s*token\s*[,)])/);
   });
 });
