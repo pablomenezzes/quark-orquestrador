@@ -143,10 +143,10 @@ const hoje = () => new Date().toISOString().slice(0, 10);
 const somaDias = (d: string, n: number) => new Date(new Date(`${d}T00:00:00Z`).getTime() + n * 86_400_000).toISOString().slice(0, 10);
 
 /** Intervalo a ler: da marca d'agua (menos a janela de revisao) ate ontem; sem marca, desde o inicio da carga. */
-export function intervalo(desde: string, marcaDagua: string | null, agora = hoje()): { inicio: string; fim: string; modo: 'backfill' | 'incremental' } {
+export function intervalo(desde: string, marcaDagua: string | null, agora = hoje(), revisao = REVISAO_DIAS): { inicio: string; fim: string; modo: 'backfill' | 'incremental' } {
   const fim = somaDias(agora, -1);
   if (!marcaDagua) return { inicio: desde, fim, modo: 'backfill' };
-  const inicio = somaDias(marcaDagua, -(REVISAO_DIAS - 1));
+  const inicio = somaDias(marcaDagua, -(revisao - 1));
   return { inicio: inicio < desde ? desde : inicio, fim, modo: 'incremental' };
 }
 
