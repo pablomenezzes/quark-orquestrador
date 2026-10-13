@@ -18,3 +18,8 @@ supabase/.branches/
 
 # conector do Claude Desktop gerado por npm run mcp:build
 mcp/dist/
+
+# ferramenta de design (impeccable) instalada em .github por outro programa: nao faz parte deste projeto
+.github/skills/impeccable/
+.github/agents/impeccable-*.md
+.github/hooks/impeccable.json
