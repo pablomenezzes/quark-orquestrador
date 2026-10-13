@@ -12,7 +12,7 @@
 import pg from 'pg';
 import { assertRoleUser, assertSafeDbTarget } from '../src/db/guard.js';
 import { MetaClient, metaCredenciaisFromEnv } from '../src/datahub/meta/meta.js';
-import { MetaStore, syncMetaDesempenho, syncMetaEstrutura } from '../src/datahub/meta/meta-sync.js';
+import { MetaStore, syncMetaDesempenho, syncMetaEstrutura, syncMetaLigacao } from '../src/datahub/meta/meta-sync.js';
 
 try {
   process.loadEnvFile('.env.local');
@@ -65,6 +65,11 @@ for (const conta of contas) {
     console.log(`${x.entidade}: ${x.lidos} lidos, ${x.gravados} gravados${x.ate ? `, ate ${x.ate}` : ''}${x.faltaram ? `, ${x.faltaram} itens buscados pelo ID` : ''}${x.erro ? ` ERRO: ${x.erro}` : ''}`);
     if (x.erro) falhou = true;
   }
+}
+if (so !== 'estrutura' && apply) {
+  const lig = await syncMetaLigacao(store, { apply });
+  console.log(`${lig.entidade}: ${lig.gravados} negocios ligados${lig.erro ? ` ERRO: ${lig.erro}` : ''}`);
+  if (lig.erro) falhou = true;
 }
 console.log(`Requisicoes a Meta: ${client.requisicoes} | uso maximo da cota: chamadas ${client.usoMaximo.callCount}%, cpu ${client.usoMaximo.cpu}%, tempo ${client.usoMaximo.tempo}%`);
 await pool?.end();

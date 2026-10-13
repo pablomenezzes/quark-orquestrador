@@ -11,7 +11,7 @@ const BASE = `https://graph.facebook.com/${META_VERSAO}`;
 export interface MetaConta { id: string; produto: 'rh' | 'clinic' }
 export interface MetaCredenciais { token: string; contas: MetaConta[] }
 
-export type FetchLike = (url: string, init?: { headers?: Record<string, string> }) => Promise<{
+export type FetchLike = (url: string, init?: { headers?: Record<string, string>; signal?: AbortSignal }) => Promise<{
   ok: boolean;
   status: number;
   headers: { get(nome: string): string | null };
@@ -50,7 +50,10 @@ export interface UsoCota { callCount: number; cpu: number; tempo: number; espera
 
 export class MetaClient {
   requisicoes = 0;
+  /** O maior uso visto na rodada (so para relatar). */
   usoMaximo: UsoCota = { callCount: 0, cpu: 0, tempo: 0, esperaMin: 0 };
+  /** O uso da ULTIMA resposta: e ele que manda esperar (o maximo nunca desce e travaria a rodada para sempre). */
+  usoAtual: UsoCota = { callCount: 0, cpu: 0, tempo: 0, esperaMin: 0 };
   constructor(
     private readonly token: string,
     private readonly doFetch: FetchLike = fetch as unknown as FetchLike,
@@ -60,8 +63,13 @@ export class MetaClient {
   private lerUso(cabecalho: string | null) {
     if (!cabecalho) return;
     try {
+      this.usoAtual = { callCount: 0, cpu: 0, tempo: 0, esperaMin: 0 };
       for (const lista of Object.values(JSON.parse(cabecalho) as Record<string, Array<Record<string, number>>>)) {
         for (const u of lista) {
+          this.usoAtual = {
+            callCount: Math.max(this.usoAtual.callCount, u.call_count ?? 0), cpu: Math.max(this.usoAtual.cpu, u.total_cputime ?? 0),
+            tempo: Math.max(this.usoAtual.tempo, u.total_time ?? 0), esperaMin: Math.max(this.usoAtual.esperaMin, u.estimated_time_to_regain_access ?? 0),
+          };
           this.usoMaximo = {
             callCount: Math.max(this.usoMaximo.callCount, u.call_count ?? 0),
             cpu: Math.max(this.usoMaximo.cpu, u.total_cputime ?? 0),
@@ -80,12 +88,24 @@ export class MetaClient {
     const url = caminhoOuUrl.startsWith('http') ? caminhoOuUrl : `${BASE}/${caminhoOuUrl}?${new URLSearchParams(params).toString()}`;
     for (let tentativa = 0; ; tentativa++) {
       this.requisicoes++;
-      const r = await this.doFetch(url, { headers: { authorization: `Bearer ${this.token}` } });
+      // tempo limite: uma chamada que nao responde nao pode travar a rodada (ja travou por horas); cai na repeticao abaixo
+      let r: Awaited<ReturnType<FetchLike>>;
+      try {
+        r = await this.doFetch(url, { headers: { authorization: `Bearer ${this.token}` }, signal: AbortSignal.timeout(90_000) });
+      } catch {
+        if (tentativa >= 5) throw new MetaErro(0, null, 'sem resposta da Meta (tempo esgotado ou rede)');
+        await this.espera(5000 * 2 ** tentativa);
+        continue;
+      }
       this.lerUso(r.headers.get('x-business-use-case-usage'));
       const j = await r.json().catch(() => ({}));
       if (r.ok) {
-        // perto do limite: espera antes da proxima chamada (o proprio uso informado pela Meta manda)
-        if (this.usoMaximo.callCount >= 90 || this.usoMaximo.tempo >= 90 || this.usoMaximo.cpu >= 90) await this.espera(Math.max(30, this.usoMaximo.esperaMin * 60) * 1000);
+        // perto do limite: espera antes da proxima chamada (o uso da ultima resposta, informado pela Meta, manda)
+        const u = this.usoAtual;
+        if (u.callCount >= 90 || u.tempo >= 90 || u.cpu >= 90) {
+          this.usoAtual = { callCount: 0, cpu: 0, tempo: 0, esperaMin: 0 };
+          await this.espera(Math.max(30, u.esperaMin * 60) * 1000);
+        }
         return j;
       }
       const cod = (j?.error?.code as number | undefined) ?? null;

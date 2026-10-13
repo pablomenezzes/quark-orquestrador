@@ -102,6 +102,11 @@ export class MetaStore {
     };
   }
 
+  /** Recalcula a ligacao negocio -> anuncio/conjunto/campanha (funcao do banco, por upsert; devolve quantos negocios foram gravados). */
+  async recalcularLigacao(): Promise<number> {
+    return Number((await this.q.query(`select mkt.recalcular_ligacao_meta() as n`)).rows[0].n);
+  }
+
   async marcaDagua(entidade: string): Promise<string | null> {
     const r = await this.q.query(`select marca_dagua::date::text as d from ops.sync_checkpoints where entity = $1`, [entidade]);
     return r.rows[0]?.d ?? null;
@@ -124,6 +129,23 @@ export class MetaStore {
 }
 
 export interface MetaSyncResultado { entidade: string; lidos: number; gravados: number; ate?: string | null; faltaram?: number; erro?: string }
+
+/** Liga os negocios do Pipedrive a Meta (3 metodos, ver a migration 0018) e devolve a contagem por metodo. */
+export async function syncMetaLigacao(store: MetaStore, opts: { apply: boolean; origem?: 'agendada' | 'manual' }): Promise<MetaSyncResultado> {
+  const entidade = 'meta_ligacao';
+  if (!opts.apply) return { entidade, lidos: 0, gravados: 0 };
+  const jobId = await store.iniciarJob(entidade, 'incremental', opts.origem ?? 'manual');
+  try {
+    const n = await store.recalcularLigacao();
+    await store.salvarMarcaDagua(entidade, new Date().toISOString().slice(0, 10), jobId, true);
+    await store.terminarJob(jobId, 'ok', n, n);
+    return { entidade, lidos: n, gravados: n };
+  } catch (e) {
+    const erro = e instanceof Error ? e.message : String(e);
+    await store.terminarJob(jobId, 'erro', 0, 0, erro);
+    return { entidade, lidos: 0, gravados: 0, erro };
+  }
+}
 
 /** Estrutura da conta (campanhas, conjuntos e anuncios) mais a busca pelo ID do que so aparece nos relatorios. */
 export async function syncMetaEstrutura(client: MetaClient, store: MetaStore, conta: MetaConta, opts: { apply: boolean; origem?: 'agendada' | 'manual'; log?: (s: string) => void }): Promise<MetaSyncResultado> {
