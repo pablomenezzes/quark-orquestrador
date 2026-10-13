@@ -28,11 +28,20 @@ function fmtAbs(tipo, v) {
   return `${sinal(v)}${fmt(tipo, Math.abs(v))}`;
 }
 
+/* fila: no máximo 3 consultas ao mesmo tempo (a página Meta dispara 12 análises; juntas estouravam o limite de 30 s do banco) */
+const MAX_SIMULTANEAS = 3;
+let emAndamento = 0;
+const espera = [];
+const liberar = () => { emAndamento--; const prox = espera.shift(); if (prox) prox(); };
 async function api(path) {
-  const res = await fetch(path, { headers: { accept: 'application/json' } });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw Object.assign(new Error(data.detail || data.error || res.statusText), { status: res.status });
-  return data;
+  if (emAndamento >= MAX_SIMULTANEAS) await new Promise((ok) => espera.push(ok));
+  emAndamento++;
+  try {
+    const res = await fetch(path, { headers: { accept: 'application/json' } });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw Object.assign(new Error(data.detail || data.error || res.statusText), { status: res.status });
+    return data;
+  } finally { liberar(); }
 }
 
 /* ---------- estado e filtros ---------- */
