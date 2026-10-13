@@ -9,7 +9,7 @@ import type pg from 'pg';
 import { blocosDeDatas } from '../google/ga4.js';
 import { intervalo } from '../google/ga4-sync.js';
 import {
-  lerEstrutura, lerInsights, mapAnuncio, mapCampanha, mapConjunto,
+  lerEstrutura, lerInsights, mapAnuncio, mapCampanha, mapConjunto, MetaCotaErro,
   type AdDia, type Anuncio, type Campanha, type Conjunto, type MetaClient, type MetaConta,
 } from './meta.js';
 
@@ -128,7 +128,7 @@ export class MetaStore {
   }
 }
 
-export interface MetaSyncResultado { entidade: string; lidos: number; gravados: number; ate?: string | null; faltaram?: number; erro?: string }
+export interface MetaSyncResultado { entidade: string; lidos: number; gravados: number; ate?: string | null; faltaram?: number; erro?: string; parou?: string }
 
 /** Liga os negocios do Pipedrive a Meta (3 metodos, ver a migration 0018) e devolve a contagem por metodo. */
 export async function syncMetaLigacao(store: MetaStore, opts: { apply: boolean; origem?: 'agendada' | 'manual' }): Promise<MetaSyncResultado> {
@@ -167,6 +167,10 @@ export async function syncMetaEstrutura(client: MetaClient, store: MetaStore, co
     }
     return { entidade, lidos, gravados };
   } catch (e) {
+    if (e instanceof MetaCotaErro) {
+      if (opts.apply) await store.terminarJob(jobId, 'parcial', lidos, gravados, e.message);
+      return { entidade, lidos, gravados, parou: e.motivo };
+    }
     const erro = e instanceof Error ? e.message : String(e);
     if (opts.apply) await store.terminarJob(jobId, 'erro', lidos, gravados, erro);
     return { entidade, lidos, gravados, erro };
@@ -203,6 +207,8 @@ export async function syncMetaDesempenho(
   opts: { desde: string; apply: boolean; origem?: 'agendada' | 'manual'; maxBlocos?: number; log?: (s: string) => void },
 ): Promise<MetaSyncResultado> {
   const entidade = `meta_insights_${conta.produto}`;
+  // protocolo (2026-10-13): o desempenho so e gravado por rodada autorizada (scripts/meta-rodada.ts: simulacao, cartao, "pode seguir")
+  if (opts.apply) throw new Error('Gravar o desempenho da Meta so por rodada autorizada: use scripts/meta-rodada.ts (simulacao e cartao primeiro).');
   // uma marca d'agua ANTERIOR ao inicio pedido (ex.: sobrou de uma carga que comecava antes) nao vale: comeca em `desde`
   const salva = await store.marcaDagua(entidade);
   const marca = salva && salva >= opts.desde ? salva : null;
@@ -229,6 +235,10 @@ export async function syncMetaDesempenho(
     if (opts.apply) await store.terminarJob(jobId, feitos === blocos.length ? 'ok' : 'parcial', lidos, gravados);
     return { entidade, lidos, gravados, ate, faltaram };
   } catch (e) {
+    if (e instanceof MetaCotaErro) { // parada por cota nao e falha: o bloco em leitura nao foi gravado e a marca d'agua nao andou
+      if (opts.apply) await store.terminarJob(jobId, 'parcial', lidos, gravados, e.message);
+      return { entidade, lidos, gravados, ate, parou: e.motivo };
+    }
     const erro = e instanceof Error ? e.message : String(e);
     if (opts.apply) await store.terminarJob(jobId, 'erro', lidos, gravados, erro);
     return { entidade, lidos, gravados, ate, erro };

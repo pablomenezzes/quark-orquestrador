@@ -56,15 +56,17 @@ jobs:
         id: ga4
         continue-on-error: true
         run: npx tsx scripts/ga4-sync.ts --apply
-      # Meta Ads: estrutura, desempenho dos ultimos 28 dias e a ligacao com o Pipedrive. So roda quando a variavel do repositorio META_ATIVO
-      # for "true" (ligue DEPOIS da carga inicial local, para a sincronia nao disputar a cota da Meta com ela). Uma chamada demorada por cota
-      # nao pode prender o job: limite de 25 minutos na etapa.
-      - name: Meta Ads (ultimos 28 dias e ligacao com o Pipedrive)
+      # Meta Ads: SO a estrutura (campanhas, conjuntos, anuncios) e a ligacao com o Pipedrive. O DESEMPENHO da Meta nao roda aqui: so por rodada
+      # autorizada (scripts/meta-rodada.ts: simulacao, cartao e "pode seguir" do Pablo), nunca agendado. A etapa so roda com a variavel
+      # META_ATIVO = "true"; limite de 25 minutos.
+      - name: Meta Ads (estrutura e ligacao com o Pipedrive)
         id: meta
         if: ${{ vars.META_ATIVO == 'true' }}
         continue-on-error: true
         timeout-minutes: 25
-        run: npx tsx scripts/meta-sync.ts --apply --max-blocos 1
+        run: |
+          npx tsx scripts/meta-sync.ts --apply --so estrutura
+          npx tsx scripts/meta-sync.ts --apply --so ligacao
       - name: Falhar se alguma etapa falhou
         if: ${{ steps.cadastros.outcome == 'failure' || steps.negocios.outcome == 'failure' || steps.historico.outcome == 'failure' || steps.ga4.outcome == 'failure' || steps.meta.outcome == 'failure' }}
         run: |

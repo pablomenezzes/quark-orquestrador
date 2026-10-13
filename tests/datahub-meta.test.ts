@@ -1,13 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import {
-  CAMPOS_INSIGHTS, META_VERSAO, MetaClient, MetaErro, STATUS_TODOS, chaveNomeMeta, mapAdDia, mapAnuncio, mapCampanha, mapConjunto,
+  CAMPOS_INSIGHTS, META_VERSAO, MetaClient, MetaCotaErro, MetaErro, STATUS_TODOS, chaveNomeMeta, mapAdDia, mapAnuncio, mapCampanha, mapConjunto,
   metaCredenciaisFromEnv, temAtividade, type FetchLike,
 } from '../src/datahub/meta/meta';
 import { META_REVISAO_DIAS, syncMetaDesempenho } from '../src/datahub/meta/meta-sync';
 import { intervalo } from '../src/datahub/google/ga4-sync';
 
-const resp = (ok: boolean, status: number, body: unknown, uso?: unknown) => ({
-  ok, status, json: async () => body, headers: { get: (n: string) => (n === 'x-business-use-case-usage' && uso ? JSON.stringify(uso) : null) },
+const resp = (ok: boolean, status: number, body: unknown, uso?: unknown, outros: Record<string, string> = {}) => ({
+  ok, status, json: async () => body, headers: { get: (n: string) => (n === 'x-business-use-case-usage' && uso ? JSON.stringify(uso) : outros[n] ?? null) },
 });
 
 describe('Meta: credenciais', () => {
@@ -80,13 +80,14 @@ describe('Meta: cliente', () => {
     expect(urls[0]).toContain('/v26.0/act_1/ads?');
     expect(urls[0]).toContain('limit=500');
   });
-  it('limite de cota: espera e tenta de novo; erro de permissão não é repetido e a mensagem não traz a URL', async () => {
+  it('limite de cota: PARA (nao espera nem insiste); erro de permissão não é repetido e a mensagem não traz a URL', async () => {
     let n = 0;
-    const esperas: number[] = [];
-    const limite: FetchLike = async () => (++n < 3 ? resp(false, 400, { error: { code: 17, message: 'User request limit reached' } }) : resp(true, 200, { data: [] }));
-    await new MetaClient('t', limite as never, async (ms) => void esperas.push(ms)).get('x');
-    expect(n).toBe(3);
-    expect(esperas).toEqual([60_000, 120_000]);
+    const limite: FetchLike = async () => { n++; return resp(false, 400, { error: { code: 17, message: 'User request limit reached' } }); };
+    const c0 = new MetaClient('t', limite as never, async () => {});
+    await expect(c0.get('x')).rejects.toBeInstanceOf(MetaCotaErro);
+    expect(n).toBe(1);
+    await expect(c0.get('x')).rejects.toBeInstanceOf(MetaCotaErro); // depois de parar, nem chama a Meta
+    expect(n).toBe(1);
     let m = 0;
     const negado: FetchLike = async () => { m++; return resp(false, 403, { error: { code: 200, message: 'Permissions error', fbtrace_id: 'x' } }); };
     const err = await new MetaClient('t', negado as never, async () => {}).get('act_1/ads').catch((e: unknown) => e);
@@ -101,13 +102,22 @@ describe('Meta: cliente', () => {
     await expect(new MetaClient('t', f as never, async () => {}).get('x')).rejects.toThrow(/codigo 1/);
     expect(n).toBe(6); // 1 + 5 repetições
   });
-  it('perto do limite de cota o cliente espera antes da próxima chamada', async () => {
-    const esperas: number[] = [];
-    const f: FetchLike = async () => resp(true, 200, { data: [] }, { '123': [{ call_count: 95, total_cputime: 10, total_time: 20, estimated_time_to_regain_access: 2 }] });
-    const c = new MetaClient('t', f as never, async (ms) => void esperas.push(ms));
+  it('a 75% do uso da cota o cliente para: a chamada atual volta, a próxima é recusada', async () => {
+    let n = 0;
+    const f: FetchLike = async () => { n++; return resp(true, 200, { data: [] }, { '123': [{ call_count: 10, total_cputime: 10, total_time: 76, estimated_time_to_regain_access: 2 }] }); };
+    const c = new MetaClient('t', f as never, async () => {});
     await c.get('x');
-    expect(esperas).toEqual([120_000]);
-    expect(c.usoMaximo).toMatchObject({ callCount: 95, esperaMin: 2 });
+    expect(c.parada).toMatch(/76%/);
+    await expect(c.get('x')).rejects.toBeInstanceOf(MetaCotaErro);
+    expect(n).toBe(1);
+    expect(c.usoMaximo).toMatchObject({ tempo: 76, esperaMin: 2 });
+  });
+  it('abaixo de 75% segue normalmente e lê o cabeçalho x-fb-ads-insights-throttle (também conta para a parada)', async () => {
+    const f: FetchLike = async () => resp(true, 200, { data: [] }, { '1': [{ call_count: 10, total_cputime: 10, total_time: 10 }] }, { 'x-fb-ads-insights-throttle': JSON.stringify({ app_id_util_pct: 20, acc_id_util_pct: 80, ads_api_access_tier: 'development_access' }) });
+    const c = new MetaClient('t', f as never, async () => {});
+    await c.get('x');
+    expect(c.throttle).toEqual({ app: 20, conta: 80, nivel: 'development_access' });
+    expect(c.parada).toMatch(/80%/);
   });
 });
 

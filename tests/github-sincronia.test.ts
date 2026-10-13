@@ -34,7 +34,13 @@ describe('.github/workflows/sincronia.yml: sincronia automática segura', () => 
     const bloco = w.slice(i, w.indexOf('- name: Falhar'));
     expect(bloco).toContain("if: ${{ vars.META_ATIVO == 'true' }}");
     expect(bloco).toContain('timeout-minutes: 25');
-    expect(bloco).toContain('scripts/meta-sync.ts --apply --max-blocos 1');
+    expect(bloco).toContain('scripts/meta-sync.ts --apply --so estrutura');
+    expect(bloco).toContain('scripts/meta-sync.ts --apply --so ligacao');
+  });
+  it('o desempenho da Meta nunca é agendado: o fluxo não chama meta-rodada nem o desempenho', () => {
+    const comandos = w.split('\n').filter((l) => !l.trim().startsWith('#')).join('\n');
+    expect(comandos).not.toContain('meta-rodada');
+    expect(comandos).not.toMatch(/meta-sync\.ts --apply(?! --so (estrutura|ligacao))/);
   });
   it('só sincroniza com --apply e nada de comando destrutivo', () => {
     for (const l of w.split('\n').filter((x) => /tsx scripts\//.test(x))) expect(l).toContain('--apply');

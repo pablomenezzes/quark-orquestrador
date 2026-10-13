@@ -66,6 +66,27 @@ run('Meta: rodadas, configuração e atributos dos negócios (transação com ro
     expect(cols.find((r) => r.column_name === 'revisao').column_default).toBe('0');
   });
 
+  it('RodadaStore: grava linha nova, relê, conta revisão ao mudar e acha a simulação prévia (dados fictícios)', async () => {
+    const { RodadaStore, hashLinha } = await import('../../src/datahub/meta/meta-rodadas');
+    const s = new RodadaStore(c());
+    const sim = await s.criarRodada({ trimestre: '2099-T1', conta_id: '287516640670266', de: '2099-01-01', ate: '2099-03-31', modo: 'simulacao', status: 'simulada', cartao: { completa: true }, mb_previsto: 0 });
+    expect((await s.simulacaoPrevia('287516640670266', '2099-01-01', '2099-03-31'))?.rodada_id).toBe(sim);
+    expect(await s.simulacaoPrevia('287516640670266', '2099-01-01', '2099-03-30')).toBeNull();
+    const base = { anuncio_id: '999000000000000009', dia: '2099-01-05', conta_id: '287516640670266', conjunto_id: null, campanha_id: null, gasto: 1.5, impressoes: 10, alcance: 9, cliques: 2, cliques_link: 1, visitas_pagina: 1, leads_meta: 0, video_reproducoes: 0, video_3s: 0, video_p25: 0, video_p50: 0, video_p75: 0, video_p95: 0, video_p100: 0, video_thruplay: 0, video_tempo_medio: null };
+    const gravacao = await s.criarRodada({ trimestre: '2099-T1', conta_id: '287516640670266', de: '2099-01-01', ate: '2099-03-31', modo: 'gravacao', status: 'parcial', cartao: {}, simulacao_de_origem: sim, autorizacao: 'teste', mb_previsto: 0 });
+    await s.gravarLinhas([base], gravacao, new Map());
+    let l = (await c().query(`select revisao, rodada_id, row_hash, gasto from mkt.meta_ads_dia where anuncio_id = 999000000000000009`)).rows[0];
+    expect([l.revisao, Number(l.rodada_id), l.row_hash, Number(l.gasto)]).toEqual([0, gravacao, hashLinha(base), 1.5]);
+    const existentes = await s.existentes('287516640670266', '2099-01-01', '2099-03-31');
+    expect(existentes).toHaveLength(1);
+    expect(hashLinha(existentes[0]!)).toBe(hashLinha(base)); // o que o banco devolve tem o mesmo hash do que entrou
+    await s.gravarLinhas([{ ...base, gasto: 2.25 }], gravacao, new Map());
+    l = (await c().query(`select revisao, gasto from mkt.meta_ads_dia where anuncio_id = 999000000000000009`)).rows[0];
+    expect([l.revisao, Number(l.gasto)]).toEqual([1, 2.25]);
+    await s.marcarTrimestre('2099-T1', '287516640670266', '2099-03-31', true);
+    expect(await s.trimestreFechado('2099-T1', '287516640670266')).toBe(true);
+  }, 60_000);
+
   it('deal_atributos: recalcula um negócio fictício e só de novo quando o JSON muda', async () => {
     await c().query(`insert into crm.field_definitions (entity, field_key, nome, tipo) values ('deal', $1, 'Meta Ad_id', 'varchar')`, ['f'.repeat(39) + 'z']);
     const antesN = (await c().query(`select count(*)::int n from crm.deal_atributos`)).rows[0].n;

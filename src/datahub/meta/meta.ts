@@ -47,9 +47,35 @@ export class MetaErro extends Error {
 }
 
 export interface UsoCota { callCount: number; cpu: number; tempo: number; esperaMin: number }
+export interface ThrottleInsights { app: number; conta: number; nivel: string | null }
 
+/** Parada por cota: a rodada para (nao espera) e fica parcial; nada do bloco em leitura e gravado. */
+export class MetaCotaErro extends Error {
+  constructor(readonly motivo: string) {
+    super(`Meta: rodada interrompida por cota (${motivo})`);
+    this.name = 'MetaCotaErro';
+  }
+}
+
+/** Limite de parada do protocolo: 75% do consumo da cota. */
+export const META_PARAR_EM = 75;
+const HOST = 'graph.facebook.com';
+/** So https e so graph.facebook.com (sem usuario/porta). */
+export function urlPermitida(u: string): boolean {
+  try {
+    const x = new URL(u);
+    return x.protocol === 'https:' && x.hostname === HOST && x.port === '' && x.username === '' && x.password === '';
+  } catch {
+    return false;
+  }
+}
+
+/** SOMENTE LEITURA por construcao: a classe so tem `get` (HTTP GET, sem corpo) e `todas`; nao existe metodo de escrita (teste le este arquivo). */
 export class MetaClient {
   requisicoes = 0;
+  /** Ultimo valor do cabecalho x-fb-ads-insights-throttle (uso do app e da conta nos insights). */
+  throttle: ThrottleInsights = { app: 0, conta: 0, nivel: null };
+  parada: string | null = null;
   /** O maior uso visto na rodada (so para relatar). */
   usoMaximo: UsoCota = { callCount: 0, cpu: 0, tempo: 0, esperaMin: 0 };
   /** O uso da ULTIMA resposta: e ele que manda esperar (o maximo nunca desce e travaria a rodada para sempre). */
@@ -58,7 +84,26 @@ export class MetaClient {
     private readonly token: string,
     private readonly doFetch: FetchLike = fetch as unknown as FetchLike,
     private readonly espera: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
+    private readonly limiteParada: number = META_PARAR_EM,
   ) {}
+
+  private lerThrottle(cabecalho: string | null) {
+    if (!cabecalho) return;
+    try {
+      const t = JSON.parse(cabecalho) as Record<string, unknown>;
+      this.throttle = { app: Number(t.app_id_util_pct ?? 0) || 0, conta: Number(t.acc_id_util_pct ?? 0) || 0, nivel: typeof t.ads_api_access_tier === 'string' ? t.ads_api_access_tier : null };
+    } catch {
+      /* fora do formato: ignora */
+    }
+  }
+
+  /** O maior percentual de uso visto na ULTIMA resposta (chamadas, cpu, tempo, throttle de insights do app e da conta). */
+  usoPct(): number {
+    const u = this.usoAtual;
+    return Math.max(u.callCount, u.cpu, u.tempo, this.throttle.app, this.throttle.conta);
+  }
+  /** O maior percentual visto em toda a rodada (para o cartao). */
+  usoMaximoPct = 0;
 
   private lerUso(cabecalho: string | null) {
     if (!cabecalho) return;
@@ -85,7 +130,11 @@ export class MetaClient {
 
   /** Uma pagina (URL relativa a versao, ou a URL completa de `paging.next`). Repete em limite de cota e erros temporarios, com espera crescente. */
   async get(caminhoOuUrl: string, params: Record<string, string> = {}): Promise<any> {
-    const url = caminhoOuUrl.startsWith('http') ? caminhoOuUrl : `${BASE}/${caminhoOuUrl}?${new URLSearchParams(params).toString()}`;
+    if (this.parada) throw new MetaCotaErro(this.parada);
+    // so graph.facebook.com por https: a URL de paginacao vem da resposta e nunca e confiada (ela carrega o token)
+    if (/^[a-z][a-z0-9+.-]*:/i.test(caminhoOuUrl) && !urlPermitida(caminhoOuUrl)) throw new MetaErro(0, null, 'URL fora de https://graph.facebook.com recusada');
+    if (caminhoOuUrl.startsWith('//')) throw new MetaErro(0, null, 'URL fora de https://graph.facebook.com recusada');
+    const url = urlPermitida(caminhoOuUrl) ? caminhoOuUrl : `${BASE}/${caminhoOuUrl}?${new URLSearchParams(params).toString()}`;
     for (let tentativa = 0; ; tentativa++) {
       this.requisicoes++;
       // tempo limite: uma chamada que nao responde nao pode travar a rodada (ja travou por horas); cai na repeticao abaixo
@@ -98,21 +147,25 @@ export class MetaClient {
         continue;
       }
       this.lerUso(r.headers.get('x-business-use-case-usage'));
+      this.lerThrottle(r.headers.get('x-fb-ads-insights-throttle'));
       const j = await r.json().catch(() => ({}));
       if (r.ok) {
-        // perto do limite: espera antes da proxima chamada (o uso da ultima resposta, informado pela Meta, manda)
-        const u = this.usoAtual;
-        if (u.callCount >= 90 || u.tempo >= 90 || u.cpu >= 90) {
-          this.usoAtual = { callCount: 0, cpu: 0, tempo: 0, esperaMin: 0 };
-          await this.espera(Math.max(30, u.esperaMin * 60) * 1000);
-        }
+        // protocolo: ao chegar em 75% da cota o cliente PARA (nao espera e continua); a chamada atual devolve normalmente, a PROXIMA recusa
+        const pct = this.usoPct();
+        this.usoMaximoPct = Math.max(this.usoMaximoPct, pct);
+        if (pct >= this.limiteParada && !this.parada) this.parada = `uso da cota em ${pct}% (limite de parada: ${this.limiteParada}%)`;
         return j;
       }
       const cod = (j?.error?.code as number | undefined) ?? null;
       const limite = r.status === 429 || [4, 17, 32, 613, 80000, 80003, 80004, 80014].includes(cod ?? -1);
-      const temporario = limite || r.status >= 500 || cod === 1 || cod === 2; // 1 e 2: erro temporario da Meta
+      // limite de cota atingido: PARA (protocolo); nao fica esperando nem insistindo
+      if (limite) {
+        this.parada = `a Meta recusou por limite de cota (HTTP ${r.status}${cod != null ? `, codigo ${cod}` : ''})`;
+        throw new MetaCotaErro(this.parada);
+      }
+      const temporario = r.status >= 500 || cod === 1 || cod === 2; // 1 e 2: erro temporario da Meta
       if (!temporario || tentativa >= 5) throw new MetaErro(r.status, cod, String(j?.error?.message ?? 'sem detalhe').slice(0, 300));
-      await this.espera(limite ? 60_000 * 2 ** Math.min(tentativa, 3) : 2000 * 2 ** tentativa);
+      await this.espera(2000 * 2 ** tentativa);
     }
   }
 
@@ -123,7 +176,7 @@ export class MetaClient {
     for (;;) {
       out.push(...(j.data ?? []));
       if (!j.paging?.next) return out;
-      j = await this.get(j.paging.next);
+      j = await this.get(String(j.paging.next)); // get() recusa qualquer host que nao seja graph.facebook.com
     }
   }
 }
