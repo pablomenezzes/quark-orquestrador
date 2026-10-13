@@ -27,6 +27,9 @@ jobs:
       GOOGLE_SA_CLIENT_EMAIL: ${{ secrets.GOOGLE_SA_CLIENT_EMAIL }}
       GOOGLE_SA_PRIVATE_KEY: ${{ secrets.GOOGLE_SA_PRIVATE_KEY }}
       GA4_PROPERTY_ID: ${{ secrets.GA4_PROPERTY_ID }}
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+      META_AD_ACCOUNT_RH: ${{ secrets.META_AD_ACCOUNT_RH }}
+      META_AD_ACCOUNT_CLINIC: ${{ secrets.META_AD_ACCOUNT_CLINIC }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -53,8 +56,17 @@ jobs:
         id: ga4
         continue-on-error: true
         run: npx tsx scripts/ga4-sync.ts --apply
+      # Meta Ads: estrutura, desempenho dos ultimos 28 dias e a ligacao com o Pipedrive. So roda quando a variavel do repositorio META_ATIVO
+      # for "true" (ligue DEPOIS da carga inicial local, para a sincronia nao disputar a cota da Meta com ela). Uma chamada demorada por cota
+      # nao pode prender o job: limite de 25 minutos na etapa.
+      - name: Meta Ads (ultimos 28 dias e ligacao com o Pipedrive)
+        id: meta
+        if: ${{ vars.META_ATIVO == 'true' }}
+        continue-on-error: true
+        timeout-minutes: 25
+        run: npx tsx scripts/meta-sync.ts --apply --max-blocos 1
       - name: Falhar se alguma etapa falhou
-        if: ${{ steps.cadastros.outcome == 'failure' || steps.negocios.outcome == 'failure' || steps.historico.outcome == 'failure' || steps.ga4.outcome == 'failure' }}
+        if: ${{ steps.cadastros.outcome == 'failure' || steps.negocios.outcome == 'failure' || steps.historico.outcome == 'failure' || steps.ga4.outcome == 'failure' || steps.meta.outcome == 'failure' }}
         run: |
-          echo "Etapa com falha: cadastros=${{ steps.cadastros.outcome }} negocios=${{ steps.negocios.outcome }} historico=${{ steps.historico.outcome }} ga4=${{ steps.ga4.outcome }}"
+          echo "Etapa com falha: cadastros=${{ steps.cadastros.outcome }} negocios=${{ steps.negocios.outcome }} historico=${{ steps.historico.outcome }} ga4=${{ steps.ga4.outcome }} meta=${{ steps.meta.outcome }}"
           exit 1
