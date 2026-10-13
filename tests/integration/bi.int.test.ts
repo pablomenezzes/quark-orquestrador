@@ -57,6 +57,11 @@ run('BI (transação com rollback)', () => {
       { id: 97200001, st: 'won', valor: 100, owner: 960001, fonte: 901, tipo: 9001, criado: '2025-01-10T12:00:00Z', fechado: '2025-01-15T12:00:00Z' }, // ganho em 5 dias (dentro de 1 mês)
       { id: 97200002, st: 'won', valor: 100, owner: 960001, fonte: 901, tipo: 9001, criado: '2025-01-10T12:00:00Z', fechado: '2025-02-24T12:00:00Z' }, // ganho em 45 dias (dentro de 2 meses)
       { id: 97200003, st: 'lost', owner: 960001, fonte: 901, tipo: 9001, criado: '2025-01-10T12:00:00Z', fechado: '2025-01-20T12:00:00Z' },
+      // linhas de referência do gráfico por mês: março/2098 (1 lead), fevereiro/2098 (1, o "mês anterior") e março/2097 (2, o "ano anterior")
+      { id: 97300001, st: 'open', owner: 960001, fonte: 901, tipo: 9001, criado: '2098-03-10T12:00:00Z' },
+      { id: 97300002, st: 'open', owner: 960001, fonte: 901, tipo: 9001, criado: '2098-02-10T12:00:00Z' },
+      { id: 97300003, st: 'open', owner: 960001, fonte: 901, tipo: 9001, criado: '2097-03-10T12:00:00Z' },
+      { id: 97300004, st: 'open', owner: 960001, fonte: 901, tipo: 9001, criado: '2097-03-20T12:00:00Z' },
     ];
     for (const d of D) {
       await c().query(
@@ -91,6 +96,50 @@ run('BI (transação com rollback)', () => {
     expect(kpi(r, 'abertos')).toBe(1);
     expect(kpi(r, 'taxa_ganho')).toBeCloseTo(2 / 5, 5);
     expect(kpi(r, 'valor_ganho')).toBe(1500);
+  });
+
+  it('visão geral compara cada KPI com o mesmo período 30 dias antes e 1 ano antes (valor de lá, diferença e %)', async () => {
+    type Itens = { itens: Array<{ id: string; valor: number | null; comp?: Array<{ id: string; periodo: string; valor: number | null; abs: number | null; pct: number | null }> }> };
+    const k = (r: Awaited<ReturnType<typeof exec>>, id: string) => (r.grafico as Itens).itens.find((i) => i.id === id)!;
+    // 2026-01-05..15 não tem negócios do pipeline fictício, mas 1 ano antes (2025-01-05..15) tem os 3 leads da curva de safra (2 ganhos de R$ 100)
+    const a = await exec('visao-geral', { de: '2026-01-05', ate: '2026-01-15', pipeline_id: 940001 });
+    expect(k(a, 'leads').valor).toBe(0);
+    expect(k(a, 'leads').comp).toEqual([
+      { id: 'd30', rotulo: '30 dias antes', periodo: '2025-12-06 a 2025-12-16', valor: 0, abs: 0, pct: null }, // sem base (zero): não inventa %
+      { id: 'a1', rotulo: '1 ano antes', periodo: '2025-01-05 a 2025-01-15', valor: 3, abs: -3, pct: -1 },
+    ]);
+    expect(k(a, 'ganhos').comp![1]).toMatchObject({ valor: 2, abs: -2, pct: -1 });
+    expect(k(a, 'valor_ganho').comp![1]).toMatchObject({ valor: 200, abs: -200, pct: -1 });
+    // sem ganhos no período atual não existe ticket médio: a diferença e o % ficam em branco (não fingem -100%)
+    expect(k(a, 'ticket_ganho').valor).toBeNull();
+    expect(k(a, 'ticket_ganho').comp![1]).toMatchObject({ valor: 100, abs: null, pct: null });
+    // 30 dias antes de abril/2099 é 2099-03-02..31: os 6 leads do cenário principal (5 MQL)
+    const b = await exec('visao-geral', { de: '2099-04-01', ate: '2099-04-30', pipeline_id: 940001 });
+    expect(k(b, 'leads').comp![0]).toMatchObject({ id: 'd30', periodo: '2099-03-02 a 2099-03-31', valor: 6, abs: -6, pct: -1 });
+    expect(k(b, 'pct_mql').comp![0]!.valor).toBeCloseTo(5 / 6, 5); // taxa: o valor de lá é a taxa; a diferença é em pontos percentuais
+    expect(k(b, 'leads').comp![1]!.periodo).toBe('2098-04-01 a 2098-04-30');
+    // 29 de fevereiro em ano bissexto: o mesmo dia do ano anterior é 28 de fevereiro
+    expect(k(await exec('visao-geral', { de: '2096-02-29', ate: '2096-02-29', pipeline_id: 940001 }), 'leads').comp![1]!.periodo).toBe('2095-02-28 a 2095-02-28');
+    // a tabela também traz as duas comparações
+    expect(a.tabela.colunas.map((x) => x.id)).toEqual(expect.arrayContaining(['d30', 'v30', 'a1', 'va1']));
+  });
+
+  it('o gráfico por mês traz as linhas do mês anterior (cheia) e do mesmo mês do ano anterior (tracejada), com os mesmos filtros', async () => {
+    type Col = { categorias: string[]; series: Array<{ id: string; valores: number[] }>; linhas?: Array<{ id: string; tracejada: boolean; valores: Record<string, number[]> }> };
+    const g = (await exec('por-mes', { de: '2098-03-01', ate: '2098-03-31', pipeline_id: 940001 })).grafico as unknown as Col;
+    expect(g.categorias).toEqual(['2098-03']);
+    expect(g.series.find((s) => s.id === 'leads')!.valores).toEqual([1]);
+    const [mes, ano] = g.linhas!;
+    expect(mes).toMatchObject({ id: 'mes_anterior', tracejada: false, valores: { leads: [1] } }); // fevereiro/2098
+    expect(ano).toMatchObject({ id: 'ano_anterior', tracejada: true, valores: { leads: [2] } }); // março/2097
+    // virada de ano: o mês anterior de janeiro é dezembro do ano anterior (aqui sem negócios: zero, e não "ausente")
+    const jan = (await exec('por-mes', { de: '2025-01-01', ate: '2025-01-31', pipeline_id: 940001 })).grafico as unknown as Col;
+    expect(jan.categorias).toEqual(['2025-01']);
+    expect(jan.linhas![0]!.valores.leads).toEqual([0]);
+    expect(jan.linhas![1]!.valores.leads).toEqual([0]);
+    // as linhas respeitam os filtros: outro pipeline não vê os negócios do fictício
+    const outro = (await exec('por-mes', { de: '2098-03-01', ate: '2098-03-31' })).grafico as unknown as Col;
+    expect(outro.linhas![1]!.valores.leads).toEqual([2]); // sem filtro de pipeline, mas só há esses negócios em 2097/2098
   });
 
   it('KPIs de MRR (criado, ganho, perdido, em aberto) e ticket médio ganho aparecem em todas as telas que pedem', async () => {

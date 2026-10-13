@@ -35,10 +35,14 @@ export type BiFiltros = { de: string; ate: string; produto?: BiProduto; pipeline
 /** `brl2` = reais com centavos (custos unitários: CPL, CAC...); `dec` = número com 2 casas (ex.: ROAS). */
 export type Coluna = { id: string; rotulo: string; tipo: 'texto' | 'int' | 'pct' | 'brl' | 'brl2' | 'dec' | 'dias' };
 export type Tabela = { colunas: Coluna[]; linhas: Array<Record<string, string | number | null>> };
+/** Comparação de um KPI com o mesmo período deslocado (30 dias antes, 1 ano antes). `valor` é o número de lá; `abs` e `pct` são nulos sem base. */
+export type Comparacao = { id: 'd30' | 'a1'; rotulo: string; periodo: string; valor: number | null; abs: number | null; pct: number | null };
+/** Linha de referência sobre as colunas (ex.: mês anterior, cheia; mesmo mês do ano anterior, tracejada): um valor por categoria, por série. */
+export type LinhaRef = { id: 'mes_anterior' | 'ano_anterior'; nome: string; tracejada: boolean; valores: Record<string, number[]> };
 export type Grafico =
-  | { tipo: 'kpis'; itens: Array<{ id: string; rotulo: string; valor: number | null; formato: 'int' | 'pct' | 'brl' | 'brl2' | 'dec'; dica?: string }> }
+  | { tipo: 'kpis'; itens: Array<{ id: string; rotulo: string; valor: number | null; formato: 'int' | 'pct' | 'brl' | 'brl2' | 'dec'; dica?: string; comp?: Comparacao[] }> }
   /** `slot`: cor fixa da série (1 a 4 = paleta categórica; 0 = neutro, para "outras"). A cor segue a entidade, nunca a posição. */
-  | { tipo: 'colunas'; categorias: string[]; series: Array<{ id: string; nome: string; slot: number; valores: number[] }>; formato?: 'int' | 'pct' | 'brl' }
+  | { tipo: 'colunas'; categorias: string[]; series: Array<{ id: string; nome: string; slot: number; valores: number[] }>; formato?: 'int' | 'pct' | 'brl'; linhas?: LinhaRef[] }
   | { tipo: 'barras'; itens: Array<{ rotulo: string; valor: number; detalhe?: string }>; formato: 'int' | 'dias' | 'pct' | 'brl' | 'brl2'; ordinal?: boolean }
   /** Mapa de calor. `escala`: a cor é relativa ao maior valor de cada coluna ('coluna'), de cada linha ('linha') ou da matriz toda ('global', padrão). */
   | { tipo: 'matriz'; colunas: string[]; linhas: Array<{ rotulo: string; valores: Array<number | null>; detalhe?: string }>; formato: 'pct'; escala?: 'coluna' | 'linha' | 'global' }
@@ -293,6 +297,47 @@ const COL_CUSTOS: Coluna[] = [
   c('c_proposta', 'Custo por proposta', 'brl2'), c('cac', 'Custo por ganho (CAC)', 'brl2'), c('roas', 'ROAS (MRR ganho ÷ investimento)', 'dec'),
 ];
 
+/* ---------- Visão geral: comparações com o mesmo período deslocado ---------- */
+/** Mesmo dia no ano anterior (29/02 vira 28/02 em ano não bissexto). */
+function mesmoDiaAnoAnterior(d: string): string {
+  const [y, m, dia] = d.split('-').map(Number) as [number, number, number];
+  const ultimo = new Date(Date.UTC(y - 1, m, 0)).getUTCDate();
+  return `${y - 1}-${String(m).padStart(2, '0')}-${String(Math.min(dia, ultimo)).padStart(2, '0')}`;
+}
+async function totaisGeral(db: Db, f: BiFiltros): Promise<Row> {
+  const p: unknown[] = [];
+  const w = filtroSql(f, 'd', p);
+  return (
+    await q(
+      db,
+      `select count(*) filter (where d.conta_como_lead)::int as leads, count(*) filter (where d.is_mql)::int as mql,
+              count(*) filter (where d.status = 'won')::int as ganhos, count(*) filter (where d.status = 'lost')::int as perdidos, count(*) filter (where d.status = 'open')::int as abertos,
+              ${MRR_SQL('d')}
+         from analytics.negocios_bi d where ${w.join(' and ')}`,
+      p,
+    )
+  )[0]!;
+}
+type KpiGeral = { id: string; rotulo: string; valor: number | null; formato: 'int' | 'pct' | 'brl'; dica?: string; comp?: Comparacao[] };
+const kpisGeral = (r: Row): KpiGeral[] => {
+  const leads = n(r.leads), mql = n(r.mql), ganhos = n(r.ganhos), perdidos = n(r.perdidos), abertos = n(r.abertos);
+  return [
+    { id: 'leads', rotulo: 'Leads', valor: leads, formato: 'int', dica: 'Negócios que contam como lead' },
+    { id: 'mql', rotulo: 'MQL', valor: mql, formato: 'int', dica: 'Contam como lead e não foram perdidos por motivo que tira do MQL' },
+    { id: 'pct_mql', rotulo: '% MQL', valor: razao(mql, leads), formato: 'pct', dica: 'MQL ÷ leads' },
+    { id: 'ganhos', rotulo: 'Ganhos', valor: ganhos, formato: 'int', dica: 'Status ganho' },
+    { id: 'taxa_ganho', rotulo: 'Taxa de ganho', valor: razao(ganhos, ganhos + perdidos), formato: 'pct', dica: 'Ganhos ÷ (ganhos + perdidos)' },
+    { id: 'abertos', rotulo: 'Em aberto', valor: abertos, formato: 'int' },
+    { id: 'perdidos', rotulo: 'Perdidos', valor: perdidos, formato: 'int' },
+    ...mrrKpis(r),
+  ];
+};
+/** `valor` = o número do período comparado; `abs` = atual − anterior (em p.p. nas taxas); `pct` = variação relativa. */
+function comparar(id: 'd30' | 'a1', rotulo: string, fp: BiFiltros, atual: number | null, anterior: number | null): Comparacao {
+  const ok = atual != null && anterior != null;
+  return { id, rotulo, periodo: `${fp.de} a ${fp.ate}`, valor: anterior, abs: ok ? atual - anterior : null, pct: ok && anterior !== 0 ? atual / anterior - 1 : null };
+}
+
 const ETAPAS_URL_COLUNAS: Coluna[] = [
   c('pagina', 'Página (URL de conversão)'),
   c('sessoes', 'Sessões que entraram pela página (GA4)', 'int'),
@@ -341,35 +386,24 @@ export const BI_ANALISES: BiAnalise[] = [
     pagina: 'geral',
     titulo: 'Visão geral',
     pergunta: 'Como estão os negócios criados no período?',
-    como_ler: 'Negócios criados no período e o que aconteceu com eles até hoje. Leads e MQL seguem as regras do Painel (status que contam como lead; motivos de perda que tiram do MQL). Taxa de ganho = ganhos ÷ (ganhos + perdidos), sem contar os abertos.',
+    como_ler: 'Negócios criados no período e o que aconteceu com eles até hoje. Leads e MQL seguem as regras do Painel (status que contam como lead; motivos de perda que tiram do MQL). Taxa de ganho = ganhos ÷ (ganhos + perdidos), sem contar os abertos. A legenda pequena de cada card compara com o MESMO período deslocado: 30 dias antes e 1 ano antes (mesmos filtros), com o valor de lá, a diferença absoluta e a variação em %. Nas taxas (% MQL, taxa de ganho) a diferença é em pontos percentuais (p.p.) e a variação % é relativa. Negócios de períodos antigos já tiveram tempo de fechar; os do período atual ainda estão abertos, então compare com cuidado.',
     largura: 'cheia',
     async rodar(db, f) {
-      const p: unknown[] = [];
-      const w = filtroSql(f, 'd', p);
-      const r = (
-        await q(
-          db,
-          `select count(*) filter (where d.conta_como_lead)::int as leads, count(*) filter (where d.is_mql)::int as mql,
-                  count(*) filter (where d.status = 'won')::int as ganhos, count(*) filter (where d.status = 'lost')::int as perdidos, count(*) filter (where d.status = 'open')::int as abertos,
-                  ${MRR_SQL('d')}
-             from analytics.negocios_bi d where ${w.join(' and ')}`,
-          p,
-        )
-      )[0]!;
-      const leads = n(r.leads), mql = n(r.mql), ganhos = n(r.ganhos), perdidos = n(r.perdidos), abertos = n(r.abertos);
-      const itens = [
-        { id: 'leads', rotulo: 'Leads', valor: leads, formato: 'int' as const, dica: 'Negócios que contam como lead' },
-        { id: 'mql', rotulo: 'MQL', valor: mql, formato: 'int' as const, dica: 'Contam como lead e não foram perdidos por motivo que tira do MQL' },
-        { id: 'pct_mql', rotulo: '% MQL', valor: razao(mql, leads), formato: 'pct' as const, dica: 'MQL ÷ leads' },
-        { id: 'ganhos', rotulo: 'Ganhos', valor: ganhos, formato: 'int' as const, dica: 'Status ganho' },
-        { id: 'taxa_ganho', rotulo: 'Taxa de ganho', valor: razao(ganhos, ganhos + perdidos), formato: 'pct' as const, dica: 'Ganhos ÷ (ganhos + perdidos)' },
-        { id: 'abertos', rotulo: 'Em aberto', valor: abertos, formato: 'int' as const },
-        { id: 'perdidos', rotulo: 'Perdidos', valor: perdidos, formato: 'int' as const },
-        ...mrrKpis(r),
-      ];
+      const f30 = { ...f, de: somaDias(f.de, -30), ate: somaDias(f.ate, -30) };
+      const fa1 = { ...f, de: mesmoDiaAnoAnterior(f.de), ate: mesmoDiaAnoAnterior(f.ate) };
+      const [r, r30, ra1] = await Promise.all([totaisGeral(db, f), totaisGeral(db, f30), totaisGeral(db, fa1)]);
+      const itens = kpisGeral(r);
+      const i30 = kpisGeral(r30), ia1 = kpisGeral(ra1);
+      itens.forEach((it, k) => {
+        it.comp = [comparar('d30', '30 dias antes', f30, it.valor, i30[k]!.valor), comparar('a1', '1 ano antes', fa1, it.valor, ia1[k]!.valor)];
+      });
+      const txt = (v: number | null, formato: string) => (v == null ? '—' : formato === 'pct' ? pct(v) : formato === 'brl' ? `R$ ${v.toFixed(2)}` : String(v));
       return {
         grafico: { tipo: 'kpis', itens },
-        tabela: { colunas: [c('indicador', 'Indicador'), c('valor', 'Valor')], linhas: itens.map((i) => ({ indicador: i.rotulo, valor: i.valor == null ? '—' : i.formato === 'pct' ? pct(i.valor) : i.formato === 'brl' ? `R$ ${i.valor.toFixed(2)}` : String(i.valor) })) },
+        tabela: {
+          colunas: [c('indicador', 'Indicador'), c('valor', 'Valor'), c('d30', '30 dias antes'), c('v30', 'Variação vs 30 dias antes', 'pct'), c('a1', '1 ano antes'), c('va1', 'Variação vs 1 ano antes', 'pct')],
+          linhas: itens.map((i, k) => ({ indicador: i.rotulo, valor: txt(i.valor, i.formato), d30: txt(i30[k]!.valor, i.formato), v30: i.comp![0]!.pct, a1: txt(ia1[k]!.valor, i.formato), va1: i.comp![1]!.pct })),
+        },
         avisos: [],
       };
     },
@@ -379,7 +413,7 @@ export const BI_ANALISES: BiAnalise[] = [
     pagina: 'geral',
     titulo: 'Leads, MQL e ganhos por mês de criação',
     pergunta: 'Como a entrada de leads evolui e quanto vira ganho?',
-    como_ler: 'Cada mês agrupa os negócios CRIADOS naquele mês e mostra o que aconteceu com eles até hoje (um ganho de hoje conta no mês em que o negócio nasceu). Meses recentes ainda têm negócios abertos.',
+    como_ler: 'Cada mês agrupa os negócios CRIADOS naquele mês e mostra o que aconteceu com eles até hoje (um ganho de hoje conta no mês em que o negócio nasceu). Meses recentes ainda têm negócios abertos. As caixas acima do gráfico mostram ou escondem duas linhas de referência para a série escolhida: a linha CHEIA é o valor do mês anterior e a TRACEJADA é o do mesmo mês um ano antes (mesmos filtros). O mês em curso está incompleto, então ele tende a ficar abaixo das linhas.',
     largura: 'cheia',
     async rodar(db, f) {
       const p: unknown[] = [];
@@ -392,14 +426,46 @@ export const BI_ANALISES: BiAnalise[] = [
            from analytics.negocios_bi d where ${w.join(' and ')} group by 1 order by 1`,
         p,
       );
+      // linhas de referência: o mês anterior (cheia) e o mesmo mês do ano anterior (tracejada), com os MESMOS filtros;
+      // para os primeiros meses do período é preciso olhar para antes dele, então a consulta recua até o mês anterior ao do ano passado
+      const ref = mesmoDiaAnoAnterior(f.de).split('-').map(Number) as [number, number, number];
+      const inicioAmpliado = new Date(Date.UTC(ref[0], ref[1] - 2, 1)).toISOString().slice(0, 10);
+      const pa: unknown[] = [];
+      const wa = filtroSql({ ...f, de: inicioAmpliado }, 'd', pa);
+      const amplo = new Map<string, Row>(
+        (
+          await q(
+            db,
+            `select to_char(date_trunc('month', d.criado_em at time zone ${TZ}), 'YYYY-MM') as mes, count(*) filter (where d.conta_como_lead)::int as leads,
+                    count(*) filter (where d.is_mql)::int as mql, count(*) filter (where d.status = 'won')::int as ganhos
+               from analytics.negocios_bi d where ${wa.join(' and ')} group by 1`,
+            pa,
+          )
+        ).map((r) => [r.mes as string, r]),
+      );
+      const pad = (v: number) => String(v).padStart(2, '0');
+      const mesAnterior = (mes: string) => {
+        const [y, m] = mes.split('-').map(Number) as [number, number];
+        return m === 1 ? `${y - 1}-12` : `${y}-${pad(m - 1)}`;
+      };
+      const anoAnterior = (mes: string) => {
+        const [y, m] = mes.split('-').map(Number) as [number, number];
+        return `${y - 1}-${pad(m)}`;
+      };
+      const categorias = rows.map((r) => r.mes as string);
+      const valoresDe = (chave: (m: string) => string) => Object.fromEntries((['leads', 'mql', 'ganhos'] as const).map((s) => [s, categorias.map((m) => n(amplo.get(chave(m))?.[s]))]));
       return {
         grafico: {
           tipo: 'colunas',
-          categorias: rows.map((r) => r.mes),
+          categorias,
           series: [
             { id: 'leads', nome: 'Leads', slot: 1, valores: rows.map((r) => n(r.leads)) },
             { id: 'mql', nome: 'MQL', slot: 2, valores: rows.map((r) => n(r.mql)) },
             { id: 'ganhos', nome: 'Ganhos', slot: 3, valores: rows.map((r) => n(r.ganhos)) },
+          ],
+          linhas: [
+            { id: 'mes_anterior', nome: 'Mês anterior', tracejada: false, valores: valoresDe(mesAnterior) },
+            { id: 'ano_anterior', nome: 'Mesmo mês do ano anterior', tracejada: true, valores: valoresDe(anoAnterior) },
           ],
         },
         tabela: {

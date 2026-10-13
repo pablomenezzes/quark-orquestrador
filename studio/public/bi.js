@@ -18,6 +18,16 @@ function fmt(tipo, v) {
   return String(v);
 }
 
+/* comparações: diferença com sinal (nas taxas, em pontos percentuais) e variação relativa */
+const sinal = (v) => (v > 0 ? '+' : v < 0 ? '−' : '');
+const seta = (v) => (v > 0 ? '▲' : v < 0 ? '▼' : '=');
+const pctVar = (v) => (v == null ? '—' : `${sinal(v)}${nf1.format(Math.abs(v) * 100)}%`);
+function fmtAbs(tipo, v) {
+  if (v == null) return '—';
+  if (tipo === 'pct') return `${sinal(v)}${nf1.format(Math.abs(v) * 100)} p.p.`;
+  return `${sinal(v)}${fmt(tipo, Math.abs(v))}`;
+}
+
 async function api(path) {
   const res = await fetch(path, { headers: { accept: 'application/json' } });
   const data = await res.json().catch(() => ({}));
@@ -42,6 +52,8 @@ const guardar = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } 
 const ler = (k) => { try { return JSON.parse(localStorage.getItem(k) ?? 'null'); } catch { return null; } };
 Object.assign(S.filtros, ler('bi.filtros') ?? {});
 S.padrao = ler('bi.padrao') ?? {};
+/** Linhas de referência dos gráficos de colunas: caixas liga/desliga e a série a que valem ('' = a primeira; 'todas'). Lembrado neste navegador. */
+S.linhas = { mes_anterior: true, ano_anterior: true, serie: '', ...(ler('bi.linhas') ?? {}) };
 if (!PRESETS[S.filtros.periodo]) S.filtros.periodo = 'ano';
 
 function intervalo() {
@@ -128,8 +140,15 @@ function mostrarTip(ev, html) {
 const esconderTip = () => (tip.hidden = true);
 
 /* ---------- gráficos ---------- */
+/** Legenda pequena do card: o número do período comparado, a diferença absoluta e a variação em %. */
+function comparacoes(i) {
+  if (!i.comp?.length) return '';
+  return `<div class="cmp">${i.comp
+    .map((c) => `<div title="${esc(`${c.rotulo}: ${c.periodo}`)}"><span class="seta" aria-hidden="true">${c.abs == null ? '·' : seta(c.abs)}</span> vs ${esc(c.rotulo)}: ${esc(fmt(i.formato, c.valor))} · ${esc(fmtAbs(i.formato, c.abs))} (${esc(pctVar(c.pct))})</div>`)
+    .join('')}</div>`;
+}
 function tiles(g) {
-  return `<div class="tiles">${g.itens.map((i) => `<div class="tile"><div class="v">${esc(fmt(i.formato, i.valor))}</div><div class="l">${esc(i.rotulo)}</div>${i.dica ? `<div class="d">${esc(i.dica)}</div>` : ''}</div>`).join('')}</div>`;
+  return `<div class="tiles">${g.itens.map((i) => `<div class="tile"><div class="v">${esc(fmt(i.formato, i.valor))}</div><div class="l">${esc(i.rotulo)}</div>${i.dica ? `<div class="d">${esc(i.dica)}</div>` : ''}${comparacoes(i)}</div>`).join('')}</div>`;
 }
 
 function barras(g) {
@@ -151,13 +170,27 @@ function niceMax(v) {
 }
 const rotuloMes = (c) => { const p = c.split('-'); if (p.length === 3) return `${p[2]}/${p[1]}`; return `${MESES[Number(p[1]) - 1]}/${p[0].slice(2)}`; };
 
+/** A série a que as linhas valem: a escolhida, senão a primeira ('todas' = todas). */
+function seriesDasLinhas(g) {
+  const s = S.linhas.serie;
+  return s === 'todas' || g.series.some((x) => x.id === s) ? s : g.series[0].id;
+}
+/** Linhas de referência ligadas, com as séries a que se aplicam. */
+function linhasVisiveis(g) {
+  const sel = seriesDasLinhas(g);
+  const series = sel === 'todas' ? g.series : g.series.filter((s) => s.id === sel);
+  return (g.linhas ?? []).filter((l) => S.linhas[l.id] !== false).map((l) => ({ l, series }));
+}
+
 function colunas(g) {
   const W = 960, H = 300, L = 50, R = 8, T = 10, B = 26;
   const iw = W - L - R, ih = H - T - B;
   const n = g.categorias.length;
   if (!n) return '<p class="muted">Nada para mostrar neste filtro.</p>';
   const f = g.formato ?? 'int';
-  const maxV = niceMax(Math.max(...g.series.flatMap((s) => s.valores), 1e-9));
+  // a escala considera as linhas de referência (ligadas ou não), para as colunas não "pularem" ao ligar ou desligar uma linha
+  const todosRef = (g.linhas ?? []).flatMap((l) => Object.values(l.valores).flat());
+  const maxV = niceMax(Math.max(...g.series.flatMap((s) => s.valores), ...todosRef, 1e-9));
   const y = (v) => T + ih - (v / maxV) * ih;
   const band = iw / n;
   const k = g.series.length;
@@ -171,12 +204,27 @@ function colunas(g) {
     return g.series.map((s, si) => `<path d="${topo(x0 + si * (bw + 2), y(s.valores[ci]), bw, (s.valores[ci] / maxV) * ih)}" fill="${COR(s.slot)}"/>`).join('');
   }).join('');
   const hits = g.categorias.map((c, ci) => `<rect class="hit" data-c="${ci}" x="${L + band * ci}" y="${T}" width="${band}" height="${ih}" fill="transparent"/>`).join('');
+  // linhas de referência: cheia = mês anterior, tracejada = ano anterior; a cor é a da série (a cor segue a entidade) e o estilo da linha é o que as distingue
+  const lv = linhasVisiveis(g);
+  const linhasSvg = lv.map(({ l, series }) => series.map((s) => {
+    const v = l.valores[s.id];
+    if (!v) return '';
+    const pts = v.map((val, ci) => [L + band * ci + band / 2, y(val)]);
+    return `<g class="ref ref-${l.id}"><polyline points="${pts.map((p) => p.join(',')).join(' ')}" fill="none" stroke="${COR(s.slot)}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" ${l.tracejada ? 'stroke-dasharray="6 4"' : ''}/>${pts.map((p) => `<circle cx="${p[0]}" cy="${p[1]}" r="2.8" fill="${COR(s.slot)}" stroke="var(--viz-surface, var(--surface, #fff))" stroke-width="1.5"/>`).join('')}</g>`;
+  }).join('')).join('');
+  const controles = g.linhas?.length
+    ? `<div class="ref-ctl" role="group" aria-label="Linhas de referência">${g.linhas
+        .map((l) => `<label><input type="checkbox" data-linha="${l.id}" ${S.linhas[l.id] !== false ? 'checked' : ''}> <svg width="26" height="8" aria-hidden="true"><line x1="1" y1="4" x2="25" y2="4" stroke="var(--viz-ink-2)" stroke-width="2" ${l.tracejada ? 'stroke-dasharray="5 3"' : ''}/></svg> ${esc(l.nome)}</label>`)
+        .join('')}<label>linhas de: <select data-linha-serie>${[...g.series.map((s) => [s.id, s.nome]), ['todas', 'todas as séries']].map(([v, nome]) => `<option value="${esc(v)}" ${seriesDasLinhas(g) === v ? 'selected' : ''}>${esc(nome)}</option>`).join('')}</select></label></div>`
+    : '';
   return `
     <div class="legenda">${g.series.map((s) => `<span><i style="background:${COR(s.slot)}"></i>${esc(s.nome)}</span>`).join('')}</div>
+    ${controles}
     <svg class="col" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(g.categorias.map((c, ci) => `${rotuloMes(c)}: ${g.series.map((s) => `${s.nome} ${fmt(f, s.valores[ci])}`).join(', ')}`).join('; '))}">
       ${ticks.map((t) => `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}"/><text x="${L - 6}" y="${y(t) + 4}" text-anchor="end">${esc(fmt(f, t))}</text>`).join('')}
       <line class="eixo" x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}"/>
       ${barrasSvg}
+      ${linhasSvg}
       ${g.categorias.map((c, ci) => (ci % passo === 0 ? `<text x="${L + band * ci + band / 2}" y="${H - 8}" text-anchor="middle">${rotuloMes(c)}</text>` : '')).join('')}
       ${hits}
     </svg>`;
@@ -310,6 +358,16 @@ function filtrosMudaram() {
 /* ---------- eventos ---------- */
 document.addEventListener('change', (ev) => {
   const t = ev.target;
+  // caixas das linhas de referência (mês anterior, ano anterior) e a série a que valem
+  if (t.dataset?.linha || t.hasAttribute?.('data-linha-serie')) {
+    if (t.dataset.linha) S.linhas[t.dataset.linha] = t.checked;
+    else S.linhas.serie = t.value;
+    guardar('bi.linhas', S.linhas);
+    const card = t.closest('.bi-card');
+    const a = card && S.catalogo.analises.find((x) => `card-${x.id}` === card.id);
+    if (a) pintarCard(a);
+    return;
+  }
   if (t.dataset?.msOp) {
     const campo = t.dataset.msOp;
     const s = new Set(sel(campo));
@@ -422,7 +480,10 @@ document.addEventListener('mousemove', (ev) => {
   if (hit && g.tipo === 'colunas') {
     const ci = Number(hit.dataset.c);
     const f = g.formato ?? 'int';
-    return mostrarTip(ev, `<b class="t">${rotuloMes(g.categorias[ci])}</b>${g.series.map((s) => `<div class="lin"><i style="background:${COR(s.slot)}"></i>${esc(s.nome)}: <b>${esc(fmt(f, s.valores[ci]))}</b></div>`).join('')}`);
+    // com linhas de referência ligadas, cada série mostra também o valor do mês anterior e do ano anterior
+    const lv = linhasVisiveis(g);
+    const refDe = (s) => lv.filter(({ series }) => series.includes(s)).map(({ l }) => `${l.id === 'mes_anterior' ? 'mês ant.' : 'ano ant.'}: ${fmt(f, l.valores[s.id]?.[ci])}`);
+    return mostrarTip(ev, `<b class="t">${rotuloMes(g.categorias[ci])}</b>${g.series.map((s) => `<div class="lin"><i style="background:${COR(s.slot)}"></i>${esc(s.nome)}: <b>${esc(fmt(f, s.valores[ci]))}</b>${refDe(s).length ? ` <span style="color:var(--viz-muted)">(${esc(refDe(s).join(' · '))})</span>` : ''}</div>`).join('')}`);
   }
   esconderTip();
 });

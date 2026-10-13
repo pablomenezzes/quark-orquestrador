@@ -63,11 +63,11 @@ run('criativos: DOR, Mensagem e Módulo (transação com rollback)', () => {
     ]);
     await c().query(`insert into crm.field_definitions (entity, field_key, nome, tipo) values ('deal', $1, 'UTM Term', 'varchar')`, [KT]);
     const D = [
-      { id: 98300001, st: 'won', valor: 100, fonte: 901, term: 'AD1 — Cópia' },
-      { id: 98300002, st: 'open', valor: 50, fonte: 901, term: '  ad1   — cópia ' }, // o mesmo criativo, escrito diferente
-      { id: 98300003, st: 'lost', valor: 10, fonte: 901, term: 'Outro Criativo' },
+      { id: 98300001, st: 'won', valor: 100, fonte: 901, term: 'ZZ Criativo Fictício Um' },
+      { id: 98300002, st: 'open', valor: 50, fonte: 901, term: '  zz   criativo fictício um ' }, // o mesmo criativo, escrito diferente
+      { id: 98300003, st: 'lost', valor: 10, fonte: 901, term: 'ZZ Criativo Fictício Dois' },
       { id: 98300004, st: 'open', valor: 0, fonte: 901, term: null }, // Meta sem UTM Term: não é criativo
-      { id: 98300005, st: 'open', valor: 0, fonte: 902, term: 'Criativo do Google' }, // outra fonte: fora
+      { id: 98300005, st: 'open', valor: 0, fonte: 902, term: 'ZZ Criativo Fictício do Google' }, // outra fonte: fora
     ];
     for (const d of D) {
       await c().query(`insert into crm.deals (pipedrive_id, pipeline_id, stage_id, owner_id, status, is_deleted, valor, created_at) values ($1, 940004, 953001, null, $2, false, $3, '2099-03-10T12:00:00Z')`, [d.id, d.st, d.valor]);
@@ -84,9 +84,9 @@ run('criativos: DOR, Mensagem e Módulo (transação com rollback)', () => {
 
   it('só entram criativos da fonte Meta ADS com UTM Term; grafias diferentes viram um criativo só', async () => {
     const l = (await repo().criativos()) as Array<Record<string, any>>;
-    const meus = l.filter((x) => ['ad1 — cópia', 'outro criativo', 'criativo do google'].includes(x.termo_chave));
-    expect(meus.map((x) => x.termo_chave).sort()).toEqual(['ad1 — cópia', 'outro criativo']);
-    const ad1 = meus.find((x) => x.termo_chave === 'ad1 — cópia')!;
+    const meus = l.filter((x) => ['zz criativo fictício um', 'zz criativo fictício dois', 'zz criativo fictício do google'].includes(x.termo_chave));
+    expect(meus.map((x) => x.termo_chave).sort()).toEqual(['zz criativo fictício dois', 'zz criativo fictício um']);
+    const ad1 = meus.find((x) => x.termo_chave === 'zz criativo fictício um')!;
     expect(ad1).toMatchObject({ leads: 2, ganhos: 1, mrr_ganho: 100, dor_id: null, dor: null, mensagem: null, modulo: null }); // nasce em branco
   });
 
@@ -108,14 +108,14 @@ run('criativos: DOR, Mensagem e Módulo (transação com rollback)', () => {
   });
 
   it('mapeia o criativo: DOR > Mensagem e Módulo; a Mensagem tem de ser da DOR; trocar a DOR esvazia a Mensagem', async () => {
-    expect(await repo().mapearCriativos(['ad1 — cópia'], { dor_id: dorA, mensagem_id: msgA1, modulo_id: modPonto })).toEqual({ atualizados: 1 });
-    expect(await criativo('ad1 — cópia')).toMatchObject({ dor: 'Gestão manual', mensagem: 'Planilha não escala', modulo: 'Ponto' });
-    expect(await recusa(() => repo().mapearCriativos(['ad1 — cópia'], { dor_id: dorA, mensagem_id: msgB1 }))).toBeInstanceOf(PainelInvalido); // Mensagem de outra DOR
-    expect(await recusa(() => repo().mapearCriativos(['ad1 — cópia'], { mensagem_id: msgB1 }))).toBeInstanceOf(PainelInvalido); // idem, sem trocar a DOR
-    await repo().mapearCriativos(['ad1 — cópia'], { dor_id: dorB }); // só trocou a DOR: a Mensagem antiga não vale mais
-    expect(await criativo('ad1 — cópia')).toMatchObject({ dor: 'Medo de multa', mensagem: null, modulo: 'Ponto' });
+    expect(await repo().mapearCriativos(['zz criativo fictício um'], { dor_id: dorA, mensagem_id: msgA1, modulo_id: modPonto })).toEqual({ atualizados: 1 });
+    expect(await criativo('zz criativo fictício um')).toMatchObject({ dor: 'Gestão manual', mensagem: 'Planilha não escala', modulo: 'Ponto' });
+    expect(await recusa(() => repo().mapearCriativos(['zz criativo fictício um'], { dor_id: dorA, mensagem_id: msgB1 }))).toBeInstanceOf(PainelInvalido); // Mensagem de outra DOR
+    expect(await recusa(() => repo().mapearCriativos(['zz criativo fictício um'], { mensagem_id: msgB1 }))).toBeInstanceOf(PainelInvalido); // idem, sem trocar a DOR
+    await repo().mapearCriativos(['zz criativo fictício um'], { dor_id: dorB }); // só trocou a DOR: a Mensagem antiga não vale mais
+    expect(await criativo('zz criativo fictício um')).toMatchObject({ dor: 'Medo de multa', mensagem: null, modulo: 'Ponto' });
     await expect(repo().mapearCriativos(['nao-existe'], { dor_id: dorA })).rejects.toBeInstanceOf(PainelNotFound);
-    await expect(repo().mapearCriativos(['ad1 — cópia'], {})).rejects.toBeInstanceOf(PainelInvalido);
+    await expect(repo().mapearCriativos(['zz criativo fictício um'], {})).rejects.toBeInstanceOf(PainelInvalido);
     await expect(repo().mapearCriativos([], { dor_id: dorA })).rejects.toBeInstanceOf(PainelInvalido);
   });
 
@@ -127,37 +127,37 @@ run('criativos: DOR, Mensagem e Módulo (transação com rollback)', () => {
   });
 
   it('aplica a vários de uma vez e deixa em branco (null) o que não tem equivalente', async () => {
-    const r = await repo().mapearCriativos(['ad1 — cópia', 'outro criativo'], { dor_id: dorA, mensagem_id: msgA1, modulo_id: null });
+    const r = await repo().mapearCriativos(['zz criativo fictício um', 'zz criativo fictício dois'], { dor_id: dorA, mensagem_id: msgA1, modulo_id: null });
     expect(r.atualizados).toBe(2);
-    expect(await criativo('outro criativo')).toMatchObject({ dor: 'Gestão manual', mensagem: 'Planilha não escala', modulo: null });
-    await repo().mapearCriativos(['outro criativo'], { dor_id: null, mensagem_id: null, modulo_id: null });
-    expect(await criativo('outro criativo')).toMatchObject({ dor_id: null, dor: null, mensagem: null, modulo: null });
+    expect(await criativo('zz criativo fictício dois')).toMatchObject({ dor: 'Gestão manual', mensagem: 'Planilha não escala', modulo: null });
+    await repo().mapearCriativos(['zz criativo fictício dois'], { dor_id: null, mensagem_id: null, modulo_id: null });
+    expect(await criativo('zz criativo fictício dois')).toMatchObject({ dor_id: null, dor: null, mensagem: null, modulo: null });
   });
 
   it('os negócios herdam DOR, Mensagem e Módulo do criativo (e ficam em branco se o criativo não foi mapeado)', async () => {
-    await repo().mapearCriativos(['ad1 — cópia'], { dor_id: dorA, mensagem_id: msgA1, modulo_id: modPonto });
+    await repo().mapearCriativos(['zz criativo fictício um'], { dor_id: dorA, mensagem_id: msgA1, modulo_id: modPonto });
     const r = (await c().query(`select deal_id, termo_chave, dor, mensagem, modulo from analytics.negocios_criativo where deal_id between 98300001 and 98300005 order by deal_id`)).rows;
     expect(r.map((x) => [Number(x.deal_id), x.termo_chave, x.dor, x.mensagem, x.modulo])).toEqual([
-      [98300001, 'ad1 — cópia', 'Gestão manual', 'Planilha não escala', 'Ponto'],
-      [98300002, 'ad1 — cópia', 'Gestão manual', 'Planilha não escala', 'Ponto'],
-      [98300003, 'outro criativo', null, null, null],
+      [98300001, 'zz criativo fictício um', 'Gestão manual', 'Planilha não escala', 'Ponto'],
+      [98300002, 'zz criativo fictício um', 'Gestão manual', 'Planilha não escala', 'Ponto'],
+      [98300003, 'zz criativo fictício dois', null, null, null],
     ]);
   });
 
   it('remover é desativar: o item some dos relatórios (em branco), o mapa é guardado e restaurar traz tudo de volta', async () => {
     await repo().atualizarCriativoItem('modulo', modPonto, { ativo: false });
-    expect(await criativo('ad1 — cópia')).toMatchObject({ modulo: null, modulo_id: modPonto, dor: 'Gestão manual' }); // id guardado, nome em branco
-    await expect(repo().mapearCriativos(['ad1 — cópia'], { modulo_id: modPonto })).rejects.toBeInstanceOf(PainelInvalido); // não dá para escolher item removido
+    expect(await criativo('zz criativo fictício um')).toMatchObject({ modulo: null, modulo_id: modPonto, dor: 'Gestão manual' }); // id guardado, nome em branco
+    await expect(repo().mapearCriativos(['zz criativo fictício um'], { modulo_id: modPonto })).rejects.toBeInstanceOf(PainelInvalido); // não dá para escolher item removido
     await repo().atualizarCriativoItem('modulo', modPonto, { ativo: true });
-    expect(await criativo('ad1 — cópia')).toMatchObject({ modulo: 'Ponto' });
+    expect(await criativo('zz criativo fictício um')).toMatchObject({ modulo: 'Ponto' });
     // remover a DOR leva as Mensagens dela; restaurar uma Mensagem exige a DOR de volta
     await repo().atualizarCriativoItem('dor', dorA, { ativo: false });
-    expect(await criativo('ad1 — cópia')).toMatchObject({ dor: null, mensagem: null, modulo: 'Ponto' });
+    expect(await criativo('zz criativo fictício um')).toMatchObject({ dor: null, mensagem: null, modulo: 'Ponto' });
     await expect(repo().atualizarCriativoItem('mensagem', msgA1, { ativo: true })).rejects.toBeInstanceOf(PainelInvalido);
     await repo().atualizarCriativoItem('dor', dorA, { ativo: true });
-    expect(await criativo('ad1 — cópia')).toMatchObject({ dor: 'Gestão manual', mensagem: null }); // a Mensagem continua removida
+    expect(await criativo('zz criativo fictício um')).toMatchObject({ dor: 'Gestão manual', mensagem: null }); // a Mensagem continua removida
     await repo().atualizarCriativoItem('mensagem', msgA1, { ativo: true });
-    expect(await criativo('ad1 — cópia')).toMatchObject({ mensagem: 'Planilha não escala' });
+    expect(await criativo('zz criativo fictício um')).toMatchObject({ mensagem: 'Planilha não escala' });
     // criar de novo um nome removido restaura em vez de duplicar
     await repo().atualizarCriativoItem('modulo', modPonto, { ativo: false });
     expect(await repo().criarCriativoItem('modulo', 'ponto')).toEqual({ id: modPonto, restaurado: true });
@@ -175,7 +175,7 @@ run('criativos: DOR, Mensagem e Módulo (transação com rollback)', () => {
     expect(await denied(`delete from mkt.cri_mapa`)).toBe('42501');
     await c().query('reset role');
     await c().query('set local role orq_chat');
-    expect((await c().query(`select count(*)::int as n from analytics.criativos_meta where termo_chave = 'ad1 — cópia'`)).rows[0].n).toBe(1);
+    expect((await c().query(`select count(*)::int as n from analytics.criativos_meta where termo_chave = 'zz criativo fictício um'`)).rows[0].n).toBe(1);
     expect(await denied(`select * from mkt.cri_mapa`)).toBe('42501');
     expect(await denied(`insert into mkt.cri_dor (nome) values ('x')`)).toMatch(/42501|25006/);
     await c().query('reset role');
