@@ -203,7 +203,9 @@ export async function syncMetaDesempenho(
   opts: { desde: string; apply: boolean; origem?: 'agendada' | 'manual'; maxBlocos?: number; log?: (s: string) => void },
 ): Promise<MetaSyncResultado> {
   const entidade = `meta_insights_${conta.produto}`;
-  const marca = await store.marcaDagua(entidade);
+  // uma marca d'agua ANTERIOR ao inicio pedido (ex.: sobrou de uma carga que comecava antes) nao vale: comeca em `desde`
+  const salva = await store.marcaDagua(entidade);
+  const marca = salva && salva >= opts.desde ? salva : null;
   const { inicio, fim, modo } = intervalo(opts.desde, marca, undefined, META_REVISAO_DIAS);
   const blocos = inicio <= fim ? blocosDeDatas(inicio, fim, META_BLOCO_DIAS) : [];
   const jobId = opts.apply ? await store.iniciarJob(entidade, modo, opts.origem ?? 'manual') : '';

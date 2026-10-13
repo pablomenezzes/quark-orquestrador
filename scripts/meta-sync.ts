@@ -4,7 +4,7 @@
  *   npx tsx scripts/meta-sync.ts                      -> simulacao: le a Meta e mostra o que traria; NAO grava
  *   npx tsx scripts/meta-sync.ts --apply              -> grava no banco (papel orq_sync)
  *   --contas rh,clinic     quais contas (padrao: as duas)
- *   --desde 2025-01-01     primeiro dia da carga inicial
+ *   --desde 2026-01-01     primeiro dia da carga inicial (padrao: 2026-01-01)
  *   --max-blocos N         para depois de N blocos de 31 dias por conta (continua na proxima rodada)
  *   --so estrutura|desempenho
  * Variaveis (.env.local): META_ACCESS_TOKEN, META_AD_ACCOUNT_RH, META_AD_ACCOUNT_CLINIC e, com --apply, SYNC_DB_URL.
@@ -22,7 +22,7 @@ try {
 const argv = process.argv.slice(2);
 const apply = argv.includes('--apply');
 const opt = (n: string) => (argv.includes(n) ? argv[argv.indexOf(n) + 1] : undefined);
-const desde = opt('--desde') ?? '2025-01-01';
+const desde = opt('--desde') ?? '2026-01-01'; // decisao do Pablo (2026-10-13): a Meta so de 2026 em diante
 if (!/^\d{4}-\d{2}-\d{2}$/.test(desde)) {
   console.error('--desde precisa ser AAAA-MM-DD.');
   process.exit(1);

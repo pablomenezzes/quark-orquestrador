@@ -3,7 +3,7 @@ import {
   CAMPOS_INSIGHTS, META_VERSAO, MetaClient, MetaErro, STATUS_TODOS, chaveNomeMeta, mapAdDia, mapAnuncio, mapCampanha, mapConjunto,
   metaCredenciaisFromEnv, temAtividade, type FetchLike,
 } from '../src/datahub/meta/meta';
-import { META_REVISAO_DIAS } from '../src/datahub/meta/meta-sync';
+import { META_REVISAO_DIAS, syncMetaDesempenho } from '../src/datahub/meta/meta-sync';
 import { intervalo } from '../src/datahub/google/ga4-sync';
 
 const resp = (ok: boolean, status: number, body: unknown, uso?: unknown) => ({
@@ -108,6 +108,26 @@ describe('Meta: cliente', () => {
     await c.get('x');
     expect(esperas).toEqual([120_000]);
     expect(c.usoMaximo).toMatchObject({ callCount: 95, esperaMin: 2 });
+  });
+});
+
+describe('Meta: início da carga', () => {
+  const intervalos = async (marca: string | null, desde: string) => {
+    const lidos: Array<{ since: string; until: string }> = [];
+    const f: FetchLike = async (url) => {
+      lidos.push(JSON.parse(new URL(url).searchParams.get('time_range')!));
+      return resp(true, 200, { data: [] });
+    };
+    const store = { marcaDagua: async () => marca } as never;
+    await syncMetaDesempenho(new MetaClient('t', f as never, async () => {}), store, { id: '1', produto: 'rh' }, { desde, apply: false, maxBlocos: 1 });
+    return lidos[0]!;
+  };
+  it('uma marca d\'água anterior ao início pedido (sobra de uma carga que começava antes) é ignorada: começa em 2026-01-01', async () => {
+    expect((await intervalos('2025-07-05', '2026-01-01')).since).toBe('2026-01-01');
+  });
+  it('uma marca d\'água depois do início vale: relê só os últimos 28 dias', async () => {
+    const r = await intervalos('2026-06-10', '2026-01-01');
+    expect(r.since).toBe('2026-05-14'); // 2026-06-10 menos 27 dias
   });
 });
 
