@@ -24,6 +24,7 @@ export const BI_PAGINAS = [
   { id: 'safra', rotulo: 'Safra' },
   { id: 'canais', rotulo: 'Canais' },
   { id: 'ads', rotulo: 'Google Ads' },
+  { id: 'meta', rotulo: 'Meta Ads' },
   { id: 'site', rotulo: 'Site e páginas' },
   { id: 'qualidade', rotulo: 'Qualidade' },
 ] as const;
@@ -288,10 +289,12 @@ async function custoAds(db: Db, f: BiFiltros): Promise<{ total: Custo; meses: Ma
 const SOMA_FUNIL = ['leads', 'mql', 'sql', 'reuniao', 'proposta', 'ganhos', 'perdidos', 'abertos', 'mrr_criado', 'mrr_ganho', 'mrr_perdido', 'mrr_aberto'] as const;
 const somarFunil = (rows: Row[]): Row => Object.fromEntries(SOMA_FUNIL.map((k) => [k, rows.reduce((s, r) => s + n(r[k]), 0)]));
 /** Custo por etapa: investimento ÷ negócios que chegaram na etapa (null se ninguém chegou). */
-const custosEtapa = (inv: number, r: Row) => ({
-  cpl: razao(inv, n(r.leads)), c_mql: razao(inv, n(r.mql)), c_sql: razao(inv, n(r.sql)), c_reuniao: razao(inv, n(r.reuniao)),
-  c_proposta: razao(inv, n(r.proposta)), cac: razao(inv, n(r.ganhos)), roas: razao(n(r.mrr_ganho), inv),
-});
+const custosEtapa = (inv: number, r: Row) => {
+  // sem investimento (mês sem gasto, ou linha que não tem gasto próprio, como "negócios sem ligação") não existe custo: fica em branco, nunca R$ 0,00
+  const g = inv > 0 ? inv : null;
+  const cus = (v: unknown) => (g == null ? null : razao(g, n(v)));
+  return { cpl: cus(r.leads), c_mql: cus(r.mql), c_sql: cus(r.sql), c_reuniao: cus(r.reuniao), c_proposta: cus(r.proposta), cac: cus(r.ganhos), roas: g == null ? null : razao(n(r.mrr_ganho), g) };
+};
 const COL_CUSTOS: Coluna[] = [
   c('cpl', 'Custo por lead', 'brl2'), c('c_mql', 'Custo por MQL', 'brl2'), c('c_sql', 'Custo por SQL', 'brl2'), c('c_reuniao', 'Custo por Reunião Agendada', 'brl2'),
   c('c_proposta', 'Custo por proposta', 'brl2'), c('cac', 'Custo por ganho (CAC)', 'brl2'), c('roas', 'ROAS (MRR ganho ÷ investimento)', 'dec'),
@@ -336,6 +339,109 @@ const kpisGeral = (r: Row): KpiGeral[] => {
 function comparar(id: 'd30' | 'a1', rotulo: string, fp: BiFiltros, atual: number | null, anterior: number | null): Comparacao {
   const ok = atual != null && anterior != null;
   return { id, rotulo, periodo: `${fp.de} a ${fp.ate}`, valor: anterior, abs: ok ? atual - anterior : null, pct: ok && anterior !== 0 ? atual / anterior - 1 : null };
+}
+
+/* ---------- Meta Ads ---------- */
+const FONTE_META_ADS = 'Marketing [Meta ADS]';
+const AVISO_SEM_META = 'Não há dados da Meta neste período (a sincronização da Meta traz de 2025-01-01 até ontem).';
+const NOTA_META =
+  'Investimento e métricas = o que a Meta informa por anúncio e dia (contas QuarkRH e QuarkClinic; o filtro de Produto escolhe a conta). Leads e funil = negócios CRIADOS no período com Fonte do Lead "Marketing [Meta ADS]", ligados ao anúncio, conjunto e campanha pela tabela de ligação (1º o Meta Ad_id; depois campanha + nome; depois só o nome; nome repetido fica ambíguo e não é somado a nenhum anúncio): o filtro de Fonte não vale nesta página. Custo por etapa = investimento ÷ negócios que chegaram na etapa. Fórmulas: CPM = gasto ÷ impressões × 1000; CPC e CTR são dos cliques NO LINK; Connect Rate = visitas à página ÷ cliques no link (exige o Pixel); Hook rate = visualizações de 3 s ÷ impressões dos anúncios com vídeo; Hold rate = ThruPlays ÷ visualizações de 3 s; retenção = quem chegou a 25/50/75/95/100% ÷ reproduções do vídeo. Taxas se calculam das somas (nunca média de taxas).';
+/** Soma das métricas da Meta (alias da visão analytics.meta_desempenho_dia); as taxas saem disso, em taxasMeta. */
+const METRICAS_META = (a: string) => `sum(${a}.gasto)::float8 as gasto, sum(${a}.impressoes)::float8 as impressoes, sum(${a}.cliques_link)::float8 as cliques_link,
+       sum(${a}.visitas_pagina)::float8 as visitas, sum(${a}.leads_meta)::float8 as leads_meta, sum(${a}.video_reproducoes)::float8 as vplays, sum(${a}.video_3s)::float8 as v3s,
+       sum(${a}.video_p25)::float8 as p25, sum(${a}.video_p50)::float8 as p50, sum(${a}.video_p75)::float8 as p75, sum(${a}.video_p95)::float8 as p95, sum(${a}.video_p100)::float8 as p100,
+       sum(${a}.video_thruplay)::float8 as thru, coalesce(sum(${a}.impressoes) filter (where ${a}.video_reproducoes > 0 or ${a}.video_3s > 0), 0)::float8 as impr_video,
+       coalesce(sum(${a}.video_tempo_medio * ${a}.video_reproducoes), 0)::float8 as tempo_pond`;
+const taxasMeta = (r: Row) => ({
+  cpm: r.impressoes > 0 ? (n(r.gasto) / n(r.impressoes)) * 1000 : null, cpc: razao(n(r.gasto), n(r.cliques_link)), ctr: razao(n(r.cliques_link), n(r.impressoes)),
+  connect: razao(n(r.visitas), n(r.cliques_link)), hook: razao(n(r.v3s), n(r.impr_video)), hold: razao(n(r.thru), n(r.v3s)),
+  ret25: razao(n(r.p25), n(r.vplays)), ret50: razao(n(r.p50), n(r.vplays)), ret75: razao(n(r.p75), n(r.vplays)), ret95: razao(n(r.p95), n(r.vplays)), ret100: razao(n(r.p100), n(r.vplays)),
+  tempo: razao(n(r.tempo_pond), n(r.vplays)),
+});
+const COL_TAXAS_META: Coluna[] = [c('cpm', 'CPM', 'brl2'), c('cpc', 'CPC (link)', 'brl2'), c('ctr', 'CTR (link)', 'pct'), c('connect', 'Connect Rate', 'pct'), c('hook', 'Hook rate', 'pct'), c('hold', 'Hold rate', 'pct')];
+const COL_FUNIL_META: Coluna[] = [c('leads', 'Leads (Pipedrive)', 'int'), c('mql', 'MQL', 'int'), c('sql', 'Chegou em SQL', 'int'), c('reuniao', 'Chegou em Reunião Agendada', 'int'), c('proposta', 'Chegou em proposta', 'int'), c('ganhos', 'Ganhos', 'int')];
+const celulasFunilMeta = (r: Row) => ({ leads: n(r.leads), mql: n(r.mql), sql: n(r.sql), reuniao: n(r.reuniao), proposta: n(r.proposta), ganhos: n(r.ganhos) });
+const FUNIL_VAZIO: Row = Object.fromEntries(['leads', 'mql', 'sql', 'reuniao', 'proposta', 'ganhos', 'perdidos', 'abertos', 'mrr_criado', 'mrr_ganho', 'mrr_perdido', 'mrr_aberto'].map((k) => [k, 0]));
+/** Filtros dos NEGÓCIOS da Meta (alias d): os da página, menos o de Fonte, que aqui é sempre "Marketing [Meta ADS]". */
+function filtroMeta(f: BiFiltros, p: unknown[]): string[] {
+  const w = filtroSql({ ...f, fontes: undefined }, 'd', p);
+  p.push(FONTE_META_ADS);
+  w.push(`${FONTE} = $${p.length}`);
+  return w;
+}
+/** Filtros do GASTO (alias m, a visão meta_desempenho_dia): o período e, se houver, o produto (= a conta). */
+function filtroGasto(f: BiFiltros, p: unknown[]): string[] {
+  p.push(f.de, f.ate);
+  const w = [`m.dia between $${p.length - 1}::date and $${p.length}::date`];
+  if (f.produto) {
+    p.push(f.produto);
+    w.push(`m.produto = $${p.length}`);
+  }
+  return w;
+}
+/** Funil e MRR dos negócios da Meta agrupados por uma chave (texto) tirada da ligação ou do criativo. `chave` usa o alias n. */
+async function funilPorChave(db: Db, f: BiFiltros, chave: string, origem = 'analytics.negocios_meta'): Promise<Map<string | null, Row>> {
+  const p: unknown[] = [];
+  const w = filtroMeta(f, p);
+  const rows = await q(
+    db,
+    `with b as (select d.deal_id, (${chave})::text as chave, d.conta_como_lead, d.is_mql, d.status, d.valor
+                  from analytics.negocios_bi d join ${origem} n on n.deal_id = d.deal_id where ${w.join(' and ')}), ${MARCOS_CTE}
+     select b.chave, count(*) filter (where b.conta_como_lead)::int as leads, count(*) filter (where b.is_mql)::int as mql, count(*) filter (where m.sql)::int as sql,
+            count(*) filter (where m.reuniao)::int as reuniao, count(*) filter (where m.proposta)::int as proposta, count(*) filter (where b.status = 'won')::int as ganhos,
+            count(*) filter (where b.status = 'lost')::int as perdidos, count(*) filter (where b.status = 'open')::int as abertos, ${MRR_SQL('b')}
+       from b left join m on m.deal_id = b.deal_id group by 1`,
+    p,
+  );
+  return new Map(rows.map((r) => [r.chave as string | null, r]));
+}
+const somaFunil = (rows: Iterable<Row>): Row => somarFunil([...rows]);
+async function totalGastoMeta(db: Db, f: BiFiltros): Promise<Row> {
+  const p: unknown[] = [];
+  const w = filtroGasto(f, p);
+  return (await q(db, `select ${METRICAS_META('m')} from analytics.meta_desempenho_dia m where ${w.join(' and ')}`, p))[0] ?? {};
+}
+
+const NIVEIS_META = {
+  campanha: { id: 'campanha_id', nome: 'campanha', rotulo: 'Campanha', deal: 'n.campanha_id', ctx: [] as string[] },
+  conjunto: { id: 'conjunto_id', nome: 'conjunto', rotulo: 'Conjunto de anúncios', deal: 'n.conjunto_id', ctx: ['campanha'] },
+  anuncio: { id: 'anuncio_id', nome: 'anuncio', rotulo: 'Anúncio (criativo)', deal: 'n.anuncio_id', ctx: ['conjunto', 'campanha'] },
+} as const;
+type NivelMeta = keyof typeof NIVEIS_META;
+/** Uma linha por campanha, conjunto ou anúncio: investimento e métricas da Meta + o funil e o MRR dos negócios ligados a ele. */
+async function metaPorNivel(db: Db, f: BiFiltros, nivel: NivelMeta, limite: number): Promise<{ colunas: Coluna[]; linhas: Array<Record<string, string | number | null>>; barras: Array<{ rotulo: string; valor: number; detalhe: string }>; avisos: string[] }> {
+  const N = NIVEIS_META[nivel];
+  const p: unknown[] = [];
+  const w = filtroGasto(f, p);
+  p.push(limite);
+  const ctxSql = N.ctx.map((x) => `max(m.${x}) as ${x}`).join(', ');
+  const spend = await q(
+    db,
+    `select m.${N.id}::text as chave, max(m.${N.nome}) as nome${ctxSql ? `, ${ctxSql}` : ''}, ${METRICAS_META('m')}
+       from analytics.meta_desempenho_dia m where ${w.join(' and ')} and m.${N.id} is not null group by m.${N.id} order by sum(m.gasto) desc, 1 limit $${p.length}`,
+    p,
+  );
+  const [funil, tot] = await Promise.all([funilPorChave(db, f, N.deal), totalGastoMeta(db, f)]);
+  const usadas = new Set(spend.map((r) => r.chave as string));
+  const linha = (nome: string, id: string | null, ctx: Record<string, string | null>, m: Row, fn: Row) => ({
+    nome, id, ...ctx, gasto: n(m.gasto), impressoes: n(m.impressoes), cliques_link: n(m.cliques_link), ...taxasMeta(m), leads_meta: n(m.leads_meta),
+    ...celulasFunilMeta(fn), ...custosEtapa(n(m.gasto), { ...fn }), ...celulasMrr(fn),
+  });
+  const linhas: Array<Record<string, string | number | null>> = [linha('Total do período', null, Object.fromEntries(N.ctx.map((x) => [x, null])), tot, somaFunil(funil.values()))];
+  for (const r of spend) linhas.push(linha((r.nome as string) || `#${r.chave}`, r.chave as string, Object.fromEntries(N.ctx.map((x) => [x, (r[x] as string) ?? null])), r, funil.get(r.chave as string) ?? FUNIL_VAZIO));
+  const restantes = [...funil.entries()].filter(([k]) => k != null && !usadas.has(k)).map(([, v]) => v);
+  if (restantes.length) linhas.push(linha(`(demais ${restantes.length} com leads e sem gasto entre os ${limite} maiores)`, null, Object.fromEntries(N.ctx.map((x) => [x, null])), {}, somaFunil(restantes)));
+  if (funil.get(null)) linhas.push(linha(`(negócios sem ligação a ${N.rotulo.toLowerCase()})`, null, Object.fromEntries(N.ctx.map((x) => [x, null])), {}, funil.get(null)!));
+  const colunas = [c('nome', N.rotulo), c('id', 'ID'), ...N.ctx.map((x) => c(x, x === 'campanha' ? 'Campanha' : 'Conjunto')), c('gasto', 'Investimento', 'brl'), c('impressoes', 'Impressões', 'int'), c('cliques_link', 'Cliques no link', 'int'),
+    ...COL_TAXAS_META, c('leads_meta', 'Leads (Meta)', 'int'), ...COL_FUNIL_META, ...COL_CUSTOS, ...colunasMrr()];
+  const avisos: string[] = [];
+  if (!spend.length) avisos.push(AVISO_SEM_META);
+  if (spend.length === limite) avisos.push(`Mostra os ${limite} com maior investimento; o total considera todos.`);
+  return {
+    colunas, linhas,
+    barras: spend.slice(0, 10).map((r) => ({ rotulo: (r.nome as string) || `#${r.chave}`, valor: n(r.gasto), detalhe: `${fmtInt(n((funil.get(r.chave as string) ?? FUNIL_VAZIO).leads))} leads · ${fmtInt(n(r.cliques_link))} cliques no link · CPM R$ ${(taxasMeta(r).cpm ?? 0).toFixed(2).replace('.', ',')}` })),
+    avisos,
+  };
 }
 
 const ETAPAS_URL_COLUNAS: Coluna[] = [
@@ -1188,6 +1294,233 @@ export const BI_ANALISES: BiAnalise[] = [
           linhas: rows.map((r) => ({ campanha: (r.campanha as string) || '(sem campanha)', id: r.campanha_id || null, custo: n(r.custo), part: razao(n(r.custo), total), cliques: n(r.cliques), impressoes: n(r.impressoes), cpc: razao(n(r.custo), n(r.cliques)) })),
         },
         avisos: rows.length ? [] : [AVISO_SEM_CUSTO],
+      };
+    },
+  },
+
+  /* ===================== META ADS (custo e desempenho da Meta + funil dos leads ligados ao anúncio) ===================== */
+  {
+    id: 'meta-resumo',
+    pagina: 'meta',
+    titulo: 'Meta Ads: visão geral do período',
+    pergunta: 'Quanto foi investido na Meta, com que desempenho e o que isso trouxe, do lead ao ganho?',
+    como_ler: `Resumo de todo o período filtrado. ${NOTA_META}`,
+    largura: 'cheia',
+    async rodar(db, f) {
+      const [g, funil] = await Promise.all([totalGastoMeta(db, f), funilPorChave(db, f, 'n.deal_id')]);
+      const t = somaFunil(funil.values());
+      const inv = n(g.gasto);
+      const x = taxasMeta(g);
+      const k = custosEtapa(inv, t);
+      const itens = [
+        { id: 'invest', rotulo: 'Investimento', valor: inv, formato: 'brl' as const, dica: 'Gasto informado pela Meta no período' },
+        { id: 'impressoes', rotulo: 'Impressões', valor: n(g.impressoes), formato: 'int' as const },
+        { id: 'cliques_link', rotulo: 'Cliques no link', valor: n(g.cliques_link), formato: 'int' as const },
+        { id: 'cpm', rotulo: 'CPM', valor: x.cpm, formato: 'brl2' as const, dica: 'Gasto ÷ impressões × 1000' },
+        { id: 'cpc', rotulo: 'CPC (link)', valor: x.cpc, formato: 'brl2' as const, dica: 'Gasto ÷ cliques no link' },
+        { id: 'ctr', rotulo: 'CTR (link)', valor: x.ctr, formato: 'pct' as const, dica: 'Cliques no link ÷ impressões' },
+        { id: 'connect', rotulo: 'Connect Rate', valor: x.connect, formato: 'pct' as const, dica: 'Visitas à página ÷ cliques no link' },
+        { id: 'hook', rotulo: 'Hook rate', valor: x.hook, formato: 'pct' as const, dica: 'Visualizações de 3 s ÷ impressões dos anúncios com vídeo' },
+        { id: 'hold', rotulo: 'Hold rate', valor: x.hold, formato: 'pct' as const, dica: 'ThruPlays ÷ visualizações de 3 s' },
+        { id: 'leads_meta', rotulo: 'Leads (Meta)', valor: n(g.leads_meta), formato: 'int' as const, dica: 'Leads que a Meta atribui aos anúncios' },
+        { id: 'leads', rotulo: 'Leads (Pipedrive)', valor: n(t.leads), formato: 'int' as const, dica: 'Negócios da fonte Meta ADS que contam como lead' },
+        { id: 'mql', rotulo: 'MQL', valor: n(t.mql), formato: 'int' as const },
+        { id: 'sql', rotulo: 'Chegou em SQL', valor: n(t.sql), formato: 'int' as const },
+        { id: 'reuniao', rotulo: 'Chegou em Reunião Agendada', valor: n(t.reuniao), formato: 'int' as const },
+        { id: 'proposta', rotulo: 'Chegou em proposta', valor: n(t.proposta), formato: 'int' as const },
+        { id: 'ganhos', rotulo: 'Ganhos', valor: n(t.ganhos), formato: 'int' as const },
+        { id: 'cpl', rotulo: 'Custo por lead', valor: k.cpl, formato: 'brl2' as const, dica: 'Investimento ÷ leads do Pipedrive' },
+        { id: 'c_mql', rotulo: 'Custo por MQL', valor: k.c_mql, formato: 'brl2' as const },
+        { id: 'c_sql', rotulo: 'Custo por SQL', valor: k.c_sql, formato: 'brl2' as const },
+        { id: 'c_reuniao', rotulo: 'Custo por Reunião Agendada', valor: k.c_reuniao, formato: 'brl2' as const },
+        { id: 'c_proposta', rotulo: 'Custo por proposta', valor: k.c_proposta, formato: 'brl2' as const },
+        { id: 'cac', rotulo: 'Custo por ganho (CAC)', valor: k.cac, formato: 'brl2' as const },
+        { id: 'roas', rotulo: 'ROAS', valor: k.roas, formato: 'dec' as const, dica: 'MRR ganho ÷ investimento' },
+        ...mrrKpis(t),
+      ];
+      return {
+        grafico: { tipo: 'kpis', itens },
+        tabela: { colunas: [c('indicador', 'Indicador'), c('valor', 'Valor')], linhas: itens.map((i) => ({ indicador: i.rotulo, valor: i.valor == null ? '—' : i.formato === 'int' ? String(i.valor) : i.valor.toFixed(i.formato === 'pct' ? 4 : 2) })) },
+        avisos: inv > 0 ? [] : [AVISO_SEM_META],
+      };
+    },
+  },
+  {
+    id: 'meta-funil-custos',
+    pagina: 'meta',
+    titulo: 'Funil da Meta e custo de cada etapa',
+    pergunta: 'Em que etapa o funil perde força e quanto custa chegar em cada uma?',
+    como_ler: `Cada linha é uma etapa do funil dos leads da fonte Meta ADS. "Passo" = dos que chegaram na etapa anterior, quantos chegaram nesta (nunca passa de 100%). "Chegou em X" inclui quem chegou em X ou além; ganhos vêm do Status. ${NOTA_META}`,
+    largura: 'cheia',
+    async rodar(db, f) {
+      const [{ colunas, avisos }, g] = await Promise.all([funisPorFonte(db, f, 6, FONTE_META_ADS), totalGastoMeta(db, f)]);
+      const k = colunas.find((x) => x.total);
+      const inv = n(g.gasto);
+      const linhas = k ? ETAPAS_FUNIL.map((etapa, i) => ({ etapa, negocios: k.valores[i]!, pct_leads: razao(k.valores[i]!, k.leads), passo: k.passos[i] ?? null, custo: razao(inv, k.valores[i]!) })) : [];
+      if (inv <= 0) avisos.push(AVISO_SEM_META);
+      return {
+        grafico: { tipo: 'barras', formato: 'brl2', itens: linhas.filter((l) => l.custo != null).map((l) => ({ rotulo: l.etapa, valor: l.custo!, detalhe: `${fmtInt(l.negocios)} negócios · ${pct(l.pct_leads)} dos leads` })) },
+        tabela: { colunas: [c('etapa', 'Etapa'), c('negocios', 'Negócios', 'int'), c('pct_leads', '% dos leads', 'pct'), c('passo', 'Passo (da etapa anterior)', 'pct'), c('custo', 'Custo da etapa', 'brl2')], linhas },
+        avisos,
+      };
+    },
+  },
+  {
+    id: 'meta-por-mes',
+    pagina: 'meta',
+    titulo: 'Meta Ads mês a mês: investimento, desempenho e custo por etapa',
+    pergunta: 'Como o investimento, o CPM, o CPC, o CTR, o Connect Rate e o custo por lead, MQL, SQL, Reunião Agendada, proposta e ganho evoluem a cada mês?',
+    como_ler: `O gráfico mostra o investimento por mês. A tabela traz, por mês, o desempenho da Meta (investimento, impressões, cliques no link, CPM, CPC, CTR, Connect, Hook e Hold), o funil dos negócios CRIADOS no mês, o custo por etapa, o ROAS e o MRR. Meses recentes têm negócios abertos: o custo por ganho deles tende a cair. ${NOTA_META}`,
+    largura: 'cheia',
+    async rodar(db, f) {
+      const p: unknown[] = [];
+      const w = filtroGasto(f, p);
+      const [gastoMes, rows] = await Promise.all([
+        q(db, `select to_char(m.dia, 'YYYY-MM') as mes, ${METRICAS_META('m')} from analytics.meta_desempenho_dia m where ${w.join(' and ')} group by 1 order by 1`, p),
+        safras(db, f, FONTE_META_ADS),
+      ]);
+      const porMes = new Map(rows.map((r) => [r.safra as string, r]));
+      const gm = new Map(gastoMes.map((r) => [r.mes as string, r]));
+      const meses = [...new Set([...gm.keys(), ...porMes.keys()])].sort();
+      const tot = await totalGastoMeta(db, f);
+      const cel = (mes: string, g: Row, r: Row) => ({
+        mes, gasto: n(g.gasto), impressoes: n(g.impressoes), cliques_link: n(g.cliques_link), ...taxasMeta(g), leads_meta: n(g.leads_meta),
+        ...celulasFunilMeta(r), ...custosEtapa(n(g.gasto), r), ...celulasMrr(r),
+      });
+      const linhas = meses.map((m) => cel(m, gm.get(m) ?? {}, porMes.get(m) ?? FUNIL_VAZIO));
+      linhas.push(cel('Total do período', tot, somarFunil(rows)));
+      return {
+        grafico: { tipo: 'colunas', categorias: meses, formato: 'brl', series: [{ id: 'invest', nome: 'Investimento', slot: 1, valores: meses.map((m) => n(gm.get(m)?.gasto)) }] },
+        tabela: { colunas: [c('mes', 'Mês'), c('gasto', 'Investimento', 'brl'), c('impressoes', 'Impressões', 'int'), c('cliques_link', 'Cliques no link', 'int'), ...COL_TAXAS_META, c('leads_meta', 'Leads (Meta)', 'int'), ...COL_FUNIL_META, ...COL_CUSTOS, ...colunasMrr()], linhas },
+        avisos: gastoMes.length ? [] : [AVISO_SEM_META],
+      };
+    },
+  },
+  {
+    id: 'meta-leads-mes',
+    pagina: 'meta',
+    titulo: 'Meta Ads mês a mês: leads e funil',
+    pergunta: 'Quantos leads da Meta viram MQL, SQL, Reunião Agendada, proposta e ganho em cada mês?',
+    como_ler: `Negócios da fonte Meta ADS agrupados pelo mês em que foram CRIADOS; as porcentagens são sobre os leads do mês. ${NOTA_META}`,
+    largura: 'cheia',
+    async rodar(db, f) {
+      const rows = await safras(db, f, FONTE_META_ADS);
+      const avisos = await avisoHistorico(db, f);
+      if (rows.length && rows.every((r) => n(r.sql) + n(r.reuniao) + n(r.proposta) === 0)) avisos.unshift(SEM_MARCOS);
+      return {
+        grafico: {
+          tipo: 'colunas', categorias: rows.map((r) => r.safra as string),
+          series: [
+            { id: 'leads', nome: 'Leads', slot: 1, valores: rows.map((r) => n(r.leads)) },
+            { id: 'mql', nome: 'MQL', slot: 2, valores: rows.map((r) => n(r.mql)) },
+            { id: 'ganhos', nome: 'Ganhos', slot: 3, valores: rows.map((r) => n(r.ganhos)) },
+          ],
+        },
+        tabela: {
+          colunas: [c('mes', 'Mês de criação'), ...COL_FUNIL_META, c('perdidos', 'Perdidos', 'int'), c('abertos', 'Abertos', 'int'), c('pmql', '% MQL', 'pct'), c('psql', '% chegou SQL', 'pct'), c('preun', '% chegou Reunião Agendada', 'pct'), c('pprop', '% chegou proposta', 'pct'), c('pganho', '% ganho', 'pct'), c('taxa', 'Taxa de ganho', 'pct'), ...colunasMrr()],
+          linhas: rows.map((r) => ({
+            mes: r.safra, ...celulasFunilMeta(r), perdidos: n(r.perdidos), abertos: n(r.abertos), pmql: razao(n(r.mql), n(r.leads)), psql: razao(n(r.sql), n(r.leads)), preun: razao(n(r.reuniao), n(r.leads)),
+            pprop: razao(n(r.proposta), n(r.leads)), pganho: razao(n(r.ganhos), n(r.leads)), taxa: razao(n(r.ganhos), n(r.ganhos) + n(r.perdidos)), ...celulasMrr(r),
+          })),
+        },
+        avisos,
+      };
+    },
+  },
+  ...(['campanha', 'conjunto', 'anuncio'] as const).map((nivel): BiAnalise => ({
+    id: `meta-${nivel === 'anuncio' ? 'criativos' : nivel === 'conjunto' ? 'conjuntos' : 'campanhas'}`,
+    pagina: 'meta',
+    titulo: nivel === 'campanha' ? 'Meta Ads por campanha' : nivel === 'conjunto' ? 'Meta Ads por conjunto de anúncios' : 'Meta Ads por anúncio (criativo)',
+    pergunta: nivel === 'campanha' ? 'Quais campanhas gastam mais e quais trazem leads, ganhos e MRR?' : nivel === 'conjunto' ? 'Quais públicos (conjuntos) performam melhor, do clique ao ganho?' : 'Quais criativos performam melhor, do CPM ao ganho?',
+    como_ler: `Os ${nivel === 'anuncio' ? 40 : 30} ${nivel === 'campanha' ? 'campanhas' : nivel === 'conjunto' ? 'conjuntos' : 'anúncios'} com maior investimento no período, com ID e nome juntos. As colunas do funil vêm dos negócios do Pipedrive ligados a ${nivel === 'campanha' ? 'cada campanha' : nivel === 'conjunto' ? 'cada conjunto' : 'cada anúncio'}: negócios que só puderam ser ligados a um nível acima (ambíguos, só campanha...) aparecem na linha "negócios sem ligação" e entram no total. ${NOTA_META}`,
+    largura: 'cheia',
+    async rodar(db, f) {
+      const r = await metaPorNivel(db, f, nivel, nivel === 'anuncio' ? 40 : 30);
+      return { grafico: { tipo: 'barras', formato: 'brl', itens: r.barras }, tabela: { colunas: r.colunas, linhas: r.linhas }, avisos: r.avisos };
+    },
+  })),
+  {
+    id: 'meta-video',
+    pagina: 'meta',
+    titulo: 'Vídeos: gancho, retenção e tempo assistido',
+    pergunta: 'Quais vídeos seguram a atenção até o fim?',
+    como_ler: `Só anúncios com reprodução de vídeo no período (os 20 com maior investimento). Hook rate = visualizações de 3 s ÷ impressões; Hold rate = ThruPlays ÷ visualizações de 3 s; retenção = parte das reproduções que chegou a 25%, 50%, 75%, 95% e 100% do vídeo (cor mais escura = maior retenção em cada coluna); tempo médio = segundos assistidos por reprodução (média ponderada pelas reproduções). ${NOTA_META}`,
+    largura: 'cheia',
+    async rodar(db, f) {
+      const p: unknown[] = [];
+      const w = filtroGasto(f, p);
+      const rows = await q(
+        db,
+        `select m.anuncio_id::text as chave, max(m.anuncio) as nome, max(m.campanha) as campanha, ${METRICAS_META('m')}
+           from analytics.meta_desempenho_dia m where ${w.join(' and ')} group by m.anuncio_id having sum(m.video_reproducoes) > 0 order by sum(m.gasto) desc limit 20`,
+        p,
+      );
+      const x = rows.map((r) => ({ r, t: taxasMeta(r) }));
+      return {
+        grafico: { tipo: 'matriz', colunas: ['Hook', 'Hold', '25%', '50%', '75%', '95%', '100%'], formato: 'pct', escala: 'coluna', linhas: x.map(({ r, t }) => ({ rotulo: (r.nome as string) || `#${r.chave}`, detalhe: `R$ ${n(r.gasto).toFixed(0)} · ${fmtInt(n(r.vplays))} reproduções`, valores: [t.hook, t.hold, t.ret25, t.ret50, t.ret75, t.ret95, t.ret100] })) },
+        tabela: {
+          colunas: [c('nome', 'Anúncio'), c('id', 'ID'), c('campanha', 'Campanha'), c('gasto', 'Investimento', 'brl'), c('impressoes', 'Impressões', 'int'), c('vplays', 'Reproduções', 'int'), c('v3s', 'Visualizações de 3 s', 'int'), c('thru', 'ThruPlays', 'int'), c('hook', 'Hook rate', 'pct'), c('hold', 'Hold rate', 'pct'), c('ret25', 'Retenção 25%', 'pct'), c('ret50', 'Retenção 50%', 'pct'), c('ret75', 'Retenção 75%', 'pct'), c('ret95', 'Retenção 95%', 'pct'), c('ret100', 'Retenção 100%', 'pct'), c('tempo', 'Tempo médio (s)', 'dec')],
+          linhas: x.map(({ r, t }) => ({ nome: r.nome, id: r.chave, campanha: r.campanha, gasto: n(r.gasto), impressoes: n(r.impressoes), vplays: n(r.vplays), v3s: n(r.v3s), thru: n(r.thru), hook: t.hook, hold: t.hold, ret25: t.ret25, ret50: t.ret50, ret75: t.ret75, ret95: t.ret95, ret100: t.ret100, tempo: t.tempo })),
+        },
+        avisos: rows.length ? [] : ['Nenhum anúncio com reprodução de vídeo neste período.'],
+      };
+    },
+  },
+  ...(['dor', 'modulo'] as const).map((eixo): BiAnalise => ({
+    id: eixo === 'dor' ? 'meta-dor' : 'meta-modulo',
+    pagina: 'meta',
+    titulo: eixo === 'dor' ? 'Meta Ads por DOR e Mensagem' : 'Meta Ads por Módulo de Interesse',
+    pergunta: eixo === 'dor' ? 'Que dores e mensagens trazem mais leads, ganhos e MRR, e a que custo?' : 'Que módulos de interesse trazem mais leads, ganhos e MRR, e a que custo?',
+    como_ler: `${eixo === 'dor' ? 'DOR, Mensagem' : 'Módulo de Interesse'} vêm do agrupamento virtual dos criativos feito na aba "Criativos" do Painel de Dados (a ligação é pelo NOME do criativo: UTM Term do negócio e nome do anúncio, sem diferenciar maiúsculas e espaços). "(em branco)" = criativos ainda sem esse mapeamento, inclusive anúncios que não geraram nenhum lead. Os leads e o funil são dos negócios CRIADOS no período; o investimento, dos anúncios com esse nome. ${NOTA_META}`,
+    largura: 'cheia',
+    async rodar(db, f) {
+      const BR = `'(em branco)'`;
+      const campoD = eixo === 'dor' ? `coalesce(n.dor, ${BR}) || ' › ' || coalesce(n.mensagem, ${BR})` : `coalesce(n.modulo, ${BR})`;
+      const campoG = eixo === 'dor' ? `coalesce(cm.dor, ${BR}) || ' › ' || coalesce(cm.mensagem, ${BR})` : `coalesce(cm.modulo, ${BR})`;
+      const p: unknown[] = [];
+      const w = filtroGasto(f, p);
+      const [gasto, funil] = await Promise.all([
+        q(db, `select ${campoG} as chave, ${METRICAS_META('m')} from analytics.meta_desempenho_dia m left join analytics.criativos_meta cm on cm.termo_chave = mkt.chave_criativo(m.anuncio) where ${w.join(' and ')} group by 1`, p),
+        funilPorChave(db, f, campoD, 'analytics.negocios_criativo'),
+      ]);
+      const gm = new Map(gasto.map((r) => [r.chave as string, r]));
+      const chaves = [...new Set([...gm.keys(), ...[...funil.keys()].filter((k): k is string => k != null)])];
+      const linhas = chaves
+        .map((chave) => { const g = gm.get(chave) ?? {}; const fn = funil.get(chave) ?? FUNIL_VAZIO; return { chave, g, fn }; })
+        .sort((a, b) => n(b.g.gasto) - n(a.g.gasto) || n(b.fn.leads) - n(a.fn.leads))
+        .map(({ chave, g, fn }) => ({ nome: chave, gasto: n(g.gasto), impressoes: n(g.impressoes), cliques_link: n(g.cliques_link), ...taxasMeta(g), ...celulasFunilMeta(fn), ...custosEtapa(n(g.gasto), fn), ...celulasMrr(fn) }));
+      return {
+        grafico: { tipo: 'barras', formato: 'brl', itens: linhas.filter((l) => l.gasto > 0).slice(0, 12).map((l) => ({ rotulo: l.nome, valor: l.gasto, detalhe: `${fmtInt(l.leads)} leads · ${fmtInt(l.ganhos)} ganhos · MRR ganho R$ ${fmtInt(l.valor)}` })) },
+        tabela: { colunas: [c('nome', eixo === 'dor' ? 'DOR › Mensagem' : 'Módulo de Interesse'), c('gasto', 'Investimento', 'brl'), c('impressoes', 'Impressões', 'int'), c('cliques_link', 'Cliques no link', 'int'), ...COL_TAXAS_META, ...COL_FUNIL_META, ...COL_CUSTOS, ...colunasMrr()], linhas },
+        avisos: gasto.length ? [] : [AVISO_SEM_META],
+      };
+    },
+  })),
+  {
+    id: 'meta-cobertura',
+    pagina: 'meta',
+    titulo: 'Cobertura: como os negócios foram ligados à Meta',
+    pergunta: 'Que parte dos negócios da Meta conseguimos ligar a um anúncio, e por qual método?',
+    como_ler: 'Por mês de criação do negócio, quantos negócios do Pipedrive com cara de Meta foram ligados por cada método: ad_id (o ID do anúncio no Pipedrive, o principal), conjunto_id, campanha_id+nome (campanha pelo ID e anúncio pelo nome), nome (só pelos nomes das UTMs), campanha_id/campanha_nome (só a campanha), ambiguo (o nome bate com mais de um anúncio) e sem_ligacao. A cor do mapa mostra a parte de cada método no mês (mais escuro = maior). Antes de ago/2025 o Pipedrive quase não guarda o ID do anúncio, então a ligação depende dos nomes.',
+    largura: 'cheia',
+    async rodar(db, f) {
+      const rows = await q(
+        db,
+        `select mes, metodo, sum(negocios)::int as negocios from analytics.meta_cobertura where mes >= $1 and mes <= $2 group by 1, 2 order by 1`,
+        [f.de.slice(0, 7), f.ate.slice(0, 7)],
+      );
+      const metodos = ['ad_id', 'conjunto_id', 'campanha_id+nome', 'nome', 'campanha_id', 'campanha_nome', 'ambiguo', 'sem_ligacao'];
+      const meses = [...new Set(rows.map((r) => r.mes as string))].sort();
+      const val = (m: string, k: string) => n(rows.find((r) => r.mes === m && r.metodo === k)?.negocios);
+      const total = (m: string) => metodos.reduce((s, k) => s + val(m, k), 0);
+      const ligados = (m: string) => val(m, 'ad_id') + val(m, 'conjunto_id') + val(m, 'campanha_id+nome') + val(m, 'nome');
+      return {
+        grafico: { tipo: 'matriz', colunas: metodos, formato: 'pct', escala: 'linha', linhas: meses.map((m) => ({ rotulo: m, detalhe: `${fmtInt(total(m))} negócios`, valores: metodos.map((k) => razao(val(m, k), total(m))) })) },
+        tabela: {
+          colunas: [c('mes', 'Mês de criação'), c('total', 'Negócios', 'int'), ...metodos.map((k) => c(k, k, 'int')), c('pligado', '% ligado a anúncio', 'pct')],
+          linhas: meses.map((m) => ({ mes: m, total: total(m), ...Object.fromEntries(metodos.map((k) => [k, val(m, k)])), pligado: razao(ligados(m), total(m)) })),
+        },
+        avisos: rows.length ? [] : ['Ainda não há ligação calculada (rode a sincronização da Meta).'],
       };
     },
   },

@@ -366,7 +366,7 @@ run('BI (transação com rollback)', () => {
         expect(Array.isArray(r.avisos), a.id).toBe(true);
       }
     }
-  });
+  }, 180_000); // ~45 análises x 4 conjuntos de filtros, várias lendo dados reais da Meta e do Google: passa de 30 s
 
   it('as opções dos filtros vêm do banco: fontes e tipos com ID e nome, e a seleção fixa marcada', async () => {
     const o = await repo().opcoes();
@@ -376,6 +376,6 @@ run('BI (transação com rollback)', () => {
     expect(nomes(o.tipos)).toEqual(expect.arrayContaining(['Marketing'])); // seleção fixa do Tipo do Lead
     expect(o.fontes.every((x) => /^\d+$/.test(x.id))).toBe(true);
     expect(repo().catalogo().length).toBe(BI_ANALISES.length);
-    expect(o.paginas.map((p) => p.id)).toEqual(['geral', 'safra', 'canais', 'ads', 'site', 'qualidade']);
+    expect(o.paginas.map((p) => p.id)).toEqual(['geral', 'safra', 'canais', 'ads', 'meta', 'site', 'qualidade']);
   });
 });
