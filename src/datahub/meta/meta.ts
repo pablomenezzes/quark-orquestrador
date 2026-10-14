@@ -97,6 +97,13 @@ export class MetaClient {
     }
   }
 
+  /** Depois de uma pausa para a cota esfriar, deixa o cliente voltar a chamar (so a rodada autorizada em curso chama isto). */
+  liberarParada(): void {
+    this.parada = null;
+    this.usoAtual = { callCount: 0, cpu: 0, tempo: 0, esperaMin: 0 };
+    this.throttle = { app: 0, conta: 0, nivel: this.throttle.nivel };
+  }
+
   /** O maior percentual de uso visto na ULTIMA resposta (chamadas, cpu, tempo, throttle de insights do app e da conta). */
   usoPct(): number {
     const u = this.usoAtual;
@@ -231,8 +238,11 @@ export function mapAdDia(r: any, conta: string): AdDia {
     video_tempo_medio: tempo == null ? null : dec2(tempo),
   };
 }
-/** Linhas sem gasto, impressoes nem cliques nao sao guardadas (economia de espaco). */
-export const temAtividade = (a: AdDia) => a.gasto > 0 || a.impressoes > 0 || a.cliques > 0;
+/**
+ * Linhas sem gasto, impressoes, cliques, leads nem visitas nao sao guardadas (economia de espaco). Leads e visitas contam: a Meta atribui
+ * conversoes ao dia do anuncio mesmo sem impressao nesse dia, e descartar essas linhas fazia a soma dos leads ficar abaixo do total da conta.
+ */
+export const temAtividade = (a: AdDia) => a.gasto > 0 || a.impressoes > 0 || a.cliques > 0 || a.leads_meta > 0 || a.visitas_pagina > 0;
 
 /* ---------- consultas ---------- */
 const filtroStatus = () => JSON.stringify(STATUS_TODOS);

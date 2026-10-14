@@ -58,6 +58,8 @@ describe('Meta: mapeamento', () => {
     expect(d).toMatchObject({ video_reproducoes: 0, video_3s: 0, video_tempo_medio: null, gasto: 0 });
     expect(temAtividade(d)).toBe(false);
     expect(temAtividade({ ...d, impressoes: 1 })).toBe(true);
+    expect(temAtividade({ ...d, leads_meta: 1 })).toBe(true); // lead atribuído a um dia sem impressão ainda é lead da conta
+    expect(temAtividade({ ...d, visitas_pagina: 1 })).toBe(true);
   });
   it('pede todos os campos de vídeo e não pede objetos excluídos (a Meta recusa)', () => {
     for (const f of ['video_p25_watched_actions', 'video_p100_watched_actions', 'video_thruplay_watched_actions', 'video_play_actions', 'inline_link_clicks', 'reach']) expect(CAMPOS_INSIGHTS).toContain(f);

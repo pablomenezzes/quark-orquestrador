@@ -10,7 +10,7 @@ describe('Meta: cliente somente leitura (segurança)', () => {
   const fonte = ler('src/datahub/meta/meta.ts');
 
   it('a classe só tem get e todas (nenhum método de escrita) e nenhum verbo de escrita aparece no código', () => {
-    const metodos = Object.getOwnPropertyNames(MetaClient.prototype).filter((n) => n !== 'constructor' && !n.startsWith('lerUso') && !n.startsWith('lerThrottle') && n !== 'usoPct').sort();
+    const metodos = Object.getOwnPropertyNames(MetaClient.prototype).filter((n) => n !== 'constructor' && !n.startsWith('lerUso') && !n.startsWith('lerThrottle') && n !== 'usoPct' && n !== 'liberarParada').sort();
     expect(metodos).toEqual(['get', 'todas']);
     const codigo = fonte.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
     expect(codigo).not.toMatch(/\b(POST|PUT|PATCH|DELETE)\b/);

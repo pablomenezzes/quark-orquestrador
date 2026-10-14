@@ -50,6 +50,18 @@ export function blocosMensais(de: string, ate: string): Array<{ inicio: string; 
   return out;
 }
 
+/** Blocos de `dias` dias corridos (o ultimo pode ser menor): a leitura da Meta anda de 7 em 7 dias e, se parar por cota, repete so o bloco de 7 dias. */
+export const DIAS_POR_BLOCO = 7;
+export function blocosDeDias(de: string, ate: string, dias = DIAS_POR_BLOCO): Array<{ inicio: string; fim: string }> {
+  const out: Array<{ inicio: string; fim: string }> = [];
+  const soma = (d: string, k: number) => new Date(Date.parse(`${d}T00:00:00Z`) + k * 86_400_000).toISOString().slice(0, 10);
+  for (let ini = de; ini <= ate; ini = soma(ini, dias)) {
+    const fim = soma(ini, dias - 1);
+    out.push({ inicio: ini, fim: fim < ate ? fim : ate });
+  }
+  return out;
+}
+
 export interface Totais { gasto: number; impressoes: number; cliques: number; leads: number }
 export const totaisDe = (rows: Array<Pick<AdDia, 'gasto' | 'impressoes' | 'cliques' | 'leads_meta'>>): Totais => ({
   gasto: Math.round(rows.reduce((s, r) => s + Number(r.gasto), 0) * 100) / 100,
@@ -132,7 +144,7 @@ export const CARTAO_TEXTO = (c: CartaoRodada): string => {
     `Duracao da simulacao: ${c.duracao_s} s`,
     `Completude: ${Object.entries(c.completude).map(([k, v]) => `${k}: ${f(v)}`).join('; ') || 'sem lacunas'}`,
     `Reconciliacao (linhas x total da conta): gasto ${r.linhas.gasto.toFixed(2)} x ${r.conta.gasto.toFixed(2)} (dif ${r.diferenca.gasto.toFixed(2)}); impressoes ${f(r.linhas.impressoes)} x ${f(r.conta.impressoes)} (dif ${r.diferenca.impressoes}); cliques ${f(r.linhas.cliques)} x ${f(r.conta.cliques)} (dif ${r.diferenca.cliques}); leads ${f(r.linhas.leads)} x ${f(r.conta.leads)} (dif ${r.diferenca.leads}) - ${r.observacao}`,
-    ...(r.por_mes ?? []).map((m) => `  mes ${m.mes}: linhas x conta: gasto ${m.linhas.gasto.toFixed(2)} x ${m.conta.gasto.toFixed(2)}; impressoes ${f(m.linhas.impressoes)} x ${f(m.conta.impressoes)}; cliques ${f(m.linhas.cliques)} x ${f(m.conta.cliques)}; leads ${f(m.linhas.leads)} x ${f(m.conta.leads)}${m.explicada ? '' : '  <- DIFERENCA'}`),
+    ...(r.por_mes ?? []).map((m) => `  ${m.mes}: linhas x conta: gasto ${m.linhas.gasto.toFixed(2)} x ${m.conta.gasto.toFixed(2)}; impressoes ${f(m.linhas.impressoes)} x ${f(m.conta.impressoes)}; cliques ${f(m.linhas.cliques)} x ${f(m.conta.cliques)}; leads ${f(m.linhas.leads)} x ${f(m.conta.leads)}${m.explicada ? '' : '  <- DIFERENCA'}`),
     `Riscos: ${c.riscos.join(' | ') || 'nenhum identificado'}`,
   ];
   if (c.parou) linhas.push(`PAROU: ${c.parou}`);
@@ -213,6 +225,29 @@ export class RodadaStore {
 
 export type RodadaStoreLike = Pick<RodadaStore, 'contaConfigurada' | 'existentes' | 'tamanhoBancoMb' | 'criarRodada' | 'finalizarRodada' | 'simulacaoPrevia' | 'gravarLinhas' | 'marcarTrimestre' | 'trimestreFechado'>;
 
+/** Espera a cota da Meta esfriar (5 min) e libera o cliente para continuar; trocavel nos testes. */
+export const PAUSA_COTA_MS = 300_000;
+let pausaCotaMs = PAUSA_COTA_MS;
+export const definirPausaCota = (ms: number) => { pausaCotaMs = ms; };
+/** Ate 12 pausas; depois de cada uma uma consulta minima de insights mede a cota (a de insights e outro balde que o da conta): volta quando < 60%. */
+async function esfriar(client: MetaClient, conta: MetaConta) {
+  const dia = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10);
+  for (let i = 0; i < 12; i++) {
+    await new Promise((r) => setTimeout(r, pausaCotaMs));
+    client.liberarParada();
+    try {
+      await client.get(`act_${conta.id}/insights`, { level: 'account', fields: 'spend', time_range: JSON.stringify({ since: dia, until: dia }) });
+      if (client.usoPct() < 60) {
+        client.liberarParada();
+        return;
+      }
+    } catch (e) {
+      if (!(e instanceof MetaCotaErro)) throw e;
+    }
+  }
+  client.liberarParada();
+}
+
 /** Le a Meta (uma conta e um trimestre), compara com o banco, reconcilia e monta o cartao. Nao grava dados; so registra a simulacao em meta_rodadas. */
 export async function lerParaRodada(client: MetaClient, store: RodadaStoreLike, conta: MetaConta, trimestre: string, hoje: string) {
   const produto = await store.contaConfigurada(conta.id);
@@ -226,14 +261,27 @@ export async function lerParaRodada(client: MetaClient, store: RodadaStoreLike, 
   const porMes: Array<{ mes: string; linhas: Totais; conta: Totais }> = [];
   try {
     const somaConta: Totais = { gasto: 0, impressoes: 0, cliques: 0, leads: 0 };
-    for (const b of blocosMensais(de, ate)) {
-      const doMes = await lerInsights(client, conta, b.inicio, b.fim);
+    for (const b of blocosDeDias(de, ate)) {
+      // Le de 7 em 7 dias. Parou a 75% da cota no meio de um bloco: descarta so o que leu DESSE bloco de 7 dias, espera a cota esfriar e le o
+      // mesmo bloco de novo (ate 6 tentativas). Nunca relê o mes: o que ja foi lido de blocos anteriores fica. E a mesma rodada continuando.
+      let doMes: AdDia[] = [];
+      let totalMes: Totais | null = null;
+      for (let tentativa = 1; ; tentativa++) {
+        try {
+          doMes = await lerInsights(client, conta, b.inicio, b.fim);
+          // total da conta no mesmo mes (insights nivel conta): a reconciliacao por mes localiza onde esta qualquer diferenca
+          totalMes = await lerTotaisConta(client, conta, b.inicio, b.fim);
+          break;
+        } catch (e) {
+          if (!(e instanceof MetaCotaErro) || tentativa >= 6) throw e;
+          await esfriar(client, conta);
+        }
+      }
       novas.push(...doMes);
-      // total da conta no mesmo mes (insights nivel conta): a reconciliacao por mes localiza onde esta qualquer diferenca
-      const totalMes = await lerTotaisConta(client, conta, b.inicio, b.fim);
-      porMes.push({ mes: b.inicio.slice(0, 7), linhas: totaisDe(doMes), conta: totalMes });
-      somaConta.gasto = Math.round((somaConta.gasto + totalMes.gasto) * 100) / 100;
-      somaConta.impressoes += totalMes.impressoes; somaConta.cliques += totalMes.cliques; somaConta.leads += totalMes.leads;
+      const tm = totalMes!;
+      porMes.push({ mes: `${b.inicio} a ${b.fim}`, linhas: totaisDe(doMes), conta: tm });
+      somaConta.gasto = Math.round((somaConta.gasto + tm.gasto) * 100) / 100;
+      somaConta.impressoes += tm.impressoes; somaConta.cliques += tm.cliques; somaConta.leads += tm.leads;
     }
     conta_totais = somaConta;
   } catch (e) {
