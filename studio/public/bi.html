@@ -79,6 +79,20 @@
     svg.col .grid { stroke: var(--viz-grid); stroke-width: 1; }
     svg.col .eixo { stroke: var(--viz-axis); stroke-width: 1; }
     svg.col .hit:hover { fill: var(--viz-grid); fill-opacity: 0.55; }
+    /* série no tempo (Meta Ads): seletor de granularidade, métricas e um gráfico por métrica */
+    .serie-ctl { display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: center; margin: 0 0 10px; }
+    .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+    .seg button { padding: 5px 12px; font: inherit; font-size: 12.5px; background: transparent; color: var(--viz-ink-2); border: 0; border-right: 1px solid var(--border); cursor: pointer; }
+    .seg button:last-child { border-right: 0; }
+    .seg button[aria-pressed='true'] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+    .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; color: var(--viz-ink-2); }
+    .chips label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+    .sm { margin: 4px 0 10px; }
+    .sm-t { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 13px; color: var(--viz-ink); margin-bottom: 2px; }
+    .sm-t span { color: var(--viz-muted); font-size: 12px; }
+    .sm-t span b { color: var(--viz-ink); font-weight: 600; }
+    .nota-serie { font-size: 11.5px; color: var(--viz-muted); margin: 2px 0 0; }
     /* matriz (mapa de calor): sequencial de uma cor só, o valor escrito em cada célula */
     .matriz-wrap { overflow: auto; }
     table.mz { border-collapse: separate; border-spacing: 2px; font-size: 12.5px; width: 100%; }

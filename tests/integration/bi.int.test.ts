@@ -215,6 +215,7 @@ run('BI (transação com rollback)', () => {
       const vazio = r.grafico.tipo === 'kpis'
         ? r.grafico.itens.every((i) => (i.valor === null || i.valor === 0))
         : r.grafico.tipo === 'colunas' ? r.grafico.categorias.length === 0
+        : r.grafico.tipo === 'serie' ? r.grafico.pontos.every((p) => p.leads === 0)
         : r.grafico.tipo === 'funis' ? r.grafico.colunas.length === 0
         : r.grafico.tipo === 'barras' ? r.grafico.itens.every((i) => i.valor === 0) || r.grafico.itens.length === 0 || a.id === 'qualidade-branco' || a.id === 'funil'
         : r.tabela.linhas.length === 0 || a.id === 'safra-ganhos';

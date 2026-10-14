@@ -52,6 +52,11 @@ export type Grafico =
    * `passos[i]` = dos que chegaram na etapa i-1, que parte chegou na i (nunca passa de 100%; null onde não há base).
    */
   | { tipo: 'funis'; etapas: string[]; colunas: Array<{ id: string; nome: string; slot: number; total?: boolean; leads: number; valores: number[]; passos: Array<number | null> }> }
+  /**
+   * Série no tempo, um ponto por dia com os COMPONENTES (gasto, impressões, cliques no link, visitas, leads): o navegador soma por dia, semana,
+   * mês ou trimestre e calcula CPL, CPM, CPC e CTR a partir das somas (nunca média de taxas).
+   */
+  | { tipo: 'serie'; pontos: Array<{ dia: string; gasto: number; impressoes: number; cliques_link: number; visitas: number; leads_meta: number; leads: number }> }
   | { tipo: 'tabela' };
 export type BiResultado = { grafico: Grafico; tabela: Tabela; avisos: string[] };
 
@@ -1342,6 +1347,42 @@ export const BI_ANALISES: BiAnalise[] = [
         grafico: { tipo: 'kpis', itens },
         tabela: { colunas: [c('indicador', 'Indicador'), c('valor', 'Valor')], linhas: itens.map((i) => ({ indicador: i.rotulo, valor: i.valor == null ? '—' : i.formato === 'int' ? String(i.valor) : i.valor.toFixed(i.formato === 'pct' ? 4 : 2) })) },
         avisos: inv > 0 ? [] : [AVISO_SEM_META],
+      };
+    },
+  },
+  {
+    id: 'meta-serie',
+    pagina: 'meta',
+    titulo: 'Meta Ads no tempo: diário, semanal, mensal e trimestral',
+    pergunta: 'Como o investimento, o CPL, o CPM, o CPC e o CTR evoluem no tempo, e onde estão os picos e as quedas?',
+    como_ler: `Escolha a granularidade (dia, semana, mês ou trimestre) e as métricas: cada métrica ganha o seu gráfico, na mesma linha do tempo e com a sua própria escala (nunca dois eixos num gráfico só). Semana começa na segunda-feira. Tudo é calculado das somas do período escolhido (CPL = investimento ÷ leads; CPM = investimento ÷ impressões × 1000; CPC e CTR são dos cliques NO LINK). CPL (Pipedrive) usa os negócios Meta ADS CRIADOS no dia; CPL (Meta) usa os leads que a Meta atribui aos anúncios. A primeira e a última semana, mês ou trimestre podem estar incompletos se o período filtrado os corta. ${NOTA_META}`,
+    largura: 'cheia',
+    async rodar(db, f) {
+      const p: unknown[] = [];
+      const w = filtroGasto(f, p);
+      const p2: unknown[] = [];
+      const w2 = filtroMeta(f, p2);
+      const [dias, leads] = await Promise.all([
+        q(db, `select m.dia::text as dia, ${METRICAS_META('m')} from analytics.meta_desempenho_dia m where ${w.join(' and ')} group by 1 order by 1`, p),
+        q(db, `select to_char(d.criado_em at time zone ${TZ}, 'YYYY-MM-DD') as dia, count(*) filter (where d.conta_como_lead)::int as leads from analytics.negocios_bi d where ${w2.join(' and ')} group by 1`, p2),
+      ]);
+      const ld = new Map(leads.map((r) => [r.dia as string, n(r.leads)]));
+      const gd = new Map(dias.map((r) => [r.dia as string, r]));
+      const pontos = [...new Set([...gd.keys(), ...ld.keys()])].sort().map((dia) => {
+        const g = gd.get(dia) ?? {};
+        return { dia, gasto: n(g.gasto), impressoes: n(g.impressoes), cliques_link: n(g.cliques_link), visitas: n(g.visitas), leads_meta: n(g.leads_meta), leads: ld.get(dia) ?? 0 };
+      });
+      return {
+        grafico: { tipo: 'serie', pontos },
+        tabela: {
+          colunas: [c('dia', 'Dia'), c('gasto', 'Investimento', 'brl'), c('impressoes', 'Impressões', 'int'), c('cliques_link', 'Cliques no link', 'int'), c('cpm', 'CPM', 'brl2'), c('cpc', 'CPC (link)', 'brl2'), c('ctr', 'CTR (link)', 'pct'),
+            c('leads_meta', 'Leads (Meta)', 'int'), c('leads', 'Leads (Pipedrive)', 'int'), c('cpl_meta', 'CPL (Meta)', 'brl2'), c('cpl', 'CPL (Pipedrive)', 'brl2')],
+          linhas: pontos.map((x) => ({
+            dia: x.dia, gasto: x.gasto, impressoes: x.impressoes, cliques_link: x.cliques_link, cpm: x.impressoes > 0 ? (x.gasto / x.impressoes) * 1000 : null, cpc: razao(x.gasto, x.cliques_link),
+            ctr: razao(x.cliques_link, x.impressoes), leads_meta: x.leads_meta, leads: x.leads, cpl_meta: razao(x.gasto, x.leads_meta), cpl: razao(x.gasto, x.leads),
+          })),
+        },
+        avisos: dias.length ? [] : [AVISO_SEM_META],
       };
     },
   },

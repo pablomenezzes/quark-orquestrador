@@ -78,6 +78,17 @@ run('BI Meta Ads (transação com rollback)', () => {
     await c().end();
   });
 
+  it('série no tempo: um ponto por dia com os componentes (gasto, impressões, cliques, leads da Meta e leads do Pipedrive)', async () => {
+    const r = await exec('meta-serie');
+    const g = r.grafico as { tipo: string; pontos: Array<Record<string, number | string>> };
+    expect(g.tipo).toBe('serie');
+    const d5 = g.pontos.find((p) => p.dia === '2099-03-05')!;
+    expect(d5).toMatchObject({ gasto: 150, impressoes: 15000, cliques_link: 250, visitas: 150, leads_meta: 10, leads: 0 });
+    expect(g.pontos.find((p) => p.dia === '2099-03-10')).toMatchObject({ gasto: 0, leads: 4 }); // negócios Meta ADS criados no dia 10 (o d5 é de outra fonte)
+    expect(r.tabela.linhas.find((l) => l.dia === '2099-03-05')).toMatchObject({ cpm: 10, cpl_meta: 15, cpl: null });
+    expect((await exec('meta-serie', { ...F, produto: 'clinic' })).grafico).toMatchObject({ pontos: [] });
+  });
+
   it('visão geral: investimento, métricas calculadas das somas, funil, custos por etapa, CAC, ROAS e MRR', async () => {
     const r = await exec('meta-resumo');
     expect(kpi(r, 'invest')).toBe(150);

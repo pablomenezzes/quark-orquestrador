@@ -239,6 +239,109 @@ function colunas(g) {
     </svg>`;
 }
 
+/* ---------- série no tempo (Meta Ads): dia, semana, mês ou trimestre; um gráfico por métrica, cada um com a sua escala ---------- */
+const GRANS = [['dia', 'Diário'], ['semana', 'Semanal'], ['mes', 'Mensal'], ['trimestre', 'Trimestral']];
+const COMP = ['gasto', 'impressoes', 'cliques_link', 'visitas', 'leads_meta', 'leads'];
+const div = (a, b) => (b > 0 ? a / b : null);
+/** Cada métrica sai das SOMAS do balde (dia, semana...), nunca de média de taxas. */
+const SERIE_MET = [
+  { id: 'invest', rot: 'Investimento', f: 'brl', calc: (s) => s.gasto },
+  { id: 'cpl', rot: 'CPL (Pipedrive)', f: 'brl2', calc: (s) => div(s.gasto, s.leads), dica: 'Investimento ÷ negócios Meta ADS criados no período' },
+  { id: 'cpl_meta', rot: 'CPL (Meta)', f: 'brl2', calc: (s) => div(s.gasto, s.leads_meta), dica: 'Investimento ÷ leads que a Meta atribui' },
+  { id: 'cpm', rot: 'CPM', f: 'brl2', calc: (s) => (s.impressoes > 0 ? (s.gasto / s.impressoes) * 1000 : null), dica: 'Investimento ÷ impressões × 1000' },
+  { id: 'cpc', rot: 'CPC (link)', f: 'brl2', calc: (s) => div(s.gasto, s.cliques_link), dica: 'Investimento ÷ cliques no link' },
+  { id: 'ctr', rot: 'CTR (link)', f: 'pct', calc: (s) => div(s.cliques_link, s.impressoes), dica: 'Cliques no link ÷ impressões' },
+  { id: 'connect', rot: 'Connect Rate', f: 'pct', calc: (s) => div(s.visitas, s.cliques_link), dica: 'Visitas à página ÷ cliques no link' },
+  { id: 'impressoes', rot: 'Impressões', f: 'int', calc: (s) => s.impressoes },
+  { id: 'cliques_link', rot: 'Cliques no link', f: 'int', calc: (s) => s.cliques_link },
+  { id: 'leads_meta', rot: 'Leads (Meta)', f: 'int', calc: (s) => s.leads_meta },
+  { id: 'leads', rot: 'Leads (Pipedrive)', f: 'int', calc: (s) => s.leads },
+];
+S.serie = { gran: 'semana', metricas: ['invest', 'cpl'], ...(ler('bi.serie') ?? {}) };
+if (!GRANS.some(([k]) => k === S.serie.gran)) S.serie.gran = 'semana';
+S.serie.metricas = (S.serie.metricas ?? []).filter((m) => SERIE_MET.some((x) => x.id === m));
+const SERIE_VIS = {}; // card -> { baldes, gran, mets }: o que está na tela (a dica ao passar o mouse lê daqui)
+const somaDias = (d, k) => new Date(Date.parse(`${d}T00:00:00Z`) + k * 86400000).toISOString().slice(0, 10);
+const dm = (d) => `${d.slice(8, 10)}/${d.slice(5, 7)}`;
+const dmy = (d) => `${dm(d)}/${d.slice(0, 4)}`;
+
+/** [chave, início, fim] do balde a que o dia pertence (semana começa na segunda-feira; trimestre de calendário). */
+function baldeDe(d, gran) {
+  if (gran === 'dia') return [d, d, d];
+  if (gran === 'semana') {
+    const seg = somaDias(d, -((new Date(`${d}T00:00:00Z`).getUTCDay() + 6) % 7));
+    return [seg, seg, somaDias(seg, 6)];
+  }
+  const y = Number(d.slice(0, 4)), m = Number(d.slice(5, 7));
+  if (gran === 'mes') return [d.slice(0, 7), `${d.slice(0, 7)}-01`, new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10)];
+  const q = Math.floor((m - 1) / 3);
+  return [`${y}-T${q + 1}`, `${y}-${String(q * 3 + 1).padStart(2, '0')}-01`, new Date(Date.UTC(y, q * 3 + 3, 0)).toISOString().slice(0, 10)];
+}
+const rotBalde = (b, gran) => (gran === 'mes' ? rotuloMes(b.chave) : gran === 'trimestre' ? `${b.chave.slice(5)}/${b.chave.slice(2, 4)}` : dm(b.ini));
+const titBalde = (b, gran) => (gran === 'dia' ? dmy(b.ini) : gran === 'semana' ? `Semana de ${dm(b.ini)} a ${dmy(b.fim)}` : gran === 'mes' ? rotuloMes(b.chave) : `${b.chave.slice(5)} de ${b.chave.slice(0, 4)}`);
+
+/** Soma os dias em baldes, em todo o calendário do primeiro ao último dia com dados (dia sem registro entra como zero). */
+function serieAgregar(pontos, gran) {
+  if (!pontos.length) return [];
+  const mapa = new Map(pontos.map((p) => [p.dia, p]));
+  const primeiro = pontos[0].dia, ultimo = pontos[pontos.length - 1].dia;
+  const out = [], idx = new Map();
+  for (let d = primeiro; d <= ultimo; d = somaDias(d, 1)) {
+    const [chave, ini, fim] = baldeDe(d, gran);
+    let b = idx.get(chave);
+    if (!b) {
+      b = { chave, ini, fim, parcial: ini < primeiro || fim > ultimo, ...Object.fromEntries(COMP.map((k) => [k, 0])) };
+      idx.set(chave, b);
+      out.push(b);
+    }
+    const p = mapa.get(d);
+    if (p) for (const k of COMP) b[k] += p[k];
+  }
+  return out;
+}
+
+function serieGrafico(m, baldes, gran) {
+  const W = 960, H = 190, L = 58, R = 10, T = 12, B = 26;
+  const iw = W - L - R, ih = H - T - B, n = baldes.length;
+  const vals = baldes.map((b) => m.calc(b));
+  const maxV = niceMax(Math.max(...vals.filter((v) => v != null), 1e-9));
+  const band = iw / n;
+  const x = (i) => L + band * (i + 0.5);
+  const y = (v) => T + ih - (v / maxV) * ih;
+  const ticks = [0, 1, 2, 3, 4].map((i) => (maxV / 4) * i);
+  // segmentos contínuos (valor ausente quebra a linha); o que toca um período parcial vai tracejado
+  let tracos = '';
+  for (let i = 0; i < n - 1; i++) {
+    if (vals[i] == null || vals[i + 1] == null) continue;
+    const tr = baldes[i].parcial || baldes[i + 1].parcial;
+    tracos += `<line x1="${x(i)}" y1="${y(vals[i])}" x2="${x(i + 1)}" y2="${y(vals[i + 1])}" stroke="var(--series-1)" stroke-width="2" stroke-linecap="round" ${tr ? 'stroke-dasharray="5 4"' : ''}/>`;
+  }
+  const marcas = n <= 45 ? vals.map((v, i) => (v == null ? '' : `<circle cx="${x(i)}" cy="${y(v)}" r="4" fill="${baldes[i].parcial ? 'var(--viz-surface)' : 'var(--series-1)'}" stroke="var(--series-1)" stroke-width="2"/>`)).join('') : '';
+  const passo = Math.max(1, Math.ceil(n / 14));
+  const hits = baldes.map((b, i) => `<rect class="hit sx" data-m="${m.id}" data-i="${i}" x="${L + band * i}" y="${T}" width="${band}" height="${ih}" fill="transparent"/>`).join('');
+  const total = m.calc(Object.fromEntries(COMP.map((k) => [k, baldes.reduce((s, b) => s + b[k], 0)])));
+  return `<div class="sm"><div class="sm-t"><b>${esc(m.rot)}</b><span>no período: <b>${esc(fmt(m.f, total))}</b></span></div>
+    <svg class="col" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(`${m.rot}: ${baldes.map((b, i) => `${titBalde(b, gran)} ${fmt(m.f, vals[i])}`).join('; ')}`)}">
+      ${ticks.map((t) => `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}"/><text x="${L - 6}" y="${y(t) + 4}" text-anchor="end">${esc(fmt(m.f, t))}</text>`).join('')}
+      <line class="eixo" x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}"/>
+      ${tracos}${marcas}
+      ${baldes.map((b, i) => (i % passo === 0 ? `<text x="${x(i)}" y="${H - 8}" text-anchor="middle">${esc(rotBalde(b, gran))}</text>` : '')).join('')}
+      ${hits}
+    </svg></div>`;
+}
+
+function serie(g, a) {
+  const st = S.serie;
+  const baldes = serieAgregar(g.pontos, st.gran);
+  const mets = SERIE_MET.filter((m) => st.metricas.includes(m.id));
+  SERIE_VIS[a.id] = { baldes, gran: st.gran, mets };
+  const ctl = `<div class="serie-ctl"><div class="seg" role="group" aria-label="Granularidade">${GRANS.map(([k, l]) => `<button type="button" data-gran="${k}" aria-pressed="${st.gran === k}">${l}</button>`).join('')}</div>
+    <div class="chips" role="group" aria-label="Métricas">${SERIE_MET.map((m) => `<label title="${esc(m.dica ?? '')}"><input type="checkbox" data-met="${m.id}" ${st.metricas.includes(m.id) ? 'checked' : ''}> ${esc(m.rot)}</label>`).join('')}</div></div>`;
+  if (!baldes.length) return `${ctl}<p class="muted">Nada para mostrar neste filtro.</p>`;
+  const aviso = baldes.some((b) => b.parcial) ? '<p class="nota-serie">Linha tracejada e marcador vazado = período parcial (o filtro corta a semana, o mês ou o trimestre, ou ele ainda está em andamento).</p>' : '';
+  return `${ctl}${mets.length ? mets.map((m) => serieGrafico(m, baldes, st.gran)).join('') : '<p class="muted">Marque ao menos uma métrica.</p>'}${aviso}`;
+}
+
 /** Mapa de calor: sequencial de uma cor só; o valor vai escrito na célula (não depende só da cor). */
 function matriz(g) {
   if (!g.linhas.length) return '<p class="muted">Nada para mostrar neste filtro.</p>';
@@ -310,7 +413,7 @@ function corpo(a) {
   const { grafico, tabela: t, avisos } = r.resultado;
   const modo = S.modo[a.id] ?? 'grafico';
   const av = avisos.map((m) => `<div class="aviso">${esc(m)}</div>`).join('');
-  const vis = modo === 'tabela' || grafico.tipo === 'tabela' ? tabela(t) : grafico.tipo === 'kpis' ? tiles(grafico) : grafico.tipo === 'colunas' ? colunas(grafico) : grafico.tipo === 'matriz' ? matriz(grafico) : grafico.tipo === 'funis' ? funis(grafico) : barras(grafico);
+  const vis = modo === 'tabela' || grafico.tipo === 'tabela' ? tabela(t) : grafico.tipo === 'kpis' ? tiles(grafico) : grafico.tipo === 'colunas' ? colunas(grafico) : grafico.tipo === 'serie' ? serie(grafico, a) : grafico.tipo === 'matriz' ? matriz(grafico) : grafico.tipo === 'funis' ? funis(grafico) : barras(grafico);
   return `${vis}${av}`;
 }
 
@@ -372,6 +475,17 @@ document.addEventListener('change', (ev) => {
     if (t.dataset.linha) S.linhas[t.dataset.linha] = t.checked;
     else S.linhas.serie = t.value;
     guardar('bi.linhas', S.linhas);
+    const card = t.closest('.bi-card');
+    const a = card && S.catalogo.analises.find((x) => `card-${x.id}` === card.id);
+    if (a) pintarCard(a);
+    return;
+  }
+  // série no tempo: métricas escolhidas
+  if (t.dataset?.met) {
+    const s = new Set(S.serie.metricas);
+    t.checked ? s.add(t.dataset.met) : s.delete(t.dataset.met);
+    S.serie.metricas = SERIE_MET.filter((m) => s.has(m.id)).map((m) => m.id);
+    guardar('bi.serie', S.serie);
     const card = t.closest('.bi-card');
     const a = card && S.catalogo.analises.find((x) => `card-${x.id}` === card.id);
     if (a) pintarCard(a);
@@ -451,6 +565,13 @@ document.addEventListener('click', (ev) => {
   const card = t.closest?.('.bi-card');
   const a = card && S.catalogo.analises.find((x) => `card-${x.id}` === card.id);
   if (!a) return;
+  const gr = t.closest('[data-gran]');
+  if (gr) {
+    S.serie.gran = gr.dataset.gran;
+    guardar('bi.serie', S.serie);
+    pintarCard(a);
+    return;
+  }
   const m = t.closest('[data-modo]');
   if (m) {
     S.modo[a.id] = m.dataset.modo;
@@ -484,6 +605,15 @@ document.addEventListener('mousemove', (ev) => {
     const k = g.colunas[ci];
     const v = k.valores[i];
     return mostrarTip(ev, `<b class="t">${esc(k.nome)} › ${esc(g.etapas[i])}</b>${nf.format(v)} negócios (${esc(fmt('pct', k.leads > 0 ? v / k.leads : 0))} dos ${nf.format(k.leads)} leads)${i > 0 ? `<br><span style="color:var(--viz-muted)">Dos que chegaram em "${esc(g.etapas[i - 1])}": ${esc(fmt('pct', k.passos[i]))} chegaram aqui</span>` : ''}`);
+  }
+  const sx = ev.target.closest('.sx');
+  if (sx && g.tipo === 'serie' && SERIE_VIS[a.id]) {
+    const { baldes, gran, mets } = SERIE_VIS[a.id];
+    const b = baldes[Number(sx.dataset.i)];
+    const m = mets.find((x) => x.id === sx.dataset.m);
+    if (!b || !m) return esconderTip();
+    // além da métrica pontada, as outras escolhidas no mesmo ponto
+    return mostrarTip(ev, `<b class="t">${esc(titBalde(b, gran))}${b.parcial ? ' <span style="color:var(--viz-muted);font-weight:400">(parcial)</span>' : ''}</b>${mets.map((x) => `<div class="lin" ${x.id === m.id ? 'style="font-weight:700"' : ''}>${esc(x.rot)}: ${esc(fmt(x.f, x.calc(b)))}</div>`).join('')}`);
   }
   const hit = ev.target.closest('.hit');
   if (hit && g.tipo === 'colunas') {
