@@ -86,7 +86,7 @@ export interface PainelRepo {
   setStageMarco(stageId: number, marco: Marco | null): Promise<void>;
   negociosResumo(): Promise<NegocioResumoLinha[]>;
   negocios(f: NegociosFiltro): Promise<{ total: number; pagina: number; por_pagina: number; itens: unknown[] }>;
-  negocio(id: number): Promise<{ negocio: unknown; campos: unknown[]; historico: unknown[] }>;
+  negocio(id: number): Promise<{ negocio: unknown; campos: unknown[]; historico: unknown[]; conversoes?: unknown[] | null }>;
   historicoProgresso(): Promise<unknown[]>;
   funilMarcos(ano: number): Promise<unknown[]>;
   motivosPerda(): Promise<MotivoPerda[]>;
@@ -95,7 +95,11 @@ export interface PainelRepo {
   setStatusContaComoLead(status: StatusNegocio, conta: boolean): Promise<void>;
   /** Conversões do site (GA4): eventos que existem, URLs onde cada um aparece e as regras criadas no Painel. */
   conversaoEventos(dias: number): Promise<unknown[]>;
-  conversaoEventoUrls(evento: string, dias: number): Promise<unknown[]>;
+  conversaoEventoUrls(evento: string, dias: number, origem?: ConversaoOrigem): Promise<unknown[]>;
+  /** Todas as conversões (site, RD e Pipedrive) com ocorrências, usuários, URLs, último dia, tipo de conversão e pontos de leadscoring. */
+  conversoesGlobais(dias: number): Promise<unknown[]>;
+  /** Classifica uma conversão (tipo e pontos). Cria a linha do catálogo se ainda não existir (é assim que se cadastra um evento do RD). */
+  salvarConversaoCatalogo(c: ConversaoCatalogoEntrada): Promise<void>;
   conversaoRegras(): Promise<unknown[]>;
   criarConversaoRegra(r: ConversaoRegraEntrada): Promise<{ id: number }>;
   atualizarConversaoRegra(id: number, r: Partial<ConversaoRegraEntrada> & { ativo?: boolean }): Promise<void>;
@@ -118,6 +122,19 @@ export type ConversaoRegraEntrada = {
   evento: string;
   url_modo: (typeof REGRA_URL_MODOS)[number];
   url_valor: string | null;
+};
+
+/** Conversões Globais: de onde vem (site = evento do GA4, rd = evento do RD Station, pipe = Pipedrive) e o que o Pablo classifica (migration 0020). */
+export const CONVERSAO_ORIGENS = ['site', 'rd', 'pipe'] as const;
+export const CONVERSAO_TIPOS = ['material', 'levantada_de_mao', 'agendamento_reuniao', 'reuniao_realizada'] as const;
+export type ConversaoOrigem = (typeof CONVERSAO_ORIGENS)[number];
+export type ConversaoCatalogoEntrada = {
+  origem: ConversaoOrigem;
+  evento: string;
+  /** null = em branco (ainda não classificada). */
+  tipo_conversao: (typeof CONVERSAO_TIPOS)[number] | null;
+  /** Nota de leadscoring; null = ainda não definida. */
+  pontos: number | null;
 };
 
 /** Mesma comparação de URL da view analytics.site_conversoes_dia, aplicada à "URL de Conversão" dos negócios do Pipedrive. */
@@ -235,7 +252,20 @@ export class PgPainelRepo implements PainelRepo {
          from analytics.historico_etapas where deal_id = $1 order by entrou_em, stage_id`,
       [id],
     );
-    return { negocio: d.rows[0], campos: c.rows, historico: h.rows };
+    // conversões do lead (Pipedrive): null enquanto a migration 0020 não foi aplicada
+    let conversoes: unknown[] | null = null;
+    if ((await this.pool.query(`select to_regclass('analytics.conversoes_pipe_negocios') is not null as ok`)).rows[0]?.ok === true) {
+      conversoes = (
+        await this.pool.query(
+          `select c.evento, c.data, c.caminho_url, k.tipo_conversao, k.pontos
+             from analytics.conversoes_pipe_negocios c
+             left join mkt.conversao_catalogo k on k.origem = 'pipe' and k.evento = c.evento and k.ativo
+            where c.deal_id = $1 order by c.data, c.evento`,
+          [id],
+        )
+      ).rows;
+    }
+    return { negocio: d.rows[0], campos: c.rows, historico: h.rows, conversoes };
   }
 
   async historicoProgresso() {
@@ -309,7 +339,46 @@ export class PgPainelRepo implements PainelRepo {
     ).rows;
   }
 
-  async conversaoEventoUrls(evento: string, dias: number) {
+  async conversoesGlobais(dias: number) {
+    return (
+      await this.pool.query(
+        `with s as (
+           select 'site'::text as origem, evento, sum(eventos)::int as ocorrencias, sum(usuarios)::int as usuarios, count(distinct caminho)::int as urls, max(dia)::text as ultimo_dia
+             from analytics.site_eventos_dia where dia >= current_date - $1::int group by evento
+         ), p as (
+           select 'pipe'::text as origem, evento, count(*)::int as ocorrencias, count(distinct pessoa_id)::int as usuarios,
+                  count(distinct caminho_url) filter (where caminho_url is not null)::int as urls, max(data)::date::text as ultimo_dia
+             from analytics.conversoes_pipe_negocios where data >= current_date - $1::int group by evento
+         ), a as (select * from s union all select * from p)
+         select coalesce(a.origem, c.origem) as origem, coalesce(a.evento, c.evento) as evento, a.ocorrencias, a.usuarios, a.urls, a.ultimo_dia,
+                c.tipo_conversao, c.pontos, c.id is not null as no_catalogo
+           from a full join (select * from mkt.conversao_catalogo where ativo) c on c.origem = a.origem and c.evento = a.evento
+          order by 1, a.ocorrencias desc nulls last, 2`,
+        [dias],
+      )
+    ).rows;
+  }
+
+  async salvarConversaoCatalogo(c: ConversaoCatalogoEntrada) {
+    await this.pool.query(
+      `insert into mkt.conversao_catalogo (origem, evento, tipo_conversao, pontos) values ($1, $2, $3, $4)
+       on conflict (origem, evento) do update set tipo_conversao = excluded.tipo_conversao, pontos = excluded.pontos, ativo = true, atualizado_em = now()`,
+      [c.origem, c.evento, c.tipo_conversao, c.pontos],
+    );
+  }
+
+  async conversaoEventoUrls(evento: string, dias: number, origem: ConversaoOrigem = 'site') {
+    if (origem === 'pipe') {
+      return (
+        await this.pool.query(
+          `select 'Pipedrive'::text as host, coalesce(caminho_url, '(sem URL de conversão)') as caminho, count(*)::int as eventos, count(distinct pessoa_id)::int as usuarios, max(data)::date::text as ultimo_dia
+             from analytics.conversoes_pipe_negocios where evento = $1 and data >= current_date - $2::int
+            group by caminho_url order by count(*) desc, caminho_url limit 200`,
+          [evento, dias],
+        )
+      ).rows;
+    }
+    if (origem === 'rd') return [];
     return (
       await this.pool.query(
         `select host, caminho, sum(eventos)::int as eventos, sum(usuarios)::int as usuarios, max(dia)::text as ultimo_dia

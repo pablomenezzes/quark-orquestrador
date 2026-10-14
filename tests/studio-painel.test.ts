@@ -95,6 +95,13 @@ const repo: PainelRepo = {
     calls.push(['conv-urls', [evento, dias]]);
     return [{ host: 'exemplo.test', caminho: '/lp-fake', eventos: 5, usuarios: 4, ultimo_dia: '2026-10-08' }];
   },
+  async conversoesGlobais(dias) {
+    calls.push(['conv-globais', [dias]]);
+    return [{ origem: 'pipe', evento: 'form_fake', ocorrencias: 3, usuarios: 3, urls: 1, ultimo_dia: '2026-10-08', tipo_conversao: 'material', pontos: 5, no_catalogo: true }];
+  },
+  async salvarConversaoCatalogo(c) {
+    calls.push(['conv-catalogo', [c]]);
+  },
   async conversaoRegras() {
     return [];
   },
@@ -285,6 +292,33 @@ describe('conversões do site (GA4): eventos, URLs e regras', () => {
   });
   it('não há como apagar regra pela API (desativa)', async () => {
     expect((await fetch(`${base}/api/painel/conversoes/regras/7`, { method: 'DELETE' })).status).toBeGreaterThanOrEqual(400);
+  });
+});
+
+describe('Conversões Globais: site, RD e Pipedrive com tipo de conversão e pontos de leadscoring', () => {
+  const corpo = { origem: 'rd', evento: ' evento_rd_fake ', tipo_conversao: 'levantada_de_mao', pontos: 15 };
+  it('lista as conversões das três origens e aceita a origem nas URLs', async () => {
+    const g = await (await fetch(`${base}/api/painel/conversoes/globais?dias=30`)).json();
+    expect(g[0]).toMatchObject({ origem: 'pipe', tipo_conversao: 'material', pontos: 5 });
+    expect((await fetch(`${base}/api/painel/conversoes/eventos/urls?evento=x&origem=pipe&dias=7`)).status).toBe(200);
+    expect((await fetch(`${base}/api/painel/conversoes/eventos/urls?evento=x&origem=outra`)).status).toBe(400);
+    expect((await fetch(`${base}/api/painel/conversoes/globais?dias=0`)).status).toBe(400);
+  });
+  it('classifica uma conversão (aparando o nome) e aceita deixar em branco', async () => {
+    expect((await put('/api/painel/conversoes/catalogo', corpo)).status).toBe(200);
+    expect((await put('/api/painel/conversoes/catalogo', { ...corpo, tipo_conversao: null, pontos: null })).status).toBe(200);
+    expect(calls).toEqual([
+      ['conv-catalogo', [{ origem: 'rd', evento: 'evento_rd_fake', tipo_conversao: 'levantada_de_mao', pontos: 15 }]],
+      ['conv-catalogo', [{ origem: 'rd', evento: 'evento_rd_fake', tipo_conversao: null, pontos: null }]],
+    ]);
+  });
+  it('recusa origem, tipo, pontos e evento inválidos sem gravar', async () => {
+    const ruins = [
+      { ...corpo, origem: 'tiktok' }, { ...corpo, tipo_conversao: 'compra' }, { ...corpo, tipo_conversao: undefined }, { ...corpo, pontos: 1.5 }, { ...corpo, pontos: 1001 },
+      { ...corpo, pontos: '10' }, { ...corpo, pontos: undefined }, { ...corpo, evento: '  ' }, { ...corpo, evento: 'x'.repeat(301) }, {},
+    ];
+    for (const b of ruins) expect((await put('/api/painel/conversoes/catalogo', b)).status, JSON.stringify(b).slice(0, 70)).toBe(400);
+    expect(calls).toEqual([]);
   });
 });
 

@@ -232,6 +232,7 @@ function viewNegocios() {
         <tr><td class="muted">Criado · fechado · perdido · atualizado</td><td>${dia(ficha.negocio.criado_em)} · ${dia(ficha.negocio.fechado_em)} · ${dia(ficha.negocio.perdido_em)} · ${dia(ficha.negocio.atualizado_em)}</td></tr>
         <tr><td class="muted">Motivo da perda</td><td>${ficha.negocio.motivo_perda ? `${esc(ficha.negocio.motivo_perda)} <span class="muted">#${ficha.negocio.motivo_perda_id ?? 'sem ID'}</span>` : '—'}</td></tr>
       </tbody></table>
+      ${blocoConversoesLead(ficha)}
       <h3 style="margin-top:16px">Por onde passou (${ficha.historico.length} etapa(s))</h3>
       <table class="t"><thead><tr><th>Etapa</th><th>Entrou</th><th>Saiu</th><th class="num">Tempo</th><th>Movido por</th></tr></thead><tbody>
       ${ficha.historico.map((h) => `<tr><td>${esc(h.etapa ?? '')} <span class="muted">#${h.stage_id}</span>${h.marco ? ` <span class="chip">${esc(h.marco)}</span>` : ''}${h.etapa_atual ? ' <span class="chip ok">etapa atual</span>' : ''}</td><td>${dia(h.entrou_em)}</td><td>${h.saiu_em ? dia(h.saiu_em) : '—'}</td><td class="num">${h.horas_na_etapa == null ? '—' : Number(h.horas_na_etapa) >= 48 ? `${(Number(h.horas_na_etapa) / 24).toFixed(1)} dias` : `${Number(h.horas_na_etapa).toFixed(1)} h`}</td><td>${esc(h.movido_por ?? (h.origem_dado === 'criacao' ? 'criação do negócio' : ''))}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">O histórico deste negócio ainda não foi lido.</td></tr>'}
@@ -282,18 +283,114 @@ function viewConferencia() {
     </tbody></table></section>`;
 }
 
-/* ---------- Conversões do site (GA4) ---------- */
+/* ---------- Conversões do lead (na ficha do negócio), no modelo da ficha do lead ---------- */
+const diaHora = (v) => (v ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(v)) : '—');
+function blocoConversoesLead(ficha) {
+  const conv = ficha.conversoes;
+  if (conv == null) return '<h3 style="margin-top:16px">Conversões do lead</h3><p class="muted">Disponível depois que a migration 0020 for aplicada.</p>';
+  const campo = (nome) => {
+    const c = ficha.campos.find((x) => (x.nome_pipedrive ?? '').toLowerCase() === nome.toLowerCase());
+    const v = c?.valor_legivel ?? c?.valor;
+    return v == null || v === '' ? null : String(v);
+  };
+  const tipoRot = (t) => (t ? rotulo(TIPOS_CONVERSAO, t) : 'Sem classificação');
+  const pontos = conv.reduce((s, c) => s + (c.pontos ?? 0), 0);
+  const semPontos = conv.filter((c) => c.pontos == null).length;
+  const primeira = conv[0];
+  const ultima = conv.length > 1 ? conv[conv.length - 1] : null;
+  const scoreDiag = campo('Score Maturidade RH');
+  const anuncio = campo('UTM Term') ?? campo('Meta Ad_id');
+  const canal = campo('Canal de origem RD') ?? campo('Fonte do Lead');
+  const bloco = (titulo, c) => `<div class="card section" style="flex:1;min-width:260px"><strong>${titulo}</strong>
+      <div>${diaHora(c.data)}</div><div class="muted">Evento</div><div>${esc(c.evento)}</div>
+      <div class="muted">Tipo de conversão</div><div>${esc(tipoRot(c.tipo_conversao))}</div>
+      <div class="muted">Pontos</div><div>${c.pontos == null ? '<span class="muted">não definidos</span>' : c.pontos}</div>
+      ${c.caminho_url ? `<div class="muted">URL</div><div>${esc(c.caminho_url)}</div>` : ''}</div>`;
+  const utms = ['UTM Source', 'UTM Medium', 'UTM Campaign', 'UTM Content', 'UTM Term'].map((n) => [n, campo(n)]);
+  // histórico: conversões e entradas em etapa, mais recentes primeiro
+  const eventos = [
+    ...conv.map((c) => ({ quando: c.data, tipo: 'Conversão', texto: `${c.evento} · ${tipoRot(c.tipo_conversao)}${c.pontos != null ? ` · ${c.pontos} pts` : ''}` })),
+    ...ficha.historico.filter((h) => h.entrou_em).map((h) => ({ quando: h.entrou_em, tipo: 'Estado', texto: `Entrou na etapa ${h.etapa ?? ''}${h.pipeline ? ` (${h.pipeline})` : ''}` })),
+  ].sort((a, b) => new Date(b.quando) - new Date(a.quando));
+  return `<h3 style="margin-top:16px">Conversões do lead</h3>
+    <div class="row" style="gap:12px;flex-wrap:wrap;margin-bottom:12px">
+      <div class="card section" style="min-width:140px"><div class="muted">Conversões</div><div style="font-size:1.6em;font-weight:700">${conv.length}</div></div>
+      <div class="card section" style="min-width:180px"><div class="muted">Pontos de leadscoring</div><div style="font-size:1.6em;font-weight:700">${pontos}</div>${semPontos ? `<div class="muted">${semPontos} conversão(ões) sem pontos definidos</div>` : ''}</div>
+      ${scoreDiag ? `<div class="card section" style="min-width:180px"><div class="muted">Score Maturidade RH</div><div style="font-size:1.6em;font-weight:700">${esc(scoreDiag)}</div></div>` : ''}
+      <div class="card section" style="min-width:180px"><div class="muted">Canal · anúncio</div><div>${esc(canal ?? '—')}</div><div class="muted">${esc(anuncio ?? 'sem anúncio')}</div></div>
+    </div>
+    ${primeira ? `<div class="row" style="gap:12px;flex-wrap:wrap;margin-bottom:12px">${bloco(ultima ? 'Primeira conversão' : 'Conversão', primeira)}${ultima ? bloco('Última conversão', ultima) : ''}</div>` : '<p class="muted">Nenhuma conversão registrada para este negócio (sem “Identificador de Conversão RD” e sem Reunião Agendada).</p>'}
+    <table class="t"><thead><tr><th>UTM</th><th>Valor da conversão que criou o negócio</th></tr></thead><tbody>${utms.map(([n, v]) => `<tr><td>${n}</td><td>${v == null ? '<span class="muted">vazio</span>' : esc(v)}</td></tr>`).join('')}</tbody></table>
+    <p class="muted">O Pipedrive guarda um só conjunto de UTMs por negócio, então não dá para comparar primeira e última conversão. Conversões do <strong>site</strong> não são ligadas a um lead (o Google Analytics é agregado) e eventos do <strong>RD</strong> ainda não estão conectados; <em>Reunião Realizada</em> ainda não tem fonte.</p>
+    <h4 style="margin-top:12px">Histórico do lead</h4>
+    <table class="t"><thead><tr><th>Quando</th><th>Tipo</th><th>O quê</th></tr></thead><tbody>${eventos.map((e) => `<tr><td>${diaHora(e.quando)}</td><td><span class="chip ${e.tipo === 'Conversão' ? 'ok' : ''}">${e.tipo}</span></td><td>${esc(e.texto)}</td></tr>`).join('') || '<tr><td colspan="3" class="empty">Sem eventos.</td></tr>'}</tbody></table>`;
+}
+
+/* ---------- Conversões Globais (site, RD e Pipedrive) ---------- */
 const TIPOS_REGRA = [['lead', 'Lead do site'], ['intermediaria', 'Conversão intermediária'], ['ignorar', 'Ignorar']];
 const URL_MODOS = [['qualquer', 'Qualquer URL'], ['igual', 'É igual a'], ['comeca', 'Começa com'], ['contem', 'Contém']];
-const CV = { dias: 30, eventos: null, regras: null, evSel: '', urls: null, form: { id: null, nome: '', tipo: 'lead', evento: '', url_modo: 'qualquer', url_valor: '' } };
+/* Tipo de conversão = o ponto do funil em que a conversão acontece (Tofu, Mofu ou Bofu). */
+const TIPOS_CONVERSAO = [['', 'Sem classificação'], ['material', 'Material (Tofu)'], ['levantada_de_mao', 'Levantada de Mão (Mofu)'], ['agendamento_reuniao', 'Agendamento de Reunião (Bofu)'], ['reuniao_realizada', 'Reunião Realizada (Bofu)']];
+const ORIGENS = { site: 'Site (GA4)', rd: 'RD Station (evento)', pipe: 'Pipedrive' };
+const GUIAS = [['todas', 'Todas'], ['site', 'Site'], ['rd', 'RD (evento)'], ['pipe', 'Pipedrive'], ['regras', 'Regras do site']];
+const CV = { dias: 30, guia: 'todas', globais: null, erroGlobais: null, eventos: null, regras: null, evSel: '', evOrigem: 'site', urls: null, form: { id: null, nome: '', tipo: 'lead', evento: '', url_modo: 'qualquer', url_valor: '' } };
 
 async function carregarConversoes() {
+  CV.erroGlobais = null;
   [CV.eventos, CV.regras] = await Promise.all([api(`/api/painel/conversoes/eventos?dias=${CV.dias}`), api('/api/painel/conversoes/regras')]);
-  CV.urls = CV.evSel ? await api(`/api/painel/conversoes/eventos/urls?evento=${encodeURIComponent(CV.evSel)}&dias=${CV.dias}`) : null;
+  try {
+    CV.globais = await api(`/api/painel/conversoes/globais?dias=${CV.dias}`);
+  } catch (e) {
+    CV.globais = [];
+    CV.erroGlobais = e.message; // migration 0020 ainda não aplicada, por exemplo
+  }
+  CV.urls = CV.evSel ? await api(`/api/painel/conversoes/eventos/urls?evento=${encodeURIComponent(CV.evSel)}&origem=${CV.evOrigem}&dias=${CV.dias}`) : null;
 }
 const rotulo = (lista, v) => lista.find(([k]) => k === v)?.[1] ?? v;
 
 function viewConversoes() {
+  const guias = `<div class="row" style="gap:6px;margin-bottom:14px;flex-wrap:wrap">${GUIAS.map(([k, l]) => `<button class="btn" type="button" data-act="guia" data-guia="${k}" ${CV.guia === k ? 'style="font-weight:700;border-color:currentColor"' : ''}>${l}</button>`).join('')}</div>`;
+  const periodo = `<div class="row" style="margin-bottom:12px"><label class="muted">Período dos números</label>
+      <select class="sel" id="cv-dias">${[7, 30, 90, 365].map((d) => `<option value="${d}" ${CV.dias === d ? 'selected' : ''}>últimos ${d} dias</option>`).join('')}</select></div>`;
+  const corpo = CV.guia === 'regras' ? viewRegrasSite() : viewGuiaGlobais();
+  return `<div class="banner ok" style="margin-bottom:14px"><strong>Conversões Globais.</strong> Uma conversão pode vir do <strong>Site</strong> (evento do Google Analytics), do <strong>RD Station</strong> (evento) ou do <strong>Pipedrive</strong> (campo “Identificador de Conversão RD” e a etapa de Reunião Agendada). Classifique cada uma como <em>Material (Tofu)</em>, <em>Levantada de Mão (Mofu)</em>, <em>Agendamento de Reunião (Bofu)</em> ou <em>Reunião Realizada (Bofu)</em> e dê os <strong>pontos de leadscoring</strong>: a soma aparece no perfil do lead (Negócios, ficha).</div>
+    ${guias}${periodo}${corpo}`;
+}
+
+function viewGuiaGlobais() {
+  if (CV.erroGlobais) return `<div class="banner warn">Não consegui ler as conversões globais (${esc(CV.erroGlobais)}). Se a migration 0020 ainda não foi aplicada, é isso.</div>`;
+  const linhas = (CV.globais ?? []).filter((x) => CV.guia === 'todas' || x.origem === CV.guia);
+  const todas = CV.guia === 'todas';
+  const cols = todas ? 9 : 8;
+  const tipoOpts = (cur) => TIPOS_CONVERSAO.map(([k, l]) => `<option value="${k}" ${(cur ?? '') === k ? 'selected' : ''}>${esc(l)}</option>`).join('');
+  const sem = (v) => (v == null ? '<span class="muted" title="Sem dados desta origem no período">—</span>' : nf.format(v));
+  const tr = (x) => `<tr data-cat-origem="${esc(x.origem)}" data-cat-evento="${esc(x.evento)}" ${x.evento === CV.evSel && x.origem === CV.evOrigem ? 'style="background:var(--surface-2, rgba(127,127,127,.08))"' : ''}>
+      <td>${esc(x.evento)}</td>${todas ? `<td><span class="chip">${esc(ORIGENS[x.origem] ?? x.origem)}</span></td>` : ''}
+      <td class="num">${sem(x.ocorrencias)}</td><td class="num">${sem(x.usuarios)}</td><td class="num">${sem(x.urls)}</td><td class="muted">${esc(x.ultimo_dia ?? '—')}</td>
+      <td><select class="sel cv-tipo-conv">${tipoOpts(x.tipo_conversao)}</select></td>
+      <td><input class="field-input cv-pontos" type="number" min="-1000" max="1000" step="1" value="${x.pontos ?? ''}" placeholder="—" style="width:84px" title="Nota de leadscoring desta conversão"></td>
+      <td style="white-space:nowrap">${x.origem === 'rd' ? '' : `<button class="btn" type="button" data-act="ver-urls" data-evento="${esc(x.evento)}" data-origem="${esc(x.origem)}">Ver URLs</button>`}</td></tr>`;
+  const aviso = CV.guia === 'rd'
+    ? `<div class="banner warn" style="margin-bottom:12px">O RD Station ainda <strong>não está conectado</strong> ao orquestrador: não há contagem de ocorrências, usuários e URLs dos eventos dele. Cadastre abaixo os eventos que você quer classificar; quando a fonte do RD entrar, os números aparecem nesta guia. Enquanto isso, as conversões que o RD gravou no Pipedrive aparecem na guia Pipedrive.</div>
+       <div class="row" style="gap:10px;margin-bottom:12px;align-items:end;flex-wrap:wrap"><label>Novo evento do RD<br><input class="field-input" id="cv-rd-novo" maxlength="300" placeholder="Nome do evento / identificador no RD" style="min-width:320px"></label><button class="btn" type="button" data-act="cadastrar-rd">Cadastrar evento</button></div>`
+    : CV.guia === 'pipe'
+      ? '<p class="muted" style="margin-top:0">Vem do campo “Identificador de Conversão RD” de cada negócio (data = criação do negócio) e da entrada na etapa de Reunião Agendada. <em>Reunião Realizada</em> ainda não tem fonte (as atividades do Pipedrive não são lidas).</p>'
+      : CV.guia === 'site'
+        ? '<p class="muted" style="margin-top:0">Eventos do Google Analytics. Eventos automáticos de alto volume (<em>page_view, session_start, first_visit, user_engagement, scroll, click</em>) não são guardados. Quem decide o que é lead do site, para os relatórios do BI, são as <strong>Regras do site</strong> (última guia).</p>'
+        : '';
+  const urlsHtml = CV.evSel && CV.urls
+    ? `<section class="card section" style="margin-top:16px"><h2>Em quais URLs “${esc(CV.evSel)}” aparece <span class="muted" style="font-weight:400">(${esc(ORIGENS[CV.evOrigem] ?? CV.evOrigem)}, últimos ${CV.dias} dias)</span></h2>
+        <table class="t"><thead><tr><th>URL</th><th class="num">Ocorrências</th><th class="num">Usuários</th><th>Último dia</th></tr></thead><tbody>
+        ${CV.urls.map((u) => `<tr><td>${esc(u.caminho)} <span class="muted">${esc(u.host)}</span></td><td class="num">${nf.format(u.eventos)}</td><td class="num">${nf.format(u.usuarios)}</td><td class="muted">${esc(u.ultimo_dia)}</td></tr>`).join('') || '<tr><td colspan="4" class="empty">Nenhuma URL no período.</td></tr>'}
+        </tbody></table></section>`
+    : '';
+  return `${aviso}<section class="card section"><h2>${esc(GUIAS.find(([k]) => k === CV.guia)?.[1] ?? '')} <span class="muted" style="font-weight:400">(${linhas.length})</span></h2>
+    <div style="overflow:auto"><table class="t"><thead><tr><th>Evento</th>${todas ? '<th>Origem</th>' : ''}<th class="num">Ocorrência</th><th class="num">Usuários</th><th class="num">URLs</th><th>Último dia</th><th>Tipo de conversão</th><th>Pontos (leadscoring)</th><th></th></tr></thead><tbody>
+    ${linhas.map(tr).join('') || `<tr><td colspan="${cols}" class="empty">Nada nesta guia no período.</td></tr>`}
+    </tbody></table></div></section>${urlsHtml}`;
+}
+
+function viewRegrasSite() {
   const f = CV.form;
   const evOpts = [...new Set([f.evento, ...CV.eventos.map((e) => e.evento)].filter(Boolean))];
   const semDados = !CV.eventos.length;
@@ -306,8 +403,6 @@ function viewConversoes() {
   return `
     <div class="banner ok" style="margin-bottom:14px">Aqui você define <strong>o que conta como conversão no site</strong>: um <strong>evento</strong> do Google Analytics, em <strong>qualquer URL</strong> ou só em algumas. Veja onde cada evento aparece, crie a regra e confira quantos negócios do Pipedrive têm aquela URL em “URL de Conversão”.
       <span class="muted">O GA4 marca até <em>page_view</em> como evento-chave, então a regra que vale é a sua.</span></div>
-    <div class="row" style="margin-bottom:12px"><label class="muted">Período dos números</label>
-      <select class="sel" id="cv-dias">${[7, 30, 90, 365].map((d) => `<option value="${d}" ${CV.dias === d ? 'selected' : ''}>últimos ${d} dias</option>`).join('')}</select></div>
     ${semDados ? '<div class="banner warn" style="margin-bottom:12px">Nenhum evento do GA4 carregado ainda. Rode <code>npx tsx scripts/ga4-sync.ts --apply</code>.</div>' : ''}
     <section class="card section"><h2>Eventos do site</h2>
       <p class="muted" style="margin-top:0">Eventos automáticos de alto volume (<em>page_view, session_start, first_visit, user_engagement, scroll, click</em>) não são guardados aqui: já estão nas sessões e páginas.</p>
@@ -346,15 +441,41 @@ function lerFormConversao() {
 }
 const redesenharConversoes = () => { $('#view').innerHTML = viewConversoes(); };
 
+/* classificação (tipo e pontos) de uma linha das guias: salva a linha inteira, no mesmo catálogo */
+async function salvarClassificacao(tr) {
+  const pontosTxt = tr.querySelector('.cv-pontos').value.trim();
+  const pontos = pontosTxt === '' ? null : Number(pontosTxt);
+  if (pontos !== null && (!Number.isInteger(pontos) || pontos < -1000 || pontos > 1000)) return toast('Pontos: número inteiro de -1000 a 1000.');
+  const tipo = tr.querySelector('.cv-tipo-conv').value || null;
+  await api('/api/painel/conversoes/catalogo', { method: 'PUT', body: { origem: tr.dataset.catOrigem, evento: tr.dataset.catEvento, tipo_conversao: tipo, pontos } });
+  const x = CV.globais.find((g) => g.origem === tr.dataset.catOrigem && g.evento === tr.dataset.catEvento);
+  if (x) Object.assign(x, { tipo_conversao: tipo, pontos, no_catalogo: true });
+  toast('Salvo');
+}
+
 document.addEventListener('click', async (ev) => {
   const b = ev.target.closest?.('[data-act]');
   if (!b || S.tab !== 'conversoes') return;
   const act = b.dataset.act;
   try {
-    if (act === 'ver-urls') {
+    if (act === 'guia') {
+      lerFormConversao();
+      CV.guia = b.dataset.guia;
+      CV.evSel = '';
+      CV.urls = null;
+      redesenharConversoes();
+    } else if (act === 'cadastrar-rd') {
+      const nome = $('#cv-rd-novo')?.value.trim();
+      if (!nome) return toast('Informe o nome do evento do RD.');
+      await api('/api/painel/conversoes/catalogo', { method: 'PUT', body: { origem: 'rd', evento: nome, tipo_conversao: null, pontos: null } });
+      await carregarConversoes();
+      redesenharConversoes();
+      toast('Evento cadastrado');
+    } else if (act === 'ver-urls') {
       lerFormConversao();
       CV.evSel = b.dataset.evento;
-      CV.urls = await api(`/api/painel/conversoes/eventos/urls?evento=${encodeURIComponent(CV.evSel)}&dias=${CV.dias}`);
+      CV.evOrigem = b.dataset.origem ?? 'site';
+      CV.urls = await api(`/api/painel/conversoes/eventos/urls?evento=${encodeURIComponent(CV.evSel)}&origem=${CV.evOrigem}&dias=${CV.dias}`);
       redesenharConversoes();
     } else if (act === 'nova-regra') {
       CV.form = { id: null, nome: '', tipo: 'lead', evento: b.dataset.evento, url_modo: 'qualquer', url_valor: '' };
@@ -404,6 +525,8 @@ document.addEventListener('change', async (ev) => {
     } else if (el.id === 'cv-modo') {
       lerFormConversao();
       redesenharConversoes();
+    } else if (el.classList?.contains('cv-tipo-conv') || el.classList?.contains('cv-pontos')) {
+      await salvarClassificacao(el.closest('tr'));
     } else if (el.dataset?.regraAtivo) {
       await api(`/api/painel/conversoes/regras/${el.dataset.regraAtivo}`, { method: 'PUT', body: { ativo: el.value === 'sim' } });
       await carregarConversoes();

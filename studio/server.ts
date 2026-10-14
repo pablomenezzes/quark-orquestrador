@@ -4,7 +4,7 @@ import { extname, join, normalize, resolve, sep } from 'node:path';
 import { FormsStore, StoreError } from './lib/forms-store.js';
 import { FORM_ID_RE } from './lib/form-schema.js';
 import { BI_PRODUTOS, BiNotFound, type BiFiltros, type BiProduto, type BiRepo } from './lib/bi.js';
-import { MARCOS, PRODUTOS, REGRA_TIPOS, REGRA_URL_MODOS, STATUS_NEGOCIO, PainelInvalido, PainelNotFound, type CriativoItem, type CriativoMapaPatch, type Marco, type NegociosFiltro, type PainelRepo, type Produto, type StatusNegocio } from './lib/painel-repo.js';
+import { CONVERSAO_ORIGENS, CONVERSAO_TIPOS, MARCOS, PRODUTOS, REGRA_TIPOS, REGRA_URL_MODOS, STATUS_NEGOCIO, PainelInvalido, PainelNotFound, type ConversaoOrigem, type CriativoItem, type CriativoMapaPatch, type Marco, type NegociosFiltro, type PainelRepo, type Produto, type StatusNegocio } from './lib/painel-repo.js';
 
 export type SubmitFn = (formId: string, mode: 'dry' | 'real', payload: unknown, ctx: { userAgent: string | null }) => Promise<{ status: number; body: unknown }>;
 
@@ -243,8 +243,21 @@ export function createStudioServer(opts: StudioOptions): Server {
       if (method === 'GET' && path === '/api/painel/conversoes/eventos') return send(res, 200, await repo.conversaoEventos(diasConv()));
       if (method === 'GET' && path === '/api/painel/conversoes/eventos/urls') {
         const ev = url.searchParams.get('evento') ?? '';
-        if (!ev || ev.length > 200) throw new HttpError(400, 'evento_invalido');
-        return send(res, 200, await repo.conversaoEventoUrls(ev, diasConv()));
+        if (!ev || ev.length > 300) throw new HttpError(400, 'evento_invalido');
+        const origemQ = url.searchParams.get('origem') ?? 'site';
+        if (!(CONVERSAO_ORIGENS as readonly string[]).includes(origemQ)) throw new HttpError(400, 'origem_invalida', { validas: [...CONVERSAO_ORIGENS] });
+        return send(res, 200, await repo.conversaoEventoUrls(ev, diasConv(), origemQ as ConversaoOrigem));
+      }
+      // Conversões Globais: site (GA4), RD (evento) e Pipedrive (Identificador de Conversão RD), com tipo de conversão e pontos de leadscoring.
+      if (method === 'GET' && path === '/api/painel/conversoes/globais') return send(res, 200, await repo.conversoesGlobais(diasConv()));
+      if (method === 'PUT' && path === '/api/painel/conversoes/catalogo') {
+        const b = await readJson(req);
+        if (!(CONVERSAO_ORIGENS as readonly unknown[]).includes(b?.origem)) throw new HttpError(400, 'origem_invalida', { validas: [...CONVERSAO_ORIGENS] });
+        if (typeof b?.evento !== 'string' || !b.evento.trim() || b.evento.length > 300) throw new HttpError(400, 'evento_invalido');
+        if (b.tipo_conversao !== null && !(CONVERSAO_TIPOS as readonly unknown[]).includes(b.tipo_conversao)) throw new HttpError(400, 'tipo_conversao_invalido', { validos: [...CONVERSAO_TIPOS] });
+        if (b.pontos !== null && !(Number.isInteger(b.pontos) && b.pontos >= -1000 && b.pontos <= 1000)) throw new HttpError(400, 'pontos_invalidos', { faixa: [-1000, 1000] });
+        await repo.salvarConversaoCatalogo({ origem: b.origem, evento: b.evento.trim(), tipo_conversao: b.tipo_conversao, pontos: b.pontos });
+        return send(res, 200, { ok: true });
       }
       if (method === 'GET' && path === '/api/painel/conversoes/regras') return send(res, 200, await repo.conversaoRegras());
       const regraId = /^\/api\/painel\/conversoes\/regras\/([^/]+)$/.exec(path);
