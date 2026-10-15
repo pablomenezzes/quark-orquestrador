@@ -349,7 +349,11 @@ export async function gravarRodada(
   if ((await store.trimestreFechado(trimestre, conta.id)) && !opts.reabrir) throw new RodadaRecusada(`${trimestre} esta FECHADO para a conta ${conta.id}; reabrir exige autorizacao explicita e motivo.`);
   const r = await lerParaRodada(client, store, conta, trimestre, hoje);
   if (!r.cartao.completa) throw new RodadaRecusada(`a leitura parou por cota (${r.cartao.parou}); nada foi gravado.`);
-  if (!r.cartao.reconciliacao.explicada && !opts.diferencaExplicada) throw new RodadaRecusada(`${r.cartao.reconciliacao.observacao}. Nada foi gravado.`);
+  if (!r.cartao.reconciliacao.explicada && !opts.diferencaExplicada) {
+    const onde = (r.cartao.reconciliacao.por_mes ?? []).filter((m) => !m.explicada)
+      .map((m) => `${m.mes}: gasto ${m.diferenca.gasto.toFixed(2)}, impressoes ${m.diferenca.impressoes}, cliques ${m.diferenca.cliques}, leads ${m.diferenca.leads}`);
+    throw new RodadaRecusada(`${r.cartao.reconciliacao.observacao}. Nada foi gravado. Onde: ${onde.join(' | ') || 'so no total'}`);
+  }
   const id = await store.criarRodada({ trimestre, conta_id: conta.id, de, ate, modo: 'gravacao', status: 'parcial', cartao: r.cartao, simulacao_de_origem: previa.rodada_id, autorizacao: opts.autorizacao, mb_previsto: r.cartao.mb_previsto });
   try {
     const aGravar = [...r.cmp.inserir, ...r.cmp.atualizar];
