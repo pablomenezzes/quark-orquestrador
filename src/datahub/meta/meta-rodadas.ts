@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Rodadas da Meta por trimestre de calendario (protocolo do Pablo, 2026-10-13). Toda rodada nasce em SIMULACAO: le a Meta (so GET), compara com o
  * que ja esta no banco, reconcilia contra o total da conta e produz o CARTAO DA RODADA. Gravar so com a autorizacao do Pablo ("pode seguir") depois do
  * cartao, vale para UMA rodada (uma conta e um intervalo) e exige a simulacao previa da MESMA conta e do MESMO intervalo.
@@ -25,6 +25,12 @@ export function trimestreIntervalo(t: string): { de: string; ate: string } {
   const ultimo = new Date(Date.UTC(ano, mesIni + 2, 0)).getUTCDate();
   const p = (n: number) => String(n).padStart(2, '0');
   return { de: `${ano}-${p(mesIni)}-01`, ate: `${ano}-${p(mesIni + 2)}-${p(ultimo)}` };
+}
+
+/** O intervalo lido da rodada: o do trimestre, mas nunca depois de hoje (a Meta recusa datas futuras; vale para o trimestre em curso). */
+export function intervaloRodada(t: string, hoje: string): { de: string; ate: string } {
+  const { de, ate } = trimestreIntervalo(t);
+  return { de, ate: ate < hoje ? ate : hoje };
 }
 
 /** corrente = o trimestre em curso; fechando = ate 30 dias depois do fim; fechado = depois disso (ou ja marcado como fechado). */
@@ -252,7 +258,7 @@ async function esfriar(client: MetaClient, conta: MetaConta) {
 export async function lerParaRodada(client: MetaClient, store: RodadaStoreLike, conta: MetaConta, trimestre: string, hoje: string) {
   const produto = await store.contaConfigurada(conta.id);
   if (!produto) throw new Error(`Conta ${conta.id} fora de ops.cfg_meta_conta: quarentena, nao ha rodada para ela.`);
-  const { de, ate } = trimestreIntervalo(trimestre);
+  const { de, ate } = intervaloRodada(trimestre, hoje);
   const inicio = Date.now();
   const antesReq = client.requisicoes;
   const novas: AdDia[] = [];
@@ -343,7 +349,7 @@ export async function gravarRodada(
   opts: { autorizacao: string; diferencaExplicada?: string; reabrir?: string },
 ) {
   if (!opts.autorizacao?.trim()) throw new RodadaRecusada('falta a autorizacao do Pablo (--autorizacao "pode seguir ...").');
-  const { de, ate } = trimestreIntervalo(trimestre);
+  const { de, ate } = intervaloRodada(trimestre, hoje);
   const previa = await store.simulacaoPrevia(conta.id, de, ate);
   if (!previa) throw new RodadaRecusada(`nao ha simulacao completa de ${trimestre} para a conta ${conta.id} (${de} a ${ate}). Rode a simulacao antes e mostre o cartao ao Pablo.`);
   if ((await store.trimestreFechado(trimestre, conta.id)) && !opts.reabrir) throw new RodadaRecusada(`${trimestre} esta FECHADO para a conta ${conta.id}; reabrir exige autorizacao explicita e motivo.`);

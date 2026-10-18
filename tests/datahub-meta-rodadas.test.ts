@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { MetaClient, type AdDia, type FetchLike } from '../src/datahub/meta/meta';
 import {
-  blocosDeDias, blocosMensais, CARTAO_TEXTO, compararLinhas, definirPausaCota, gravarRodada, hashLinha, reconciliar, RodadaRecusada, simularRodada, situacaoTrimestre, totaisDe, trimestreIntervalo,
+  blocosDeDias, blocosMensais, intervaloRodada, CARTAO_TEXTO, compararLinhas, definirPausaCota, gravarRodada, hashLinha, reconciliar, RodadaRecusada, simularRodada, situacaoTrimestre, totaisDe, trimestreIntervalo,
   type CartaoRodada, type RodadaStoreLike,
 } from '../src/datahub/meta/meta-rodadas';
 
@@ -18,6 +18,10 @@ describe('Meta: trimestres', () => {
     expect(trimestreIntervalo('2025-T1')).toEqual({ de: '2025-01-01', ate: '2025-03-31' });
     expect(trimestreIntervalo('2026-T2')).toEqual({ de: '2026-04-01', ate: '2026-06-30' });
     expect(() => trimestreIntervalo('2026-T5')).toThrow();
+  });
+  it('o intervalo lido nunca passa de hoje (a Meta recusa datas futuras no trimestre em curso)', () => {
+    expect(intervaloRodada('2026-T4', '2026-10-18')).toEqual({ de: '2026-10-01', ate: '2026-10-18' });
+    expect(intervaloRodada('2026-T3', '2026-10-18')).toEqual({ de: '2026-07-01', ate: '2026-09-30' });
   });
   it('situação: corrente, fechando (até 30 dias depois do fim), fechado', () => {
     expect(situacaoTrimestre('2026-T4', '2026-10-13')).toBe('corrente');
