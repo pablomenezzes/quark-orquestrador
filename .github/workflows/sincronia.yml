@@ -45,9 +45,7 @@ jobs:
       - name: Negocios (abertos, arquivados e excluidos)
         id: negocios
         continue-on-error: true
-        run: |
-          npx tsx scripts/datahub-sync.ts --entities deals,deals_archived,deals_deleted --apply
-          npx tsx scripts/atributos-recalcular.ts --apply
+        run: npx tsx scripts/datahub-sync.ts --entities deals,deals_archived,deals_deleted --apply   # ao final atualiza crm.deal_atributos (so o que mudou)
       - name: Historico de etapas (so os negocios sem historico)
         id: historico
         continue-on-error: true

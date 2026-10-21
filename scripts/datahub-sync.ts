@@ -111,6 +111,14 @@ try {
   if (dealKinds.length) {
     const deals = await syncDeals({ client, store, kinds: dealKinds, desde: DESDE, origem: 'manual', now: () => new Date(), maxPages });
     results.push(...deals.map((d) => ({ ...d, extra: `${d.backfill ? 'carga inicial' : 'só o que mudou'}, ${d.paginas} página(s)` })));
+    // o BI e o Painel leem os campos dos negócios de crm.deal_atributos (tabela pequena): atualiza só os que mudaram, logo depois da carga
+    try {
+      const n = (await pool.query('select crm.recalcular_deal_atributos(true) as n')).rows[0].n;
+      console.log(`deal_atributos: ${n} negócio(s) novos ou alterados.`);
+    } catch (e) {
+      console.error(`deal_atributos: ERRO ${e instanceof Error ? e.message : String(e)}`);
+      process.exitCode = 1;
+    }
   }
   if (wantsHistory) {
     const h = await syncHistory({
