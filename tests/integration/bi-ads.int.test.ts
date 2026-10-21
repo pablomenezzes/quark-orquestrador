@@ -59,6 +59,7 @@ run('BI Google Ads (transação com rollback)', () => {
       `insert into mkt.ga4_ads_dia (property_id, dia, campanha_id, campanha, custo, cliques, impressoes) values
         (9999, '2099-03-05', '77', 'Campanha Fictícia', 200, 100, 1000), (9999, '2099-04-02', '77', 'Campanha Fictícia', 100, 50, 500)`,
     );
+    await c().query('select crm.recalcular_deal_atributos(true)'); // a sincronizacao real faz isto depois dos negocios: as visoes do BI leem crm.deal_atributos
     await c().query('set local role orq_panel');
   });
   afterAll(async () => {

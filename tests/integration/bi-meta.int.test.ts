@@ -69,6 +69,7 @@ run('BI Meta Ads (transação com rollback)', () => {
     await c().query(`insert into mkt.cri_dor (nome) values ('Dor Fictícia')`);
     await c().query(`insert into mkt.cri_mensagem (dor_id, nome) select id, 'Mensagem Fictícia' from mkt.cri_dor where nome = 'Dor Fictícia'`);
     await c().query(`insert into mkt.cri_mapa (termo_chave, dor_id, mensagem_id) select 'ad um', d.id, m.id from mkt.cri_dor d join mkt.cri_mensagem m on m.dor_id = d.id where d.nome = 'Dor Fictícia'`);
+    await c().query('select crm.recalcular_deal_atributos(true)'); // a sincronizacao real faz isto depois dos negocios: as visoes do BI leem crm.deal_atributos
     await c().query(`select mkt.recalcular_ligacao_meta()`);
     await c().query('set local role orq_panel');
   });

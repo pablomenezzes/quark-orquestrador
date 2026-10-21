@@ -73,6 +73,7 @@ run('criativos: DOR, Mensagem e Módulo (transação com rollback)', () => {
       await c().query(`insert into crm.deals (pipedrive_id, pipeline_id, stage_id, owner_id, status, is_deleted, valor, created_at) values ($1, 940004, 953001, null, $2, false, $3, '2099-03-10T12:00:00Z')`, [d.id, d.st, d.valor]);
       await c().query(`insert into raw.pd_deals (source_id, payload, payload_hash) values ($1, $2::jsonb, 'h')`, [d.id, JSON.stringify({ id: d.id, custom_fields: { [KF]: d.fonte, [KT]: d.term } })]);
     }
+    await c().query('select crm.recalcular_deal_atributos(true)'); // a sincronizacao real faz isto depois dos negocios: as visoes do BI leem crm.deal_atributos
     await c().query('set local role orq_panel');
   });
   afterAll(async () => {

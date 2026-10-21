@@ -57,7 +57,10 @@ jobs:
       - name: GA4 (ultimos 7 dias)
         id: ga4
         continue-on-error: true
-        run: npx tsx scripts/ga4-sync.ts --apply
+        run: |
+          npx tsx scripts/ga4-sync.ts --apply
+          # historico comprimido: arquiva UMA vez cada mes fechado (35 dias depois do fim); nao relê nem regrava o que ja foi arquivado
+          npx tsx scripts/ga4-arquivar.ts --apply
       # Meta Ads: SO a estrutura (campanhas, conjuntos, anuncios) e a ligacao com o Pipedrive. O DESEMPENHO da Meta nao roda aqui: so por rodada
       # autorizada (scripts/meta-rodada.ts: simulacao, cartao e "pode seguir" do Pablo), nunca agendado. A etapa so roda com a variavel
       # META_ATIVO = "true"; limite de 25 minutos.

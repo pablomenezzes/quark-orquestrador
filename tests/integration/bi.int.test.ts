@@ -77,6 +77,7 @@ run('BI (transação com rollback)', () => {
       c().query(`insert into crm.stage_history (deal_id, estagio, entrou_em, stage_id, origem_dado) values ($1, $2, $3, $4, 'flow')`, [deal, `e${stage}`, t, stage]);
     await h(97100002, 950001, '2099-03-10T12:00:00Z'); await h(97100002, 950002, '2099-03-11T12:00:00Z'); await h(97100002, 950003, '2099-03-12T12:00:00Z');
     await h(97100006, 950001, '2099-03-10T12:00:00Z'); await h(97100006, 950004, '2099-03-11T12:00:00Z');
+    await c().query('select crm.recalcular_deal_atributos(true)'); // a sincronizacao real faz isto depois dos negocios: as visoes do BI leem crm.deal_atributos
     await c().query('set local role orq_panel');
   });
   afterAll(async () => {

@@ -75,6 +75,7 @@ run('BI Site e páginas (transação com rollback)', () => {
     );
     await c().query(`insert into mkt.ga4_eventos_dia (property_id, dia, host, pagina, evento, eventos, usuarios) values (9999, '2099-03-05', 'quarkrh.com.br', '/lp-teste', 'form_fake_site', 7, 6)`);
     await c().query(`insert into mkt.conversao_regras (nome, tipo, evento, url_modo) values ('regra fictícia do site', 'lead', 'form_fake_site', 'qualquer')`);
+    await c().query('select crm.recalcular_deal_atributos(true)'); // a sincronizacao real faz isto depois dos negocios: as visoes do BI leem crm.deal_atributos
     await c().query('set local role orq_panel');
   });
   afterAll(async () => {
