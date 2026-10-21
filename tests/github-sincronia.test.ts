@@ -20,7 +20,7 @@ describe('.github/workflows/meta-incremental.yml: Meta de hora em hora, só incr
     expect(comandos).not.toMatch(/meta-rodada|meta-sync|--desde|--dias \d{3,}/);
     expect(w).not.toMatch(/SUPABASE_DB_URL|PANEL_DB_URL|CHAT_DB_URL|INGEST_DB_URL|SERVICE_ROLE|PIPEDRIVE|GOOGLE/);
   });
-  it('o script limita a janela a 28 dias e o código só lê as janelas de 3 e 28 dias', () => {
+  it('o script limita a janela a 2 dias (48h) e nunca faz carga toda', () => {
     const s = ler('scripts/meta-incremental.ts');
     expect(s).toContain('dias > DIAS_DIARIA');
     expect(s).toContain("opt('--dias') ?? 'auto'");

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Sincronizacao do GA4 -> mkt.ga4_* (papel orq_sync). Retomavel e sem repetir trabalho:
  *  - carga inicial por blocos de dias, do mais antigo ao mais novo; a marca d'agua (ops.sync_checkpoints.marca_dagua) so avanca
  *    depois que o bloco foi gravado, entao uma interrupcao retoma do bloco seguinte;
@@ -11,7 +11,7 @@ import {
   type AdsDia, type EventoDia, type Ga4Client, type Ga4Entidade, type PaginaDia, type SessaoDia, type TotalDia,
 } from './ga4.js';
 
-export const REVISAO_DIAS = 7;
+export const REVISAO_DIAS = 3;
 export const BLOCO_DIAS = 31;
 const CHUNK = 2000;
 

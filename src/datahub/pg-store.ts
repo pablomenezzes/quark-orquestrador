@@ -28,14 +28,20 @@ export class PgDatahubStore implements DatahubStore, DealsStore, HistoryStore {
     return r.rowCount ?? 0;
   }
 
-  async pendingHistory(range: { from: string; to: string }): Promise<DealHistoryTask[]> {
+  /**
+   * `alteradosDesde` (negocios ANTIGOS): so entram os que ja tinham historico lido e depois mudaram de etapa, ou que mudaram nesse periodo
+   * (ainda sem historico). Assim um lead velho que e mexido no Pipedrive nao fica com a linha do tempo desatualizada, sem reler todos os antigos.
+   */
+  async pendingHistory(range: { from: string; to: string }, opts: { alteradosDesde?: string } = {}): Promise<DealHistoryTask[]> {
     const r = await this.q.query(
       `select d.pipedrive_id as deal_id, d.created_at, d.stage_id, d.stage_change_time
          from crm.deals d left join raw.pd_deal_flow f on f.deal_id = d.pipedrive_id
         where d.created_at >= $1 and d.created_at < $2 and not d.is_deleted and d.stage_change_time is not null
           and (f.deal_id is null or f.stage_change_time_vista is distinct from d.stage_change_time)
+          and ($3::timestamptz is null or f.deal_id is not null
+               or exists (select 1 from raw.pd_deals r where r.source_id = d.pipedrive_id and r.source_update_time >= $3::timestamptz))
         order by case d.status when 'open' then 0 when 'won' then 1 else 2 end, d.created_at desc`,
-      [range.from, range.to],
+      [range.from, range.to, opts.alteradosDesde ?? null],
     );
     const iso = (v: unknown) => (v ? new Date(v as string).toISOString() : null);
     return r.rows.map((x: any) => ({ deal_id: Number(x.deal_id), created_at: iso(x.created_at), stage_id: x.stage_id == null ? null : Number(x.stage_id), stage_change_time: iso(x.stage_change_time) }));

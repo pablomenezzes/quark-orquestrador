@@ -38,54 +38,58 @@ function storeFalso(opts: { existentes?: Array<Record<string, unknown>>; fechado
 }
 
 describe('Meta: atualização incremental (só os últimos dias)', () => {
-  it('3 dias de hora em hora e 28 dias às 06 UTC; nunca a carga toda', () => {
-    expect(DIAS_HORA).toBe(3);
-    expect(DIAS_DIARIA).toBe(28);
-    expect(diasDaExecucao(new Date('2026-10-21T06:20:00Z'))).toBe(28);
-    for (const h of [0, 1, 5, 7, 12, 23]) expect(diasDaExecucao(new Date(`2026-10-21T${String(h).padStart(2, '0')}:20:00Z`)), `hora ${h}`).toBe(3);
+  it('só hoje de hora em hora e só as últimas 48h (2 dias) às 06 UTC; nunca a carga toda', () => {
+    expect(DIAS_HORA).toBe(1);
+    expect(DIAS_DIARIA).toBe(2);
+    expect(diasDaExecucao(new Date('2026-10-21T06:20:00Z'))).toBe(2);
+    for (const h of [0, 1, 5, 7, 12, 23]) expect(diasDaExecucao(new Date(`2026-10-21T${String(h).padStart(2, '0')}:20:00Z`)), `hora ${h}`).toBe(1);
     expect(trimestreDe('2026-10-21')).toBe('2026-T4');
     expect(trimestreDe('2026-03-31')).toBe('2026-T1');
   });
-  it('lê só a janela pedida (3 dias = 1 bloco) e grava o que é novo', async () => {
+  it('lê só a janela pedida (2 dias = 1 bloco) e grava o que é novo', async () => {
     const { client, pedidos } = metaFalsa();
     const { store, gravadas } = storeFalso();
-    const r = await atualizarIncremental(client, store, CONTA, '2026-10-21', 3);
-    expect(r).toMatchObject({ de: '2026-10-19', ate: '2026-10-21', blocos: 1, linhas_lidas: 3, inseridas: 3, atualizadas: 0, mantidas: 0 });
-    expect(pedidos.every((p) => p.since >= '2026-10-19' && p.until <= '2026-10-21')).toBe(true);
+    const r = await atualizarIncremental(client, store, CONTA, '2026-10-21', 2);
+    expect(r).toMatchObject({ de: '2026-10-20', ate: '2026-10-21', blocos: 1, linhas_lidas: 2, inseridas: 2, atualizadas: 0, mantidas: 0 });
+    expect(pedidos.every((p) => p.since >= '2026-10-20' && p.until <= '2026-10-21')).toBe(true);
     expect(pedidos).toHaveLength(2); // linhas por anúncio + total da conta
-    expect(gravadas.map((g) => g.dia)).toEqual(['2026-10-19', '2026-10-20', '2026-10-21']);
+    expect(gravadas.map((g) => g.dia)).toEqual(['2026-10-20', '2026-10-21']);
     expect(r.diferencas).toEqual([]);
   });
   it('só grava o que mudou: igual fica, valor diferente é atualizado, dia novo é inserido', async () => {
-    const { client } = metaFalsa({ gastoPorDia: { '2026-10-20': '12.00' } });
-    const igual = { ...linhaApi('2026-10-19'), anuncio_id: '1', dia: '2026-10-19', gasto: '10.00', impressoes: 1000, alcance: 800, cliques: 30, cliques_link: 20, visitas_pagina: 0, leads_meta: 2, video_reproducoes: 0, video_3s: 0, video_p25: 0, video_p50: 0, video_p75: 0, video_p95: 0, video_p100: 0, video_thruplay: 0, video_tempo_medio: null };
-    const antigo = { ...igual, dia: '2026-10-20', gasto: '10.00' }; // a Meta revisou o gasto para 12,00
-    const { store, gravadas } = storeFalso({ existentes: [igual, antigo] });
-    const r = await atualizarIncremental(client, store, CONTA, '2026-10-21', 3);
-    expect([r.inseridas, r.atualizadas, r.mantidas]).toEqual([1, 1, 1]);
-    expect(gravadas.map((g) => [g.dia, g.gasto])).toEqual([['2026-10-21', 10], ['2026-10-20', 12]]);
+    const { client } = metaFalsa();
+    const igual = { ...linhaApi('2026-10-20'), anuncio_id: '1', dia: '2026-10-20', gasto: '10.00', impressoes: 1000, alcance: 800, cliques: 30, cliques_link: 20, visitas_pagina: 0, leads_meta: 2, video_reproducoes: 0, video_3s: 0, video_p25: 0, video_p50: 0, video_p75: 0, video_p95: 0, video_p100: 0, video_thruplay: 0, video_tempo_medio: null };
+    const { store, gravadas } = storeFalso({ existentes: [igual] });
+    const r = await atualizarIncremental(client, store, CONTA, '2026-10-21', 2);
+    expect([r.inseridas, r.atualizadas, r.mantidas]).toEqual([1, 0, 1]);
+    expect(gravadas.map((g) => [g.dia, g.gasto])).toEqual([['2026-10-21', 10]]);
+    // a Meta revisou o gasto do dia 20 para 12,00: vira atualização
+    const rev = metaFalsa({ gastoPorDia: { '2026-10-20': '12.00' } });
+    const s2 = storeFalso({ existentes: [igual] });
+    const r2 = await atualizarIncremental(rev.client, s2.store, CONTA, '2026-10-21', 2);
+    expect([r2.inseridas, r2.atualizadas, r2.mantidas]).toEqual([1, 1, 0]);
+    expect(s2.gravadas.map((g) => [g.dia, g.gasto])).toEqual([['2026-10-21', 10], ['2026-10-20', 12]]);
   });
   it('trimestre FECHADO nunca é tocado', async () => {
     const { client, pedidos } = metaFalsa();
     const { store, gravadas } = storeFalso({ fechados: ['2026-T4'] });
-    const r = await atualizarIncremental(client, store, CONTA, '2026-10-21', 3);
+    const r = await atualizarIncremental(client, store, CONTA, '2026-10-21', 2);
     expect(r).toMatchObject({ blocos: 0, ignorados_fechados: 1, inseridas: 0 });
     expect(pedidos).toHaveLength(0);
     expect(gravadas).toHaveLength(0);
   });
-  it('janela de 28 dias anda de 7 em 7 dias', async () => {
+  it('nunca a carga toda: pedir mais de 2 dias é recusado antes de chamar a Meta', async () => {
     const { client, pedidos } = metaFalsa();
     const { store } = storeFalso();
-    const r = await atualizarIncremental(client, store, CONTA, '2026-10-21', 28);
-    expect(r.blocos).toBe(4);
-    expect(r.linhas_lidas).toBe(28);
-    for (const p of pedidos) expect((Date.parse(p.until) - Date.parse(p.since)) / 86_400_000).toBeLessThanOrEqual(6);
+    await expect(atualizarIncremental(client, store, CONTA, '2026-10-21', 3)).rejects.toThrow(/nunca a carga toda/);
+    await expect(atualizarIncremental(client, store, CONTA, '2026-10-21', 28)).rejects.toThrow(/nunca a carga toda/);
+    expect(pedidos).toHaveLength(0);
   });
   it('diferença com o total da conta nos dias recentes é registrada, mas não trava a atualização', async () => {
     const { client } = metaFalsa({ contaExtra: 0.07 });
     const { store, gravadas } = storeFalso();
-    const r = await atualizarIncremental(client, store, CONTA, '2026-10-21', 3);
-    expect(gravadas).toHaveLength(3);
+    const r = await atualizarIncremental(client, store, CONTA, '2026-10-21', 2);
+    expect(gravadas).toHaveLength(2);
     expect(r.diferencas).toHaveLength(1);
     expect(r.diferencas[0]).toContain('gasto -0.07');
   });
@@ -93,14 +97,14 @@ describe('Meta: atualização incremental (só os últimos dias)', () => {
     const { client } = metaFalsa({ usoNaPrimeira: 80 });
     const { store, gravadas } = storeFalso();
     let esperas = 0;
-    const r = await atualizarIncremental(client, store, CONTA, '2026-10-21', 3, { esfriar: async () => void esperas++ });
+    const r = await atualizarIncremental(client, store, CONTA, '2026-10-21', 2, { esfriar: async () => void esperas++ });
     expect(esperas).toBe(1);
-    expect(r.inseridas).toBe(3);
-    expect(gravadas).toHaveLength(3);
+    expect(r.inseridas).toBe(2);
+    expect(gravadas).toHaveLength(2);
     // sem como esfriar: para (parou) e nada do bloco foi gravado
     const quente = metaFalsa({ usoNaPrimeira: 80 });
     const s2 = storeFalso();
-    const r2 = await atualizarIncremental(quente.client, s2.store, CONTA, '2026-10-21', 3);
+    const r2 = await atualizarIncremental(quente.client, s2.store, CONTA, '2026-10-21', 2);
     expect(r2.parou).toMatch(/80%/);
     expect(s2.gravadas).toHaveLength(0);
   });

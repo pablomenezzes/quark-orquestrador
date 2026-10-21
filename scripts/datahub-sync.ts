@@ -47,9 +47,11 @@ if (maxPages !== undefined && !(Number.isInteger(maxPages) && maxPages > 0)) {
   process.exit(1);
 }
 const wantsHistory = wanted.includes(HISTORY_ENTITY);
-const createdYear = opt('--created-year') ? Number(opt('--created-year')) : undefined;
-if (wantsHistory && !(createdYear && Number.isInteger(createdYear) && createdYear >= 2000 && createdYear <= 2100)) {
-  console.error('Para o histórico de etapas informe o ano de criação dos negócios: --created-year 2026');
+// --created-year 2026 (ano de criação) ou --created-year antigos (negócios criados antes de 2025: só os já lidos que mudaram de etapa ou foram alterados nos últimos 14 dias)
+const antigos = opt('--created-year') === 'antigos';
+const createdYear = !antigos && opt('--created-year') ? Number(opt('--created-year')) : undefined;
+if (wantsHistory && !antigos && !(createdYear && Number.isInteger(createdYear) && createdYear >= 2000 && createdYear <= 2100)) {
+  console.error('Para o histórico de etapas informe o ano de criação dos negócios: --created-year 2026 (ou --created-year antigos)');
   process.exit(1);
 }
 const maxDeals = opt('--max-deals') ? Number(opt('--max-deals')) : undefined;
@@ -122,10 +124,10 @@ try {
   }
   if (wantsHistory) {
     const h = await syncHistory({
-      client, store, year: createdYear!, modo: 'backfill', origem: 'manual', maxDeals, concurrency: Number(opt('--concurrency') ?? 6), now: () => new Date(),
+      client, store, year: createdYear, antigos: antigos ? { alteradosHaDias: 14 } : undefined, modo: 'backfill', origem: 'manual', maxDeals, concurrency: Number(opt('--concurrency') ?? 6), now: () => new Date(),
       onProgress: (feitos, total) => { if (feitos % 250 === 0) console.log(`  histórico: ${feitos}/${total} negócios lidos (${client.usage.tokens} unidades até agora)`); },
     });
-    results.push({ ...h, extra: `criados em ${createdYear}: ${h.semMudanca} sem mudança de etapa (sem consultar), ${h.pendentesAntes} com mudança, ${h.restantes} ainda na fila, ${h.avisos} aviso(s)` });
+    results.push({ ...h, extra: `criados ${antigos ? 'antes de 2025 (só os alterados)' : `em ${createdYear}`}:${h.semMudanca} sem mudança de etapa (sem consultar), ${h.pendentesAntes} com mudança, ${h.restantes} ainda na fila, ${h.avisos} aviso(s)` });
   }
   console.log('');
   console.log('entidade             status   lidos  gravados  atualizados  ignorados  falhas  unidades');

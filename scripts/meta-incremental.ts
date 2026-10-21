@@ -2,7 +2,7 @@
  * Atualizacao INCREMENTAL do desempenho da Meta (somente leitura na Meta; grava so linhas novas ou alteradas).
  *   npx tsx scripts/meta-incremental.ts                 -> simulacao: le a Meta e mostra o que gravaria
  *   npx tsx scripts/meta-incremental.ts --apply         -> grava (papel orq_sync)
- *   --dias auto|N      auto (padrao): 28 dias as 06 UTC, 3 dias nas outras horas; ou um numero de dias ate hoje
+ *   --dias auto|N      auto (padrao): 48h (2 dias) as 06 UTC, so hoje (1 dia) nas outras horas; N de 1 a 2
  *   --contas rh,clinic
  * Roda de hora em hora no GitHub Actions (.github/workflows/meta-incremental.yml). Nunca relê o historico todo: so os ultimos dias.
  */

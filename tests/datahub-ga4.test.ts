@@ -85,8 +85,8 @@ describe('GA4: datas e intervalo da sincronização', () => {
     expect(intervalo('2025-01-01', null, '2026-10-09')).toEqual({ inicio: '2025-01-01', fim: '2026-10-08', modo: 'backfill' });
     const i = intervalo('2025-01-01', '2026-10-08', '2026-10-09');
     expect(i.modo).toBe('incremental');
-    expect(i.inicio).toBe('2026-10-02'); // marca - (REVISAO_DIAS - 1)
-    expect(REVISAO_DIAS).toBe(7);
+    expect(i.inicio).toBe('2026-10-06'); // marca - (REVISAO_DIAS - 1): so os ultimos 3 dias (o GA4 ajusta por 2 a 3 dias)
+    expect(REVISAO_DIAS).toBe(3);
   });
   it('a revisão nunca volta antes do início configurado', () => {
     expect(intervalo('2026-10-05', '2026-10-06', '2026-10-09').inicio).toBe('2026-10-05');

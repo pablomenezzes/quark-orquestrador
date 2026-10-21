@@ -1,6 +1,6 @@
 name: Meta Ads incremental (de hora em hora)
 
-# De hora em hora (UTC) atualiza SO os ultimos dias do desempenho da Meta: 3 dias; as 06 UTC, 28 dias (janela em que a atribuicao ainda muda).
+# De hora em hora (UTC) atualiza SO o dia de HOJE do desempenho da Meta; as 06 UTC, so as ultimas 48h (fecha o dia anterior).
 # Nunca faz carga historica. Meta: somente leitura (so GET, so graph.facebook.com, token no cabecalho). Grava pelo papel orq_sync (sem permissao de apagar).
 # Para a 75% da cota da Meta (espera e relê so o bloco de 7 dias; se continuar quente, termina sem falhar e a proxima hora continua).
 # Trimestres FECHADOS nunca sao tocados. So roda com a variavel do repositorio META_ATIVO = "true". Nenhum gatilho de pull request.

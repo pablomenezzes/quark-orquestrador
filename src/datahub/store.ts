@@ -55,7 +55,7 @@ export interface HistoryStore extends DatahubStore {
   /** Negócios sem nenhuma mudança de etapa: uma linha "entrou na criação", sem chamar a API. Devolve quantas linhas novas. */
   seedNoChangeHistory(range: { from: string; to: string }): Promise<number>;
   /** Fila de negócios com mudança de etapa ainda não lida (ou lida antes da última mudança). Abertos e ganhos primeiro. */
-  pendingHistory(range: { from: string; to: string }): Promise<DealHistoryTask[]>;
+  pendingHistory(range: { from: string; to: string }, opts?: { alteradosDesde?: string }): Promise<DealHistoryTask[]>;
   saveDealHistory(h: {
     deal_id: number;
     items: unknown[];

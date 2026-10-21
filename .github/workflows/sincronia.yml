@@ -52,6 +52,8 @@ jobs:
         run: |
           npx tsx scripts/datahub-sync.ts --entities deal_history --created-year 2026 --apply
           npx tsx scripts/datahub-sync.ts --entities deal_history --created-year 2025 --apply
+          # leads ANTIGOS (criados antes de 2025) que foram mexidos no Pipedrive: relê o historico so dos ja lidos que mudaram de etapa ou dos alterados nos ultimos 14 dias
+          npx tsx scripts/datahub-sync.ts --entities deal_history --created-year antigos --apply
       - name: GA4 (ultimos 7 dias)
         id: ga4
         continue-on-error: true

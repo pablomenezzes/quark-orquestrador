@@ -24,8 +24,13 @@ export type HistoryResult = JobResult & { entity: string; semMudanca: number; pe
 export async function syncHistory(args: {
   client: HistoryClient;
   store: HistoryStore;
-  /** Ano de criação dos negócios (inclusive). Ex.: 2026. */
-  year: number;
+  /** Ano de criação dos negócios (inclusive). Ex.: 2026. Ou, no lugar dele, `antigos`. */
+  year?: number;
+  /**
+   * Negócios ANTIGOS (criados antes de 2025): relê o histórico só dos que já tinham sido lidos e mudaram de etapa, ou que foram alterados
+   * nos últimos `alteradosHaDias` dias. Não semeia "entrou na criação" nem lê todos os antigos.
+   */
+  antigos?: { alteradosHaDias: number };
   modo?: 'backfill' | 'incremental';
   origem?: 'agendada' | 'manual';
   /** Para depois de N negócios (carga gradual). */
@@ -36,7 +41,8 @@ export async function syncHistory(args: {
   onProgress?: (feitos: number, total: number) => void;
 }): Promise<HistoryResult> {
   const { client, store, now } = args;
-  const range = { from: `${args.year}-01-01T00:00:00Z`, to: `${args.year + 1}-01-01T00:00:00Z` };
+  const range = args.antigos ? { from: '1970-01-01T00:00:00Z', to: '2025-01-01T00:00:00Z' } : { from: `${args.year}-01-01T00:00:00Z`, to: `${args.year! + 1}-01-01T00:00:00Z` };
+  const alteradosDesde = args.antigos ? new Date(now().getTime() - args.antigos.alteradosHaDias * 86_400_000).toISOString() : undefined;
   const jobId = await store.startJob({ entity: HISTORY_ENTITY, modo: args.modo ?? 'backfill', origem: args.origem ?? 'manual' });
   const before = { ...client.usage };
   const counts = { lidos: 0, gravados: 0, atualizados: 0, ignorados: 0, falhas: 0 };
@@ -47,8 +53,8 @@ export async function syncHistory(args: {
   let result: JobResult;
 
   try {
-    semMudanca = await store.seedNoChangeHistory(range);
-    const fila = await store.pendingHistory(range);
+    semMudanca = args.antigos ? 0 : await store.seedNoChangeHistory(range);
+    const fila = await store.pendingHistory(range, { alteradosDesde });
     pendentesAntes = fila.length;
     const tasks = args.maxDeals != null ? fila.slice(0, args.maxDeals) : fila;
     let seguidas = 0;
