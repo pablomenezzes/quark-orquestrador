@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Monitor diário · QuarkRH</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/s/studio.css">
+  <style>
+    /* Brand Core do QuarkRH (quarkrh-brand-core.md): laranja #EA8C0C é o único laranja e só entra no que mais importa (preenchimento, nunca texto sobre claro);
+       texto #212529; apoio turquesa, verde e azul nunca dominam; Red Hat Display 400 e 700. Verde e vermelho semânticos abaixo aguardam aprovação do Pablo. */
+    :root {
+      --accent: #EA8C0C; --accent-ink: #212529; --accent-soft: rgba(234, 140, 12, .16);
+      --font: 'Red Hat Display', system-ui, -apple-system, 'Segoe UI', sans-serif;
+      --m-bg: #ffffff; --m-ink: #212529; --m-ink2: #55595e; --m-muted: #8a8d91; --m-line: #e6e7e8; --m-card: #ffffff; --m-neutro: #b8babd;
+      --m-laranja: #EA8C0C; --m-turquesa: #39B4B6; --m-verde: #98BF12; --m-azul: #00ABE4;
+      --m-bom: #2f7d1f; --m-ruim: #b3261e; --m-bom-bg: rgba(66, 165, 43, .12); --m-ruim-bg: rgba(179, 38, 30, .10);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme='light']) {
+        --accent: #EA8C0C; --accent-ink: #212529; --accent-soft: rgba(234, 140, 12, .16);
+        --m-bg: #212529; --m-ink: #ffffff; --m-ink2: #c9cbcd; --m-muted: #8f9296; --m-line: #3a3f44; --m-card: #2a2e33; --m-neutro: #6b6f73;
+        --m-bom: #8fd47a; --m-ruim: #ff8a80; --m-bom-bg: rgba(143, 212, 122, .14); --m-ruim-bg: rgba(255, 138, 128, .14);
+      }
+    }
+    body { font-family: var(--font); background: var(--m-bg); color: var(--m-ink); font-weight: 400; }
+    b, strong, h1, h2, h3, th { font-weight: 700; }
+    .mon { max-width: 1280px; margin: 0 auto; padding: 18px 20px 40px; font-variant-numeric: tabular-nums; }
+    .faixa { height: 4px; border-radius: 2px; background: linear-gradient(90deg, var(--m-laranja) 0 25%, var(--m-turquesa) 25% 50%, var(--m-verde) 50% 75%, var(--m-azul) 75% 100%); margin: 0 0 14px; }
+    .cab { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; margin-bottom: 4px; }
+    .cab .marca { font-weight: 700; font-size: 15px; letter-spacing: .01em; }
+    .cab h1 { font-size: 26px; margin: 0; letter-spacing: -.01em; }
+    .etiquetas { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-left: auto; font-size: 12.5px; color: var(--m-ink2); }
+    .etq { border: 1px solid var(--m-line); border-radius: 999px; padding: 2px 10px; background: var(--m-card); }
+    .veredito { font-size: 17px; margin: 8px 0 14px; color: var(--m-ink); max-width: 980px; }
+    .veredito .alerta { color: var(--m-ruim); font-weight: 700; }
+    .barra-ctl { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin-bottom: 16px; }
+    .abas-m { display: flex; gap: 4px; }
+    .abas-m button { font: inherit; font-weight: 700; padding: 8px 16px; border: 0; border-bottom: 3px solid transparent; background: transparent; color: var(--m-ink2); cursor: pointer; }
+    .abas-m button[aria-selected='true'] { color: var(--m-ink); border-bottom-color: var(--m-laranja); }
+    .abas-m button:focus-visible, .mon select:focus-visible { outline: 2px solid var(--m-azul); outline-offset: 2px; }
+    .mon select { font: inherit; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--m-line); background: var(--m-card); color: var(--m-ink); }
+    .tres { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .quatro { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .cartao { background: var(--m-card); border: 1px solid var(--m-line); border-radius: 12px; padding: 14px 16px 12px; min-width: 0; }
+    .cartao h2 { font-size: 15px; margin: 0; }
+    .cartao .sub { font-size: 12.5px; color: var(--m-ink2); margin: 2px 0 10px; }
+    table.kp { width: 100%; border-collapse: collapse; font-size: 14px; }
+    table.kp td, table.kp th { padding: 7px 0; border-bottom: 1px solid var(--m-line); vertical-align: baseline; }
+    table.kp tr:last-child td { border-bottom: 0; }
+    table.kp .rot { color: var(--m-ink2); }
+    table.kp .rot small { display: block; color: var(--m-muted); font-size: 11.5px; }
+    table.kp .val { text-align: right; font-weight: 700; font-size: 18px; white-space: nowrap; padding-left: 8px; }
+    table.kp tr.n1 .val { font-size: 20px; }
+    table.kp tr.n2 .val { font-size: 15px; font-weight: 700; }
+    table.kp .ant { text-align: right; color: var(--m-muted); font-size: 11.5px; font-weight: 400; white-space: nowrap; }
+    table.kp .dl { text-align: right; white-space: nowrap; padding-left: 8px; }
+    .delta { display: inline-block; font-size: 12.5px; font-weight: 700; padding: 1px 7px; border-radius: 6px; background: var(--m-line); color: var(--m-ink2); }
+    .delta.bom { background: var(--m-bom-bg); color: var(--m-bom); }
+    .delta.ruim { background: var(--m-ruim-bg); color: var(--m-ruim); }
+    .na { color: var(--m-muted); font-weight: 400; font-size: 12.5px; }
+    .destaque { border-left: 4px solid var(--m-laranja); }
+    .canal-cab { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .canal-cab i { width: 10px; height: 22px; border-radius: 3px; display: inline-block; }
+    table.cn { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+    table.cn th { font-size: 11.5px; color: var(--m-muted); text-align: right; padding: 4px 0 6px 8px; border-bottom: 1px solid var(--m-line); font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
+    table.cn th:first-child, table.cn td:first-child { text-align: left; padding-left: 0; }
+    table.cn td { padding: 6px 0 6px 8px; border-bottom: 1px solid var(--m-line); text-align: right; white-space: nowrap; }
+    table.cn td:first-child { color: var(--m-ink2); }
+    table.cn td b { font-size: 15px; }
+    table.cn td .delta { margin-left: 4px; font-size: 11.5px; }
+    table.cn tr:last-child td { border-bottom: 0; }
+    .graficos { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 14px; }
+    svg.gr { width: 100%; height: auto; display: block; overflow: visible; }
+    svg.gr text { fill: var(--m-muted); font-size: 11px; font-family: var(--font); }
+    svg.gr .grid { stroke: var(--m-line); stroke-width: 1; }
+    svg.gr .hit:hover { fill: var(--m-line); fill-opacity: .5; }
+    .leg { display: flex; gap: 14px; font-size: 12.5px; color: var(--m-ink2); margin: 0 0 4px; }
+    .leg i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+    .nota { font-size: 12px; color: var(--m-muted); margin: 10px 0 0; }
+    .erro-m { background: var(--m-ruim-bg); color: var(--m-ruim); border-radius: 10px; padding: 10px 14px; margin: 10px 0; }
+    .aviso-m { background: var(--m-accent-soft, rgba(234, 140, 12, .14)); border-radius: 10px; padding: 8px 12px; margin: 10px 0; font-size: 13px; }
+    .carregando { opacity: .55; transition: opacity .15s; }
+    .esq { animation: pisca 1.2s ease-in-out infinite; color: var(--m-muted); }
+    @keyframes pisca { 50% { opacity: .45; } }
+    details.defs { margin-top: 22px; font-size: 13px; color: var(--m-ink2); }
+    details.defs summary { cursor: pointer; font-weight: 700; color: var(--m-ink); }
+    details.defs li { margin: 4px 0; }
+    #tip { position: fixed; z-index: 40; pointer-events: none; background: var(--m-card); color: var(--m-ink); border: 1px solid var(--m-line); border-radius: 8px; padding: 8px 10px; font-size: 12.5px; box-shadow: 0 4px 16px rgba(0,0,0,.18); max-width: 320px; }
+    @media (max-width: 980px) { .tres, .quatro, .graficos { grid-template-columns: 1fr; } .etiquetas { margin-left: 0; } .cab h1 { font-size: 22px; } }
+  </style>
+</head>
+<body>
+  <header class="top" data-pagina="monitor"></header>
+  <main class="mon">
+    <div class="faixa" aria-hidden="true"></div>
+    <div class="cab">
+      <span class="marca">QuarkRH</span><!-- espaço reservado para a logo oficial (Logo_quarkrh_v2.svg): a logo é arquivo da marca, nunca desenhada aqui -->
+      <h1 id="titulo">Monitor diário</h1>
+      <div class="etiquetas"><span class="etq">Fonte de verdade: Pipedrive, Meta Ads e GA4</span><span class="etq" id="et-dados">Carregando…</span></div>
+    </div>
+    <p class="veredito" id="veredito"><span class="esq">Carregando o resultado de hoje…</span></p>
+    <div class="barra-ctl">
+      <div class="abas-m" role="tablist" aria-label="Painéis">
+        <button role="tab" data-painel="monitor" aria-selected="true">Monitor diário</button>
+        <button role="tab" data-painel="canais" aria-selected="false">Canais</button>
+      </div>
+      <label>Produto <select id="produto"><option value="">QuarkRH e QuarkClinic (consolidado)</option><option value="rh">QuarkRH</option><option value="clinic">QuarkClinic</option></select></label>
+      <button id="atualizar" class="btn" type="button">Atualizar agora</button>
+    </div>
+    <div id="aviso"></div>
+    <section id="painel" aria-live="polite"></section>
+    <details class="defs">
+      <summary>Definições e origem de cada número</summary>
+      <ul>
+        <li><b>Hoje, semana e mês:</b> o dia vira à meia-noite em America/Fortaleza; a semana começa na segunda. Cada período é comparado com o <b>mesmo trecho</b> anterior (mesmo número de dias desde o início). No comparativo do dia, as contagens de ontem vão até a <b>mesma hora</b> de agora.</li>
+        <li><b>Leads e MQL:</b> negócios do Pipedrive por data de <b>criação</b> (lead = conta como lead; MQL = lead não perdido por Lead Inválido, Suporte, Contato Inexistente ou Duplicado, regra D-36). Os últimos dias têm % MQL inflado: lead aberto conta como MQL até ser desqualificado.</li>
+        <li><b>Reuniões agendadas:</b> negócios que <b>entraram</b> na etapa marcada como Reunião Agendada, pela data da entrada.</li>
+        <li><b>Ganhos e MRR novo:</b> negócios ganhos, pela data do <b>fechamento</b> (fluxo), com o valor do negócio. MRR novo = soma do valor dos ganhos do período.</li>
+        <li><b>Investimento:</b> Meta Ads pelo gasto do dia (conta do produto escolhido) e Google Ads pelo custo no GA4 (QuarkRH; chega com atraso de cerca de 1 dia). Social e Orgânico não têm verba: custo mostra "não se aplica", nunca zero.</li>
+        <li><b>CPL e CAC de mídia:</b> investimento ÷ leads e investimento ÷ ganhos. CAC de mídia não inclui time, ferramentas nem comissão. Ontem entra inteiro nos custos (o gasto só existe por dia).</li>
+        <li><b>Canal:</b> a Fonte do Lead do negócio (Google ADS, Meta ADS, Social, Orgânico), nunca digitada no painel. O total soma só esses quatro canais.</li>
+        <li><b>Cores:</b> verde e vermelho dos deltas indicam o que é bom (CAC e CPL subindo são ruins); aguardam a decisão do Pablo sobre as cores semânticas do Brand Core.</li>
+      </ul>
+    </details>
+    <div id="tip" hidden></div>
+  </main>
+  <script src="/s/nav.js"></script>
+  <script type="module" src="/s/monitor.js"></script>
+</body>
+</html>

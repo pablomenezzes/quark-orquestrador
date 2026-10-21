@@ -3,6 +3,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { FormsStore, StoreError } from './lib/forms-store.js';
 import { FORM_ID_RE } from './lib/form-schema.js';
+import { PRODUTOS_MONITOR, type MonitorRepo, type ProdutoMonitor } from './lib/monitor.js';
 import { BI_PRODUTOS, BiNotFound, type BiFiltros, type BiProduto, type BiRepo } from './lib/bi.js';
 import { CONVERSAO_ORIGENS, CONVERSAO_TIPOS, MARCOS, PRODUTOS, REGRA_TIPOS, REGRA_URL_MODOS, STATUS_NEGOCIO, PainelInvalido, PainelNotFound, type ConversaoOrigem, type CriativoItem, type CriativoMapaPatch, type Marco, type NegociosFiltro, type PainelRepo, type Produto, type StatusNegocio } from './lib/painel-repo.js';
 
@@ -20,6 +21,8 @@ export type StudioOptions = {
   painel?: PainelRepo | null;
   /** BI (análises e KPIs sobre as visões de analytics). Sem isto, as rotas do BI respondem 503 com a explicação. */
   bi?: BiRepo | null;
+  /** Monitor diário (hoje x ontem, semana, mês; total e por canal). */
+  monitor?: MonitorRepo | null;
 };
 
 const MIME: Record<string, string> = {
@@ -126,6 +129,16 @@ export function createStudioServer(opts: StudioOptions): Server {
     // Menu único: Início (última atualização), BI, Painel de Dados e, por último, Studio (testes).
     if (method === 'GET' && path === '/studio') return sendFile(res, join(opts.publicDir, 'index.html'));
     if (method === 'GET' && path === '/painel') return sendFile(res, join(opts.publicDir, 'painel.html'));
+
+    // Monitor diário (e Canais): hoje x ontem, semana e mês contra o mesmo trecho anterior, total e por canal. Só leitura.
+    if (method === 'GET' && path === '/monitor') return sendFile(res, join(opts.publicDir, 'monitor.html'));
+    if (path === '/api/monitor') {
+      if (!opts.monitor) return send(res, 503, { error: 'monitor_nao_configurado', detail: 'Falta PANEL_DB_URL no .env.local. Peça para gerar com: node scripts/set-role-password.mjs --role orq_panel --apply' });
+      if (method !== 'GET') return send(res, 405, { error: 'method_not_allowed' });
+      const produto = url.searchParams.get('produto');
+      if (produto && !(PRODUTOS_MONITOR as readonly string[]).includes(produto)) throw new HttpError(400, 'produto_invalido', { validos: [...PRODUTOS_MONITOR] });
+      return send(res, 200, await opts.monitor.monitor((produto || undefined) as ProdutoMonitor | undefined));
+    }
 
     // BI: só leitura. O navegador escolhe a análise e os filtros; nunca manda SQL.
     if (method === 'GET' && path === '/bi') return sendFile(res, join(opts.publicDir, 'bi.html'));

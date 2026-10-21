@@ -60,7 +60,11 @@ for (const conta of contas) {
     mudou += r.inseridas + r.atualizadas;
     console.log(`${entidade}: ${r.de} a ${r.ate}: ${r.linhas_lidas} lidas, ${r.inseridas} novas, ${r.atualizadas} alteradas, ${r.mantidas} iguais; ${r.chamadas} chamadas, cota ${r.uso_cota_pct}%${r.parou ? ` PAROU: ${r.parou}` : ''}${r.ignorados_fechados ? `; ${r.ignorados_fechados} blocos em trimestre fechado ignorados` : ''}`);
     for (const d of r.diferencas) console.log(`  diferenca com o total da conta (esperada nos dias recentes): ${d}`);
-    if (apply) await metaStore.terminarJob(jobId, r.parou ? 'parcial' : 'ok', r.linhas_lidas, r.inseridas + r.atualizadas, r.parou);
+    if (apply) {
+      await metaStore.terminarJob(jobId, r.parou ? 'parcial' : 'ok', r.linhas_lidas, r.inseridas + r.atualizadas, r.parou);
+      // a tela "Saúde da sincronização" do Painel mede o frescor pelo checkpoint: so uma rodada completa (sem parar por cota) conta como "ultima vez com sucesso"
+      if (!r.parou) await metaStore.salvarMarcaDagua(entidade, hoje, jobId, true);
+    }
   } catch (e) {
     falhou = true;
     const erro = e instanceof Error ? e.message : String(e);

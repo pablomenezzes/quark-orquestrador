@@ -5,6 +5,7 @@
  */
 const ITENS = [
   ['inicio', 'Início', '/'],
+  ['monitor', 'Monitor', '/monitor'],
   ['bi', 'BI', '/bi'],
   ['painel', 'Painel de Dados', '/painel'],
   ['studio', 'Studio (testes)', '/studio'],
