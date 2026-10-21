@@ -197,7 +197,7 @@ export class RodadaStore {
     return x && x.cartao?.completa === true ? { rodada_id: Number(x.rodada_id), cartao: x.cartao as CartaoRodada } : null;
   }
   /** So as linhas novas e as que mudaram; mudou = revisao + 1 (fica a versao mais recente). */
-  async gravarLinhas(rows: AdDia[], rodadaId: number, hashes: Map<string, string>) {
+  async gravarLinhas(rows: AdDia[], rodadaId: number | null, hashes: Map<string, string>) {
     for (let i = 0; i < rows.length; i += 1000) {
       const c = rows.slice(i, i + 1000);
       const col = (k: keyof AdDia) => c.map((r) => r[k]);
@@ -236,7 +236,7 @@ export const PAUSA_COTA_MS = 300_000;
 let pausaCotaMs = PAUSA_COTA_MS;
 export const definirPausaCota = (ms: number) => { pausaCotaMs = ms; };
 /** Ate 12 pausas; depois de cada uma uma consulta minima de insights mede a cota (a de insights e outro balde que o da conta): volta quando < 60%. */
-async function esfriar(client: MetaClient, conta: MetaConta) {
+export async function esfriar(client: MetaClient, conta: MetaConta) {
   const dia = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10);
   for (let i = 0; i < 12; i++) {
     await new Promise((r) => setTimeout(r, pausaCotaMs));

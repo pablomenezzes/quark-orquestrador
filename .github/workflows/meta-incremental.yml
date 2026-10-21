@@ -1,0 +1,38 @@
+name: Meta Ads incremental (de hora em hora)
+
+# De hora em hora (UTC) atualiza SO os ultimos dias do desempenho da Meta: 3 dias; as 06 UTC, 28 dias (janela em que a atribuicao ainda muda).
+# Nunca faz carga historica. Meta: somente leitura (so GET, so graph.facebook.com, token no cabecalho). Grava pelo papel orq_sync (sem permissao de apagar).
+# Para a 75% da cota da Meta (espera e relê so o bloco de 7 dias; se continuar quente, termina sem falhar e a proxima hora continua).
+# Trimestres FECHADOS nunca sao tocados. So roda com a variavel do repositorio META_ATIVO = "true". Nenhum gatilho de pull request.
+on:
+  schedule:
+    - cron: '23 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: meta-incremental
+  cancel-in-progress: false
+
+jobs:
+  incremental:
+    if: ${{ vars.META_ATIVO == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      SYNC_DB_URL: ${{ secrets.SYNC_DB_URL }}
+      SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+      META_AD_ACCOUNT_RH: ${{ secrets.META_AD_ACCOUNT_RH }}
+      META_AD_ACCOUNT_CLINIC: ${{ secrets.META_AD_ACCOUNT_CLINIC }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Meta Ads, so os ultimos dias
+        run: npx tsx scripts/meta-incremental.ts --apply

@@ -11,7 +11,7 @@ const ENTIDADES = [
   ['deals', 'Negócios'], ['deals_archived', 'Negócios arquivados'], ['deals_deleted', 'Negócios excluídos'], ['deal_history', 'Histórico de etapas'],
   ['deal_fields', 'Campos de negócios'], ['person_fields', 'Campos de pessoas'], ['organization_fields', 'Campos de organizações'], ['activity_fields', 'Campos de atividades'],
   ['ga4_dia', 'Google Analytics: totais por dia'], ['ga4_sessoes', 'Google Analytics: sessões por página'], ['ga4_eventos', 'Google Analytics: eventos'], ['ga4_paginas', 'Google Analytics: páginas vistas'],
-  ['meta_estrutura_rh', 'Meta Ads QuarkRH: estrutura'], ['meta_insights_rh', 'Meta Ads QuarkRH: desempenho'], ['meta_estrutura_clinic', 'Meta Ads QuarkClinic: estrutura'], ['meta_insights_clinic', 'Meta Ads QuarkClinic: desempenho'], ['meta_ligacao', 'Meta Ads: ligação com o Pipedrive'],
+  ['meta_estrutura_rh', 'Meta Ads QuarkRH: estrutura'], ['meta_insights_rh', 'Meta Ads QuarkRH: desempenho'], ['meta_estrutura_clinic', 'Meta Ads QuarkClinic: estrutura'], ['meta_insights_clinic', 'Meta Ads QuarkClinic: desempenho'], ['meta_ligacao', 'Meta Ads: ligação com o Pipedrive'], ['meta_incremental_rh', 'Meta Ads QuarkRH: atualização de hora em hora'], ['meta_incremental_clinic', 'Meta Ads QuarkClinic: atualização de hora em hora'],
 ];
 const ENTIDADE_CAMPO = { deal: 'Negócios', person: 'Pessoas', organization: 'Organizações', activity: 'Atividades' };
 const ALERTA_HORAS = 8;

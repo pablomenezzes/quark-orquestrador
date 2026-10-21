@@ -3,6 +3,30 @@ import { readFileSync } from 'node:fs';
 
 const ler = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
 
+describe('.github/workflows/meta-incremental.yml: Meta de hora em hora, só incremental', () => {
+  const w = ler('.github/workflows/meta-incremental.yml');
+  it('roda de hora em hora, só com META_ATIVO, sem gatilho de pull request ou push e uma execução por vez', () => {
+    expect(w).toContain("cron: '23 * * * *'");
+    expect(w).toContain("if: ${{ vars.META_ATIVO == 'true' }}");
+    expect(w).not.toMatch(/pull_request|pull_request_target|^\s+push:/m);
+    expect(w).toMatch(/permissions:\s*\n\s+contents: read/);
+    expect(w).toContain('group: meta-incremental');
+    expect(w).toContain('cancel-in-progress: false');
+    expect(w).toContain('timeout-minutes: 25');
+  });
+  it('só o incremental: nunca a rodada, a carga toda, o papel do dono nem outros segredos', () => {
+    const comandos = w.split('\n').filter((l) => !l.trim().startsWith('#')).join('\n');
+    expect(comandos).toContain('scripts/meta-incremental.ts --apply');
+    expect(comandos).not.toMatch(/meta-rodada|meta-sync|--desde|--dias \d{3,}/);
+    expect(w).not.toMatch(/SUPABASE_DB_URL|PANEL_DB_URL|CHAT_DB_URL|INGEST_DB_URL|SERVICE_ROLE|PIPEDRIVE|GOOGLE/);
+  });
+  it('o script limita a janela a 28 dias e o código só lê as janelas de 3 e 28 dias', () => {
+    const s = ler('scripts/meta-incremental.ts');
+    expect(s).toContain('dias > DIAS_DIARIA');
+    expect(s).toContain("opt('--dias') ?? 'auto'");
+  });
+});
+
 describe('.github/workflows/sincronia.yml: sincronia automática segura', () => {
   const w = ler('.github/workflows/sincronia.yml');
   it('roda a cada 4 horas e sob demanda, sem gatilho de pull request ou push (segredos nunca ao alcance de terceiros)', () => {
