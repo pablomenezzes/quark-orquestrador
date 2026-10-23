@@ -1,11 +1,11 @@
 name: Sincronia (Pipedrive e GA4)
 
-# A cada 4 horas (UTC) traz SO o que mudou: cadastros, negocios, historico de etapas e GA4 (ultimos 7 dias).
+# A cada 2 horas (UTC) traz SO o que mudou: cadastros, negocios, historico de etapas e GA4 (ultimos 7 dias).
 # Pipedrive e Google: somente leitura. Grava no banco pelo papel orq_sync (sem permissao de apagar).
 # Nenhum gatilho de pull request: segredos nunca ficam ao alcance de codigo de terceiros.
 on:
   schedule:
-    - cron: '17 */4 * * *'
+    - cron: '17 */2 * * *'
   workflow_dispatch:
 
 permissions:

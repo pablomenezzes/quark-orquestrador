@@ -6,7 +6,7 @@ const ler = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'ut
 describe('.github/workflows/meta-incremental.yml: Meta de hora em hora, só incremental', () => {
   const w = ler('.github/workflows/meta-incremental.yml');
   it('roda de hora em hora, só com META_ATIVO, sem gatilho de pull request ou push e uma execução por vez', () => {
-    expect(w).toContain("cron: '23 * * * *'");
+    expect(w).toContain("cron: '23 */2 * * *'");
     expect(w).toContain("if: ${{ vars.META_ATIVO == 'true' }}");
     expect(w).not.toMatch(/pull_request|pull_request_target|^\s+push:/m);
     expect(w).toMatch(/permissions:\s*\n\s+contents: read/);
@@ -29,8 +29,8 @@ describe('.github/workflows/meta-incremental.yml: Meta de hora em hora, só incr
 
 describe('.github/workflows/sincronia.yml: sincronia automática segura', () => {
   const w = ler('.github/workflows/sincronia.yml');
-  it('roda a cada 4 horas e sob demanda, sem gatilho de pull request ou push (segredos nunca ao alcance de terceiros)', () => {
-    expect(w).toContain("cron: '17 */4 * * *'");
+  it('roda a cada 2 horas e sob demanda, sem gatilho de pull request ou push (segredos nunca ao alcance de terceiros)', () => {
+    expect(w).toContain("cron: '17 */2 * * *'");
     expect(w).toContain('workflow_dispatch');
     expect(w).not.toMatch(/pull_request|pull_request_target|^\s+push:/m);
   });
