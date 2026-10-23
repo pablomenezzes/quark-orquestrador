@@ -1,4 +1,5 @@
 import type pg from 'pg';
+import { ANALISES_DEBRIEFING } from './debriefing.js';
 
 /**
  * BI do Data Hub: catálogo de análises, organizado em páginas (Visão geral, Safra, Canais, Qualidade).
@@ -21,6 +22,7 @@ export const PADRAO_TIPOS = ['Marketing'];
 
 export const BI_PAGINAS = [
   { id: 'geral', rotulo: 'Visão geral' },
+  { id: 'debriefing', rotulo: 'Debriefing semanal' },
   { id: 'safra', rotulo: 'Safra' },
   { id: 'canais', rotulo: 'Canais' },
   { id: 'ads', rotulo: 'Google Ads' },
@@ -1794,6 +1796,9 @@ export const BI_ANALISES: BiAnalise[] = [
       return { grafico: { tipo: 'tabela' }, tabela: { colunas: ETAPAS_URL_COLUNAS, linhas }, avisos };
     },
   },
+
+  /* ===================== DEBRIEFING SEMANAL (studio/lib/debriefing.ts) ===================== */
+  ...ANALISES_DEBRIEFING,
 ];
 
 export type BiCatalogoItem = Pick<BiAnalise, 'id' | 'pagina' | 'titulo' | 'pergunta' | 'como_ler' | 'largura'>;

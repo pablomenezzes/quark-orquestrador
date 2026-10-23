@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import { createStudioServer } from '../studio/server';
-import { agoraLocal, CANAIS, montarMonitor, periodosDe, veredito, ZERO, type CanalId, type DadosMonitor, type Soma, type MonitorRepo } from '../studio/lib/monitor';
+import { agoraLocal, CANAIS, metricasDe, semanasCompletas, montarMonitor, periodosDe, veredito, ZERO, type CanalId, type DadosMonitor, type Soma, type MonitorRepo } from '../studio/lib/monitor';
 
 const soma = (o: Partial<Soma>): Soma => ({ ...ZERO, ...o });
 const vazio = (): Record<CanalId, Map<string, Soma>> => ({ google: new Map(), meta: new Map(), social: new Map(), organico: new Map() });
@@ -71,7 +71,7 @@ describe('Monitor: montagem por canal e total', () => {
     const t = canal('total').periodos.dia.anterior;
     expect(t.leads).toBe(42); // 30 + 4 + 8 (até 12:00), e não 68 (dia inteiro)
     expect(t.invest).toBe(1450); // gasto só existe por dia: ontem inteiro
-    expect(t.cpl).toBeCloseTo(1450 / 68, 6); // razão de custo: ontem inteiro de ponta a ponta
+    expect(t.cpl).toBeCloseTo(1450 / 56, 6); // razão de custo: ontem inteiro, e só com os leads dos canais PAGOS (Meta 50 + Google 6): Orgânico não entra no CPL
     expect(t.cac).toBeCloseTo(1450 / 3, 6);
   });
   it('semana e mês comparam janelas de mesmo tamanho', () => {
@@ -117,6 +117,22 @@ describe('Monitor: montagem por canal e total', () => {
     expect(ontem.cpm).toBeCloseTo((1450 / 56000) * 1000, 6);
     expect(ontem.trafego).toBe(1620); // 500 + 120 cliques e 1000 sessões
     expect(ontem.txLead).toBeCloseTo(68 / 1620, 6);
+  });
+  it('CPL e CAC de mídia do total e de "pagos" usam só leads e ganhos de canais pagos; Orgânico não tem custo', () => {
+    const d = dados();
+    const j = periodosDe('2026-10-21').mes.atual;
+    const tot = metricasDe(d, 'total', j);
+    expect(tot.leads).toBe(55 + 68); // todos os canais no mês (19 a 21 só tem 20 e 21 com dados)
+    expect(tot.cpl).toBeCloseTo(tot.invest / (40 + 50 + 5 + 6), 6);
+    expect(tot.cac).toBeCloseTo(tot.invest / (1 + 2 + 0 + 1), 6);
+    expect(metricasDe(d, 'pagos', j).cpl).toBeCloseTo(tot.cpl!, 6);
+    expect(metricasDe(d, 'organico', j).cpl).toBeNull();
+  });
+  it('semanas completas (segunda a domingo) antes de hoje, da mais recente para trás', () => {
+    const s = semanasCompletas('2026-10-21', 3); // quarta
+    expect(s.map((x) => [x.de, x.ate])).toEqual([['2026-10-12', '2026-10-18'], ['2026-10-05', '2026-10-11'], ['2026-09-28', '2026-10-04']]);
+    expect(semanasCompletas('2026-10-19', 1)[0]).toMatchObject({ de: '2026-10-12', ate: '2026-10-18' }); // segunda: a semana que acabou ontem
+    expect(semanasCompletas('2026-10-25', 1)[0]).toMatchObject({ de: '2026-10-12', ate: '2026-10-18' }); // domingo: ainda é a semana em curso
   });
   it('a série de 30 dias termina em hoje e é por canal', () => {
     const s = canal('meta').serie;

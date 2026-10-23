@@ -42,7 +42,7 @@ export interface Metricas extends Soma {
 export interface Janela { de: string; ate: string; dias: number }
 export interface PeriodosDef { dia: { atual: Janela; anterior: Janela }; semana: { atual: Janela; anterior: Janela }; mes: { atual: Janela; anterior: Janela } }
 
-const somaDias = (d: string, k: number) => new Date(Date.parse(`${d}T00:00:00Z`) + k * 86_400_000).toISOString().slice(0, 10);
+export const somaDias = (d: string, k: number) => new Date(Date.parse(`${d}T00:00:00Z`) + k * 86_400_000).toISOString().slice(0, 10);
 const diasEntre = (de: string, ate: string) => Math.round((Date.parse(ate) - Date.parse(de)) / 86_400_000) + 1;
 const janela = (de: string, ate: string): Janela => ({ de, ate, dias: diasEntre(de, ate) });
 
@@ -96,16 +96,33 @@ export interface DadosMonitor {
 /** Canais cujo degrau de tráfego vem do GA4 (sessões do site), não de mídia paga. */
 const USA_GA4: ReadonlySet<CanalId> = new Set<CanalId>(['social', 'organico']);
 
-const somaJanela = (m: Map<string, Soma>, j: Janela): Soma => {
+export const somaJanela = (m: Map<string, Soma>, j: Janela): Soma => {
   let s = ZERO;
   for (let d = j.de; d <= j.ate; d = somaDias(d, 1)) s = somar(s, m.get(d) ?? ZERO);
   return s;
 };
-const total = (d: Record<CanalId, Map<string, Soma>>): Map<string, Soma> => {
+/** Soma dia a dia dos canais pedidos (padrão: os 4). */
+export const total = (d: Record<CanalId, Map<string, Soma>>, canais: ReadonlyArray<CanalId> = CANAIS.map((c) => c.id)): Map<string, Soma> => {
   const t = new Map<string, Soma>();
-  for (const c of CANAIS) for (const [dia, s] of d[c.id]) t.set(dia, somar(t.get(dia) ?? ZERO, s));
+  for (const id of canais) for (const [dia, s] of d[id]) t.set(dia, somar(t.get(dia) ?? ZERO, s));
   return t;
 };
+/** Canais com verba (Google Ads e Meta Ads): são os que têm CPL e CAC de mídia. */
+export const CANAIS_PAGOS: ReadonlyArray<CanalId> = CANAIS.filter((c) => c.pago).map((c) => c.id);
+
+/** As n últimas semanas COMPLETAS (segunda a domingo) antes de hoje, da mais recente para trás. */
+export function semanasCompletas(hoje: string, n = 8): Janela[] {
+  const segunda = somaDias(hoje, -((new Date(`${hoje}T00:00:00Z`).getUTCDay() + 6) % 7));
+  return Array.from({ length: n }, (_, k) => janela(somaDias(segunda, -7 * (k + 1)), somaDias(segunda, -7 * (k + 1) + 6)));
+}
+/** Métricas de uma janela para um canal, ou para o total ('total') ou só a mídia paga ('pagos'). CPL e CAC do total e da mídia paga usam só leads e ganhos de canais pagos. */
+export function metricasDe(d: Pick<DadosMonitor, 'diario'>, quem: CanalId | 'total' | 'pagos', j: Janela): Metricas {
+  const m = quem === 'total' ? total(d.diario) : quem === 'pagos' ? total(d.diario, CANAIS_PAGOS) : d.diario[quem];
+  const s = somaJanela(m, j);
+  const pg = quem === 'total' ? somaJanela(total(d.diario, CANAIS_PAGOS), j) : s;
+  const base = metricas(s);
+  return { ...base, cpl: s.invest > 0 ? razao(s.invest, pg.leads) : null, cac: s.invest > 0 ? razao(s.invest, pg.ganhos) : null };
+}
 
 export interface ParAtualAnterior { atual: Metricas; anterior: Metricas }
 export interface CanalMonitor { id: CanalId | 'total'; nome: string; pago: boolean; periodos: Record<PeriodoId, ParAtualAnterior>; serie: { dias: string[]; leads: number[]; mql: number[]; ganhos: number[]; invest: number[] } }
@@ -147,21 +164,25 @@ export function veredito(t: CanalMonitor): Veredito {
 export function montarMonitor(d: DadosMonitor, hoje: string): Monitor {
   const janelas = periodosDe(hoje);
   const serieDias = Array.from({ length: 30 }, (_, i) => somaDias(hoje, i - 29));
-  const montar = (id: CanalId | 'total', nome: string, pago: boolean, m: Map<string, Soma>, ontemHora: Soma): CanalMonitor => {
+  const montar = (id: CanalId | 'total', nome: string, pago: boolean, m: Map<string, Soma>, ontemHora: Soma, mPagos: Map<string, Soma> = m): CanalMonitor => {
     const periodos = {} as Record<PeriodoId, ParAtualAnterior>;
     for (const p of ['dia', 'semana', 'mes'] as PeriodoId[]) {
       const atual = somaJanela(m, janelas[p].atual);
       const inteiro = somaJanela(m, janelas[p].anterior);
+      // CPL e CAC de mídia: investimento ÷ leads (ou ganhos) dos canais PAGOS; no total, os leads e ganhos de Social e Orgânico não entram na conta do custo
+      const ajusta = (met: Metricas, s: Soma, pg: Soma): Metricas => ({ ...met, cpl: s.invest > 0 ? razao(s.invest, pg.leads) : null, cac: s.invest > 0 ? razao(s.invest, pg.ganhos) : null });
+      const pgAtual = somaJanela(mPagos, janelas[p].atual);
+      const pgInteiro = somaJanela(mPagos, janelas[p].anterior);
       if (p === 'dia') {
         // contagens de ontem até a mesma hora; investimento, impressões, cliques, sessões e todas as razões (CPM, CTR, CPC, taxa, CPL, CAC) de ontem
         // inteiro: o gasto e o tráfego só existem por dia, e custo e taxa são razões
         const hora = metricas({ ...ontemHora, invest: inteiro.invest });
-        const cheio = metricas(inteiro);
+        const cheio = ajusta(metricas(inteiro), inteiro, pgInteiro);
         periodos[p] = {
-          atual: metricas(atual),
+          atual: ajusta(metricas(atual), atual, pgAtual),
           anterior: { ...hora, invest: cheio.invest, impressoes: cheio.impressoes, cliques: cheio.cliques, sessoes: cheio.sessoes, leadsT: cheio.leadsT, trafego: cheio.trafego, cpm: cheio.cpm, ctr: cheio.ctr, cpc: cheio.cpc, txLead: cheio.txLead, cpl: cheio.cpl, cac: cheio.cac },
         };
-      } else periodos[p] = { atual: metricas(atual), anterior: metricas(inteiro) };
+      } else periodos[p] = { atual: ajusta(metricas(atual), atual, pgAtual), anterior: ajusta(metricas(inteiro), inteiro, pgInteiro) };
     }
     const serie = { dias: serieDias, leads: [] as number[], mql: [] as number[], ganhos: [] as number[], invest: [] as number[] };
     for (const dia of serieDias) {
@@ -171,7 +192,7 @@ export function montarMonitor(d: DadosMonitor, hoje: string): Monitor {
     return { id, nome, pago, periodos, serie };
   };
   const ontemTotal = CANAIS.reduce((s, c) => somar(s, d.ontemMesmaHora[c.id]), ZERO);
-  const canais = [montar('total', 'Total dos 4 canais', true, total(d.diario), ontemTotal), ...CANAIS.map((c) => montar(c.id, c.nome, c.pago, d.diario[c.id], d.ontemMesmaHora[c.id]))];
+  const canais = [montar('total', 'Total dos 4 canais', true, total(d.diario), ontemTotal, total(d.diario, CANAIS_PAGOS)), ...CANAIS.map((c) => montar(c.id, c.nome, c.pago, d.diario[c.id], d.ontemMesmaHora[c.id]))];
   return { hoje, hora: d.hora, tz: TZ_MONITOR, janelas, canais, veredito: veredito(canais[0]!) };
 }
 
@@ -188,9 +209,9 @@ export function agoraLocal(agora = new Date()): { hoje: string; hora: string } {
   return { hoje: `${g('year')}-${g('month')}-${g('day')}`, hora: `${g('hour')}:${g('minute')}` };
 }
 
-export async function lerDadosMonitor(db: Db, hoje: string, hora: string, produto?: ProdutoMonitor): Promise<DadosMonitor> {
+export async function lerDadosMonitor(db: Db, hoje: string, hora: string, produto?: ProdutoMonitor, desde?: string): Promise<DadosMonitor> {
   const j = periodosDe(hoje);
-  const inicio = [j.mes.anterior.de, j.semana.anterior.de, somaDias(hoje, -29)].sort()[0]!; // o mais antigo entre mês anterior, semana anterior e a série de 30 dias
+  const inicio = [j.mes.anterior.de, j.semana.anterior.de, somaDias(hoje, -29), ...(desde ? [desde] : [])].sort()[0]!; // o mais antigo entre mês anterior, semana anterior e a série de 30 dias
   const ontem = somaDias(hoje, -1);
   const diario = Object.fromEntries(CANAIS.map((c) => [c.id, new Map<string, Soma>()])) as Record<CanalId, Map<string, Soma>>;
   const ontemMesmaHora = Object.fromEntries(CANAIS.map((c) => [c.id, ZERO])) as Record<CanalId, Soma>;

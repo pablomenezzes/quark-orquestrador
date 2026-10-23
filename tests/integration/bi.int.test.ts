@@ -211,7 +211,8 @@ run('BI (transação com rollback)', () => {
 
   it('os filtros de Fonte e Tipo valem em TODAS as análises de negócios (nenhuma ignora)', async () => {
     // o tráfego do site (Google Analytics) não tem fonte nem tipo do Pipedrive: só o funil por URL, que parte dos negócios, obedece
-    for (const a of BI_ANALISES.filter((x) => x.pagina !== 'site' || x.id === 'site-url-funil')) {
+    // o Debriefing semanal é por canal fixo (os 4 canais de marketing) e por semana completa: Fonte, Tipo e período do filtro não se aplicam a ele
+    for (const a of BI_ANALISES.filter((x) => (x.pagina !== 'site' && x.pagina !== 'debriefing') || x.id === 'site-url-funil')) {
       const r = await exec(a.id, { ...F, fontes: ['999999'], tipos: ['999999'] });
       const vazio = r.grafico.tipo === 'kpis'
         ? r.grafico.itens.every((i) => (i.valor === null || i.valor === 0))
@@ -378,6 +379,6 @@ run('BI (transação com rollback)', () => {
     expect(nomes(o.tipos)).toEqual(expect.arrayContaining(['Marketing'])); // seleção fixa do Tipo do Lead
     expect(o.fontes.every((x) => /^\d+$/.test(x.id))).toBe(true);
     expect(repo().catalogo().length).toBe(BI_ANALISES.length);
-    expect(o.paginas.map((p) => p.id)).toEqual(['geral', 'safra', 'canais', 'ads', 'meta', 'site', 'qualidade']);
+    expect(o.paginas.map((p) => p.id)).toEqual(['geral', 'debriefing', 'safra', 'canais', 'ads', 'meta', 'site', 'qualidade']);
   });
 });
