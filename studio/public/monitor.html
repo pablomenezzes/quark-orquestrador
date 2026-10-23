@@ -72,6 +72,46 @@
     table.cn td b { font-size: 15px; }
     table.cn td .delta { margin-left: 4px; font-size: 11.5px; }
     table.cn tr:last-child td { border-bottom: 0; }
+    /* funil: do investimento ao lead; cada degrau mais estreito, com a razão entre eles e a composição por canal */
+    .funil .degrau { margin: 0 auto 0 0; width: var(--larg, 100%); min-width: 78%; background: var(--m-bg); border: 1px solid var(--m-line); border-left: 4px solid var(--m-laranja); border-radius: 8px; padding: 8px 12px 9px; }
+    .funil .dcab { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: baseline; }
+    .funil .drot { font-size: 13px; color: var(--m-ink2); }
+    .funil .drot small { display: block; font-size: 11px; color: var(--m-muted); line-height: 1.3; }
+    .funil .dval { font-weight: 700; font-size: 22px; text-align: right; white-space: nowrap; }
+    .funil .ddel { text-align: right; min-width: 74px; }
+    .funil .dant { font-size: 11.5px; color: var(--m-muted); display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin: 1px 0 5px; }
+    .funil .xtra b { color: var(--m-ink2); font-weight: 700; }
+    .funil .liga { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding: 5px 4px 5px 14px; font-size: 12.5px; color: var(--m-ink2); }
+    .funil .liga b { color: var(--m-ink); font-size: 14px; }
+    .funil .liga .lant { color: var(--m-muted); font-size: 11.5px; margin-left: auto; }
+    .funil .liga.fim { border-top: 1px dashed var(--m-line); margin-top: 6px; padding-top: 8px; }
+    .seta { color: var(--m-muted); font-weight: 700; }
+    .comp { display: flex; height: 7px; border-radius: 4px; overflow: hidden; gap: 2px; background: var(--m-line); }
+    .comp i { display: block; height: 100%; }
+    .comp.vazia { opacity: .5; }
+    .leg-c { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12.5px; color: var(--m-ink2); margin: 0 0 8px; }
+    .leg-c i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+    .depois { font-size: 12px; color: var(--m-muted); text-transform: uppercase; letter-spacing: .04em; margin: 14px 0 6px; }
+    .pos { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 14px; }
+    .pl { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; align-items: baseline; font-size: 13px; color: var(--m-ink2); border-bottom: 1px solid var(--m-line); padding: 3px 0; }
+    .pl b { color: var(--m-ink); font-size: 14px; text-align: right; }
+    .cab-matriz { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; align-items: flex-start; }
+    .seg-m { display: inline-flex; border: 1px solid var(--m-line); border-radius: 8px; overflow: hidden; }
+    .seg-m button { font: inherit; font-size: 13px; padding: 5px 14px; border: 0; border-right: 1px solid var(--m-line); background: transparent; color: var(--m-ink2); cursor: pointer; }
+    .seg-m button:last-child { border-right: 0; }
+    .seg-m button[aria-pressed='true'] { background: var(--m-laranja); color: #212529; font-weight: 700; }
+    .rolagem { overflow-x: auto; }
+    table.mz { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 900px; }
+    table.mz th { font-size: 11.5px; color: var(--m-muted); text-align: right; padding: 4px 8px 6px; border-bottom: 1px solid var(--m-line); font-weight: 700; white-space: nowrap; }
+    table.mz th:first-child, table.mz tbody th { text-align: left; }
+    table.mz tbody th { font-size: 13.5px; color: var(--m-ink); padding: 8px 8px 8px 0; border-bottom: 1px solid var(--m-line); white-space: nowrap; }
+    table.mz td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--m-line); white-space: nowrap; }
+    table.mz td b { font-size: 14px; display: block; }
+    table.mz tr.tot td, table.mz tr.tot th { background: rgba(234, 140, 12, .08); }
+    table.mz .delta { font-size: 11px; margin-top: 2px; }
+    .ponto { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 8px; }
+    table.cn tr.razao td { color: var(--m-ink2); font-size: 12.5px; }
+    table.cn tr.razao td b { font-size: 13px; }
     .graficos { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 14px; }
     svg.gr { width: 100%; height: auto; display: block; overflow: visible; }
     svg.gr text { fill: var(--m-muted); font-size: 11px; font-family: var(--font); }
@@ -116,6 +156,8 @@
       <summary>Definições e origem de cada número</summary>
       <ul>
         <li><b>Hoje, semana e mês:</b> o dia vira à meia-noite em America/Fortaleza; a semana começa na segunda. Cada período é comparado com o <b>mesmo trecho</b> anterior (mesmo número de dias desde o início). No comparativo do dia, as contagens de ontem vão até a <b>mesma hora</b> de agora.</li>
+        <li><b>Funil, do investimento ao lead:</b> <b>Investimento</b> (gasto do dia) → <b>Impressões</b> (a razão entre os dois é o CPM) → <b>Cliques e visitas</b> (a razão é o CTR; CPC = investimento ÷ cliques) → <b>Leads</b> (a razão é a taxa de clique ou visita até o lead; CPL = investimento ÷ leads). Meta Ads e Google Ads: impressões e cliques no link da plataforma; Social e Orgânico não têm verba, e o topo deles são as <b>sessões do site</b> (GA4: mídia social e busca orgânica, com 1 dia de atraso). O total soma cliques de mídia paga e sessões, por isso a taxa do total mistura os dois e é uma leitura de conjunto. A barra colorida sob cada degrau mostra de que canais ele vem.</li>
+        <li><b>Meta Ads e o site:</b> grande parte dos leads da Meta vem de formulário nativo (sem passar pelo site), então a taxa clique → lead do Meta é uma razão de plataforma, não de visita ao site.</li>
         <li><b>Leads e MQL:</b> negócios do Pipedrive por data de <b>criação</b> (lead = conta como lead; MQL = lead não perdido por Lead Inválido, Suporte, Contato Inexistente ou Duplicado, regra D-36). Os últimos dias têm % MQL inflado: lead aberto conta como MQL até ser desqualificado.</li>
         <li><b>Reuniões agendadas:</b> negócios que <b>entraram</b> na etapa marcada como Reunião Agendada, pela data da entrada.</li>
         <li><b>Ganhos e MRR novo:</b> negócios ganhos, pela data do <b>fechamento</b> (fluxo), com o valor do negócio. MRR novo = soma do valor dos ganhos do período.</li>

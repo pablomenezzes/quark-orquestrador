@@ -40,19 +40,19 @@ describe('Monitor: janelas de comparação (mesmo número de dias desde o iníci
 describe('Monitor: montagem por canal e total', () => {
   const dados = (): DadosMonitor => {
     const d = vazio();
-    d.meta.set('2026-10-21', soma({ leads: 40, mql: 30, reunioes: 4, ganhos: 1, mrr: 500, invest: 1000 }));
-    d.meta.set('2026-10-20', soma({ leads: 50, mql: 40, reunioes: 5, ganhos: 2, mrr: 900, invest: 1200 }));
-    d.google.set('2026-10-21', soma({ leads: 5, mql: 4, ganhos: 0, invest: 200 }));
-    d.google.set('2026-10-20', soma({ leads: 6, mql: 3, ganhos: 1, mrr: 300, invest: 250 }));
-    d.organico.set('2026-10-21', soma({ leads: 10, mql: 9, ganhos: 1, mrr: 700 }));
-    d.organico.set('2026-10-20', soma({ leads: 12, mql: 8 }));
+    d.meta.set('2026-10-21', soma({ leads: 40, mql: 30, reunioes: 4, ganhos: 1, mrr: 500, invest: 1000, impressoes: 40000, cliques: 400, leadsT: 40 }));
+    d.meta.set('2026-10-20', soma({ leads: 50, mql: 40, reunioes: 5, ganhos: 2, mrr: 900, invest: 1200, impressoes: 50000, cliques: 500, leadsT: 50 }));
+    d.google.set('2026-10-21', soma({ leads: 5, mql: 4, ganhos: 0, invest: 200, impressoes: 5000, cliques: 100, leadsT: 5 }));
+    d.google.set('2026-10-20', soma({ leads: 6, mql: 3, ganhos: 1, mrr: 300, invest: 250, impressoes: 6000, cliques: 120, leadsT: 6 }));
+    d.organico.set('2026-10-21', soma({ leads: 10, mql: 9, ganhos: 1, mrr: 700 })); // o GA4 ainda não tem o dia de hoje: sem sessões e leadsT 0
+    d.organico.set('2026-10-20', soma({ leads: 12, mql: 8, sessoes: 1000, leadsT: 12 }));
     d.social.set('2026-09-05', soma({ leads: 3 }));
     // contagens de ontem ATÉ A MESMA HORA (menores que o dia inteiro)
     const o = semOntem();
     o.meta = soma({ leads: 30, mql: 25, reunioes: 3, ganhos: 1, mrr: 400 });
     o.google = soma({ leads: 4, mql: 2 });
     o.organico = soma({ leads: 8, mql: 6 });
-    return { diario: d, ontemMesmaHora: o, hora: '12:00' };
+    return { diario: d, ontemMesmaHora: o, hora: '12:00', trafegoAte: '2026-10-20' };
   };
   const m = montarMonitor(dados(), '2026-10-21');
   const canal = (id: string) => m.canais.find((c) => c.id === id)!;
@@ -87,6 +87,37 @@ describe('Monitor: montagem por canal e total', () => {
     expect(canal('meta').periodos.dia.atual.cac).toBeCloseTo(1000, 6);
     expect(canal('meta').periodos.dia.atual.pctMql).toBeCloseTo(30 / 40, 6);
   });
+  it('funil de mídia paga: CPM, CTR, CPC, taxa até o lead e CPL saem das somas', () => {
+    const d = canal('meta').periodos.dia.atual;
+    expect(d).toMatchObject({ trafego: 400 });
+    expect(d.cpm).toBeCloseTo(25, 6); // 1000 ÷ 40000 × 1000
+    expect(d.ctr).toBeCloseTo(0.01, 6);
+    expect(d.cpc).toBeCloseTo(2.5, 6);
+    expect(d.txLead).toBeCloseTo(0.1, 6);
+    expect(d.cpl).toBeCloseTo(25, 6);
+  });
+  it('Social e Orgânico: o topo são as sessões do GA4; sem verba, nada de CPM, CTR, CPC nem CPL; hoje (sem GA4) fica em branco, nunca zero', () => {
+    const hoje = canal('organico').periodos.dia.atual;
+    expect(hoje.trafego).toBeNull();
+    expect(hoje.txLead).toBeNull();
+    expect(hoje.cpm).toBeNull();
+    expect(hoje.ctr).toBeNull();
+    const mes = canal('organico').periodos.mes.atual;
+    expect(mes.trafego).toBe(1000);
+    expect(mes.txLead).toBeCloseTo(12 / 1000, 6); // só os leads dos dias com sessões (os de hoje ficam de fora)
+    expect(mes.leads).toBe(22);
+  });
+  it('total do funil: CTR só da mídia paga, taxa até o lead sobre os dias com tráfego, e investimento só dos pagos', () => {
+    const t = canal('total').periodos.dia.atual;
+    expect(t).toMatchObject({ invest: 1200, impressoes: 45000, cliques: 500, trafego: 500 });
+    expect(t.ctr).toBeCloseTo(500 / 45000, 6);
+    expect(t.txLead).toBeCloseTo(45 / 500, 6); // leadsT = 40 (Meta) + 5 (Google) + 0 (Orgânico sem GA4 hoje)
+    const ontem = canal('total').periodos.dia.anterior;
+    expect(ontem.impressoes).toBe(56000); // ontem inteiro, como o investimento
+    expect(ontem.cpm).toBeCloseTo((1450 / 56000) * 1000, 6);
+    expect(ontem.trafego).toBe(1620); // 500 + 120 cliques e 1000 sessões
+    expect(ontem.txLead).toBeCloseTo(68 / 1620, 6);
+  });
   it('a série de 30 dias termina em hoje e é por canal', () => {
     const s = canal('meta').serie;
     expect(s.dias).toHaveLength(30);
@@ -109,7 +140,7 @@ describe('Monitor: montagem por canal e total', () => {
 describe('Monitor: página e API', () => {
   let server: Server; let semRepo: Server; let base: string; let baseSem: string; let dir: string;
   const chamadas: Array<string | undefined> = [];
-  const repo: MonitorRepo = { async monitor(p) { chamadas.push(p); return montarMonitor({ diario: vazio(), ontemMesmaHora: semOntem(), hora: '10:00' }, '2026-10-21'); } };
+  const repo: MonitorRepo = { async monitor(p) { chamadas.push(p); return montarMonitor({ diario: vazio(), ontemMesmaHora: semOntem(), hora: '10:00', trafegoAte: null }, '2026-10-21'); } };
   const mk = (monitor: MonitorRepo | null) => createStudioServer({ formsDir: join(dir, 'forms'), publicDir: join(dir, 'public'), trackingDir: join(dir, 'tracking'), sources: [], dbInfo: () => ({ connected: true }), submit: async () => ({ status: 200, body: {} }), monitor });
   beforeAll(async () => {
     dir = mkdtempSync(join(tmpdir(), 'studio-monitor-'));

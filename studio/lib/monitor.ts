@@ -22,10 +22,22 @@ export type ProdutoMonitor = (typeof PRODUTOS_MONITOR)[number];
 export type PeriodoId = 'dia' | 'semana' | 'mes';
 
 /** Contagens e valores de um dia (ou da soma de vários). */
-export interface Soma { leads: number; mql: number; reunioes: number; ganhos: number; mrr: number; invest: number }
-export const ZERO: Soma = { leads: 0, mql: 0, reunioes: 0, ganhos: 0, mrr: 0, invest: 0 };
-/** Métricas exibidas. cpl e cac são null quando não há investimento (canal sem verba: "não se aplica", nunca zero). */
-export interface Metricas extends Soma { cpl: number | null; cac: number | null; pctMql: number | null }
+export interface Soma {
+  leads: number; mql: number; reunioes: number; ganhos: number; mrr: number; invest: number;
+  /** Funil de mídia: impressões e cliques no link (Meta Ads e Google Ads) e sessões no site (GA4: Social e Orgânico). */
+  impressoes: number; cliques: number; sessoes: number;
+  /** Leads dos dias em que o degrau de tráfego existe (GA4 chega com 1 dia de atraso): base da taxa tráfego -> lead. */
+  leadsT: number;
+}
+export const ZERO: Soma = { leads: 0, mql: 0, reunioes: 0, ganhos: 0, mrr: 0, invest: 0, impressoes: 0, cliques: 0, sessoes: 0, leadsT: 0 };
+/**
+ * Métricas exibidas, na ordem do funil: investimento -> impressões -> cliques ou visitas -> lead. Custos e taxas são nulos quando não se aplicam
+ * (canal sem verba: "não se aplica", nunca zero). `trafego` = cliques no link (pagos) + sessões do site (Social e Orgânico).
+ */
+export interface Metricas extends Soma {
+  trafego: number | null; cpm: number | null; ctr: number | null; cpc: number | null; txLead: number | null;
+  cpl: number | null; cac: number | null; pctMql: number | null;
+}
 
 export interface Janela { de: string; ate: string; dias: number }
 export interface PeriodosDef { dia: { atual: Janela; anterior: Janela }; semana: { atual: Janela; anterior: Janela }; mes: { atual: Janela; anterior: Janela } }
@@ -54,11 +66,23 @@ export function periodosDe(hoje: string): PeriodosDef {
   };
 }
 
-export const somar = (a: Soma, b: Partial<Soma>): Soma => ({
-  leads: a.leads + (b.leads ?? 0), mql: a.mql + (b.mql ?? 0), reunioes: a.reunioes + (b.reunioes ?? 0), ganhos: a.ganhos + (b.ganhos ?? 0), mrr: a.mrr + (b.mrr ?? 0), invest: a.invest + (b.invest ?? 0),
-});
+const CAMPOS_SOMA = Object.keys(ZERO) as Array<keyof Soma>;
+export const somar = (a: Soma, b: Partial<Soma>): Soma => Object.fromEntries(CAMPOS_SOMA.map((k) => [k, a[k] + (b[k] ?? 0)])) as unknown as Soma;
 const razao = (a: number, b: number): number | null => (b > 0 ? a / b : null);
-export const metricas = (s: Soma): Metricas => ({ ...s, cpl: s.invest > 0 ? razao(s.invest, s.leads) : null, cac: s.invest > 0 ? razao(s.invest, s.ganhos) : null, pctMql: razao(s.mql, s.leads) });
+export const metricas = (s: Soma): Metricas => {
+  const trafego = s.cliques + s.sessoes;
+  return {
+    ...s,
+    trafego: trafego > 0 ? trafego : null,
+    cpm: s.invest > 0 && s.impressoes > 0 ? (s.invest / s.impressoes) * 1000 : null,
+    ctr: razao(s.cliques, s.impressoes),
+    cpc: s.invest > 0 ? razao(s.invest, s.cliques) : null,
+    txLead: razao(s.leadsT, trafego),
+    cpl: s.invest > 0 ? razao(s.invest, s.leads) : null,
+    cac: s.invest > 0 ? razao(s.invest, s.ganhos) : null,
+    pctMql: razao(s.mql, s.leads),
+  };
+};
 
 /** Dados diários por canal (dia AAAA-MM-DD -> Soma) mais as contagens de ontem até a mesma hora. */
 export interface DadosMonitor {
@@ -66,7 +90,11 @@ export interface DadosMonitor {
   ontemMesmaHora: Record<CanalId, Soma>;
   /** HH:MM de agora, no fuso do Monitor. */
   hora: string;
+  /** Último dia com sessões do GA4 (chega com cerca de 1 dia de atraso); depois dele o degrau de visitas de Social e Orgânico não existe. */
+  trafegoAte: string | null;
 }
+/** Canais cujo degrau de tráfego vem do GA4 (sessões do site), não de mídia paga. */
+const USA_GA4: ReadonlySet<CanalId> = new Set<CanalId>(['social', 'organico']);
 
 const somaJanela = (m: Map<string, Soma>, j: Janela): Soma => {
   let s = ZERO;
@@ -91,7 +119,10 @@ export interface Monitor {
 /**
  * Métricas "boas quando sobem" (true) ou "boas quando descem" (false); investimento não é bom nem ruim (null).
  */
-export const BOM_SE_SOBE: Record<keyof Metricas, boolean | null> = { leads: true, mql: true, reunioes: true, ganhos: true, mrr: true, pctMql: true, cpl: false, cac: false, invest: null };
+export const BOM_SE_SOBE: Record<keyof Metricas, boolean | null> = {
+  leads: true, mql: true, reunioes: true, ganhos: true, mrr: true, pctMql: true, cpl: false, cac: false, invest: null,
+  impressoes: null, cliques: null, sessoes: null, leadsT: null, trafego: true, cpm: false, ctr: true, cpc: false, txLead: true,
+};
 
 export interface Veredito { leads: number; ganhos: number; mrr: number; pior: { metrica: keyof Metricas; periodo: PeriodoId; pct: number } | null }
 const KPIS_VEREDITO: Array<keyof Metricas> = ['mrr', 'ganhos', 'cac', 'leads', 'pctMql', 'cpl'] as Array<keyof Metricas>;
@@ -122,10 +153,14 @@ export function montarMonitor(d: DadosMonitor, hoje: string): Monitor {
       const atual = somaJanela(m, janelas[p].atual);
       const inteiro = somaJanela(m, janelas[p].anterior);
       if (p === 'dia') {
-        // contagens de ontem até a mesma hora; investimento, CPL e CAC de ontem inteiro (o gasto só existe por dia, e custo é razão)
+        // contagens de ontem até a mesma hora; investimento, impressões, cliques, sessões e todas as razões (CPM, CTR, CPC, taxa, CPL, CAC) de ontem
+        // inteiro: o gasto e o tráfego só existem por dia, e custo e taxa são razões
         const hora = metricas({ ...ontemHora, invest: inteiro.invest });
         const cheio = metricas(inteiro);
-        periodos[p] = { atual: metricas(atual), anterior: { ...hora, cpl: cheio.cpl, cac: cheio.cac, invest: cheio.invest } };
+        periodos[p] = {
+          atual: metricas(atual),
+          anterior: { ...hora, invest: cheio.invest, impressoes: cheio.impressoes, cliques: cheio.cliques, sessoes: cheio.sessoes, leadsT: cheio.leadsT, trafego: cheio.trafego, cpm: cheio.cpm, ctr: cheio.ctr, cpc: cheio.cpc, txLead: cheio.txLead, cpl: cheio.cpl, cac: cheio.cac },
+        };
       } else periodos[p] = { atual: metricas(atual), anterior: metricas(inteiro) };
     }
     const serie = { dias: serieDias, leads: [] as number[], mql: [] as number[], ganhos: [] as number[], invest: [] as number[] };
@@ -179,11 +214,26 @@ export async function lerDadosMonitor(db: Db, hoje: string, hora: string, produt
   for (const r of reunioes.rows) { const c = canalDeFonte(r.fonte); if (c) poe(c, r.dia, { reunioes: n(r.reunioes) }); }
 
   // investimento por dia: Meta pela conta do produto; Google Ads vem do GA4 do site (QuarkRH): só entra no total e no RH
-  const meta = await db.query(`select dia::text as dia, sum(gasto)::float8 as gasto from analytics.meta_desempenho_dia m where m.dia >= $1::date${produto ? ' and m.produto = $2' : ''} group by 1`, produto ? [inicio, produto] : [inicio]);
-  for (const r of meta.rows) poe('meta', r.dia, { invest: n(r.gasto) });
+  // funil de mídia paga: gasto, impressões e cliques no link; Social e Orgânico não têm verba: o topo deles são as sessões do site (GA4)
+  const meta = await db.query(
+    `select dia::text as dia, sum(gasto)::float8 as gasto, sum(impressoes)::float8 as impressoes, sum(cliques_link)::float8 as cliques from analytics.meta_desempenho_dia m
+      where m.dia >= $1::date${produto ? ' and m.produto = $2' : ''} group by 1`, produto ? [inicio, produto] : [inicio]);
+  for (const r of meta.rows) poe('meta', r.dia, { invest: n(r.gasto), impressoes: n(r.impressoes), cliques: n(r.cliques) });
   if (!produto || produto === 'rh') {
-    const g = await db.query(`select dia::text as dia, sum(custo)::float8 as custo from analytics.ads_investimento_dia where dia >= $1::date group by 1`, [inicio]);
-    for (const r of g.rows) poe('google', r.dia, { invest: n(r.custo) });
+    const g = await db.query(`select dia::text as dia, sum(custo)::float8 as custo, sum(impressoes)::float8 as impressoes, sum(cliques)::float8 as cliques from analytics.ads_investimento_dia where dia >= $1::date group by 1`, [inicio]);
+    for (const r of g.rows) poe('google', r.dia, { invest: n(r.custo), impressoes: n(r.impressoes), cliques: n(r.cliques) });
+  }
+  // sessões do site por canal (a mídia do GA4: social = midia "social"; orgânico = busca orgânica); o site do QuarkClinic é um host separado
+  const host = produto === 'clinic' ? ` and host = 'quarkclinic.com.br'` : produto === 'rh' ? ` and host <> 'quarkclinic.com.br'` : '';
+  const [ga, ultimoGa] = await Promise.all([
+    db.query(`select dia::text as dia, midia, sum(sessoes)::float8 as sessoes from analytics.site_sessoes_dia where dia >= $1::date and midia in ('social', 'organic')${host} group by 1, 2`, [inicio]),
+    db.query(`select max(dia)::text as dia from analytics.site_sessoes_dia`),
+  ]);
+  for (const r of ga.rows) poe(r.midia === 'social' ? 'social' : 'organico', r.dia, { sessoes: n(r.sessoes) });
+  const trafegoAte: string | null = ultimoGa.rows[0]?.dia ?? null;
+  // leadsT: leads dos dias em que o degrau de tráfego existe (o GA4 não tem o dia de hoje), base da taxa tráfego -> lead
+  for (const c of CANAIS) {
+    for (const [dia, s] of diario[c.id]) diario[c.id].set(dia, { ...s, leadsT: USA_GA4.has(c.id) && (trafegoAte == null || dia > trafegoAte) ? 0 : s.leads });
   }
 
   // ontem até a mesma hora (só contagens: o gasto só existe por dia)
@@ -203,7 +253,7 @@ export async function lerDadosMonitor(db: Db, hoje: string, hora: string, produt
   for (const r of oc.rows) { const c = canalDeFonte(r.fonte); if (c) ontemMesmaHora[c] = somar(ontemMesmaHora[c], { leads: n(r.leads), mql: n(r.mql) }); }
   for (const r of og.rows) { const c = canalDeFonte(r.fonte); if (c) ontemMesmaHora[c] = somar(ontemMesmaHora[c], { ganhos: n(r.ganhos), mrr: n(r.mrr) }); }
   for (const r of or.rows) { const c = canalDeFonte(r.fonte); if (c) ontemMesmaHora[c] = somar(ontemMesmaHora[c], { reunioes: n(r.reunioes) }); }
-  return { diario, ontemMesmaHora, hora };
+  return { diario, ontemMesmaHora, hora, trafegoAte };
 }
 
 export interface MonitorRepo { monitor(produto?: ProdutoMonitor): Promise<Monitor> }
