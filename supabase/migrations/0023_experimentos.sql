@@ -46,8 +46,6 @@ create table mkt.experimentos (
 
   -- documentacao: HTML do editor do Studio (texto livre + relatorio visual diario, semanal e geral); gravado a parte da lista
   documentacao text check (documentacao is null or char_length(documentacao) <= 400000),
-  -- chave da carga das planilhas antigas (scripts/importar-experimentos.ts); evita importar duas vezes
-  origem text unique,
 
   criado_em timestamptz not null default now(),
   atualizado_em timestamptz not null default now(),
