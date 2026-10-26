@@ -25,6 +25,13 @@ create table mkt.experimentos (
   investimento numeric check (investimento is null or investimento >= 0),
   inicio date,
   fim date,
+  -- escopo opcional (pedido do Pablo): pagina de destino (GA4), campanha da Meta e identificador de conversao do Pipedrive. Cada um vem das contas reais
+  -- (ou e digitado a mao); com mais de um vale o conjunto (E). Sem escopo, o resultado e o do canal. O id da campanha e texto-numerico: ids da Meta passam de 2^53.
+  pagina_host text check (pagina_host is null or char_length(pagina_host) <= 200),
+  pagina_caminho text check (pagina_caminho is null or char_length(pagina_caminho) <= 300),
+  campanha_id bigint,
+  campanha_nome text check (campanha_nome is null or char_length(campanha_nome) <= 200),
+  identificador_conversao text check (identificador_conversao is null or char_length(identificador_conversao) <= 200),
   status text not null default 'backlog' check (status in ('backlog', 'planejado', 'rodando', 'bloqueado', 'concluido', 'cancelado')),
   -- avaliacao manual de quem conduziu (a planilha antiga); o desfecho abaixo e o calculado pela meta
   avaliacao text check (avaliacao is null or avaliacao in ('sucesso', 'falha', 'inconclusivo')),

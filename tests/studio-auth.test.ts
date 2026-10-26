@@ -126,6 +126,7 @@ describe('Acesso: servidor publicado (login, papéis e Studio de testes desligad
     async atualizar(id) { return { id } as never; },
     async relatorio(id) { return { id } as never; },
     async salvarDocumentacao(id) { return { id, atualizadoEm: 'x' }; },
+    async opcoes() { return { paginas: [], campanhas: [], identificadores: [] }; },
   };
   let server: Server; let base: string; let dir: string; let host: string;
   beforeAll(async () => {

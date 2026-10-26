@@ -69,6 +69,11 @@ const delta = (atual, antes, melhor) => {
 const tabela = (cab, linhas) => `<table class="rel-tab"><thead><tr>${cab.map((c) => `<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>${linhas.map((l) => `<tr>${l.map((c, i) => `<td${i === 0 ? '' : ' class="n"'}>${c}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
 const periodo = (l) => (l.de === l.ate ? dm(l.de) : `${dm(l.de)} a ${dm(l.ate)}`);
 
+/** Rótulos do escopo (página, campanha e identificador) do experimento, como aparecem no cadastro. */
+function rotuloEscopo(e) {
+  const camp = e.campanhaId ? `${e.campanhaNome ?? 'Campanha'} (${e.campanhaId})` : e.campanhaNome;
+  return [e.paginaCaminho ? `Página ${e.paginaHost ?? ''}${e.paginaCaminho}` : '', camp ? `Campanha ${camp}` : '', e.identificadorConversao ? `Identificador ${e.identificadorConversao}` : ''].filter(Boolean);
+}
 function ctx(R) {
   const e = R.experimento, p = e.progresso, rel = R.relatorio;
   const m = R.metricas.find((x) => x.id === e.metrica) || null;
@@ -81,16 +86,17 @@ function blocoKpis(R) {
   const g = rel.geral, b = rel.base;
   if (!g) return `<h2>Resumo do resultado</h2><p class="nota">${e.inicio ? 'O primeiro dia completo ainda não fechou.' : 'Defina início e fim do experimento para gerar o relatório.'}</p>`;
   const k = (rot, val, sub) => `<div class="kpi"><span>${esc(rot)}</span><b>${val}</b><small>${sub || ''}</small></div>`;
-  const chave = m
-    ? k(`${m.rotulo} (métrica chave)`, esc(fmtM(m, p.atual)), `Meta ${esc(fmtM(m, e.meta))} · previsto até aqui ${esc(fmtM(m, p.esperado))}`)
-      + k('Atingimento da meta', p.atingimento == null ? '—' : `${nf0.format(p.atingimento * 100)}%`, `<span class="estado ${p.estado}">${esc(ESTADO_ROTULO[p.estado])}</span>`)
-    : k('Métrica chave', '—', 'Não definida: escolha uma no cadastro para acompanhar a meta');
+  const hero = m
+    ? `<div class="kpi hero"><span><i class="real">REAL</i>${esc(m.rotulo)} · métrica chave</span><b>${esc(fmtM(m, p.atual))}</b>
+        <small>Meta ${esc(fmtM(m, e.meta))} · previsto até aqui ${esc(fmtM(m, p.esperado))} · atingimento ${p.atingimento == null ? '—' : nf0.format(p.atingimento * 100) + '%'} <span class="estado ${p.estado}">${esc(ESTADO_ROTULO[p.estado])}</span>${p.projecao != null ? ` · projeção no fim ${esc(fmtM(m, p.projecao))}` : ''}</small></div>`
+    : '<div class="kpi hero"><span>Métrica chave</span><b>—</b><small>Não definida: escolha uma no cadastro para acompanhar o resultado real contra a meta.</small></div>';
+  const escopo = rotuloEscopo(e);
   // o período anterior tem o tamanho do experimento inteiro e o "durante" só os dias fechados: compara médias por dia
   const dia = (l, campo) => (l ? l[campo] / Math.max(1, l.dias) : null);
   const por = (campo, melhor) => delta(dia(g, campo), dia(b, campo), melhor);
   const antes = (campo) => (b ? `antes: ${nf.format(dia(b, campo))}/dia` : 'antes: —');
   return `<h2>Resumo do resultado</h2><p class="nota">${esc(atualizado)} · ${g.dias} ${g.dias === 1 ? 'dia completo' : 'dias completos'} de ${p.totalDias}. Variações comparam a média por dia com a do período anterior ao teste.</p>
-    <div class="kpis">${chave}
+    <div class="kpis">${hero}${escopo.length ? `<div class="escopo-doc" style="grid-column:1/-1">${escopo.map((t) => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
       ${k('Leads', num(g.leads), `${por('leads', 'subir')} ${antes('leads')}`)}
       ${k('MQL', num(g.mql), `${por('mql', 'subir')} ${antes('mql')}`)}
       ${k('Reuniões', num(g.reunioes), `${por('reunioes', 'subir')} ${antes('reunioes')}`)}
@@ -139,13 +145,13 @@ function blocoDiario(R) {
   const rotulos = rel.diario.map((l) => dm(l.de));
   const chave = m ? { nome: m.rotulo, f: (v) => FORMATOS[m.formato](v), vals: rel.diario.map((l) => l.valor), soma: m.tipo === 'soma' } : { nome: 'Leads', f: nf0.format, vals: rel.diario.map((l) => l.leads), soma: true };
   const grafDia = chave.soma
-    ? barrasSvg({ rotulos, series: [{ nome: `${chave.nome} por dia`, cor: COR.laranja, valores: chave.vals }], fmt: chave.f, titulo: `${chave.nome} por dia` })
+    ? barrasSvg({ rotulos, series: [{ nome: `${chave.nome} real por dia`, cor: COR.laranja, valores: chave.vals }], fmt: chave.f, titulo: `${chave.nome} real por dia` })
     : linhasSvg({ rotulos, series: [{ nome: `${chave.nome} do dia`, cor: COR.laranja, valores: chave.vals }], fmt: chave.f, titulo: `${chave.nome} por dia` });
   const traj = m && p.serie.length
     ? linhasSvg({ rotulos: p.serie.map((s) => dm(s.dia)), series: [{ nome: m.tipo === 'soma' ? 'Acumulado real' : 'Real no período até o dia', cor: COR.laranja, valores: p.serie.map((s) => s.real) }, { nome: 'Previsto até a meta', cor: COR.ink2, tracejado: true, valores: p.serie.map((s) => s.esperado) }], fmt: (v) => FORMATOS[m.formato](v), titulo: 'Real contra previsto', zero: m.tipo === 'soma' })
     : '';
   return `<h2>Visão diária</h2><p class="nota">${esc(atualizado)}.</p>
-    <h3>${esc(chave.nome)} por dia</h3>${grafDia}
+    <h3>${esc(chave.nome)} real por dia</h3>${grafDia}
     ${traj ? `<h3>Real contra previsto${m.tipo === 'soma' ? ' (acumulado)' : ''}</h3>${traj}` : ''}
     <h3>Dia a dia</h3>${tabela(['Dia', ...colunasDados(m)], rel.diario.map((l) => linhaTab(l, m, dm(l.de))))}`;
 }
@@ -155,9 +161,9 @@ function blocoSemanal(R) {
   if (!rel.semanal.length) return semPeriodo('Visão semanal');
   const rotulos = rel.semanal.map((l, k) => `S${k + 1}`);
   const serie = (nome, cor, campo) => ({ nome, cor, valores: rel.semanal.map((l) => l[campo]) });
-  const chave = m ? barrasSvg({ rotulos, series: [{ nome: `${m.rotulo} da semana`, cor: COR.laranja, valores: rel.semanal.map((l) => l.valor) }], fmt: (v) => FORMATOS[m.formato](v), titulo: `${m.rotulo} por semana` }) : '';
+  const chave = m ? barrasSvg({ rotulos, series: [{ nome: `${m.rotulo} real da semana`, cor: COR.laranja, valores: rel.semanal.map((l) => l.valor) }], fmt: (v) => FORMATOS[m.formato](v), titulo: `${m.rotulo} por semana` }) : '';
   return `<h2>Visão semanal</h2><p class="nota">${esc(atualizado)}. Semanas de segunda a domingo; a primeira e a última podem ter menos dias.</p>
-    ${chave ? `<h3>${esc(m.rotulo)} por semana</h3>${chave}` : ''}
+    ${chave ? `<h3>${esc(m.rotulo)} real por semana</h3>${chave}` : ''}
     <h3>Funil por semana</h3>${barrasSvg({ rotulos, series: [serie('Leads', COR.laranja, 'leads'), serie('MQL', COR.turquesa, 'mql'), serie('Reuniões', COR.verde, 'reunioes'), serie('Ganhos', COR.azul, 'ganhos')], fmt: (v) => nf0.format(v), titulo: 'Funil por semana' })}
     <h3>Semana a semana</h3>${tabela(['Semana', 'Período', ...colunasDados(m)], rel.semanal.map((l, k) => { const [, ...resto] = linhaTab(l, m, ''); return [`S${k + 1}`, `${esc(periodo(l))} (${l.dias}d)`, ...resto]; }))}`;
 }
@@ -189,6 +195,7 @@ export function modeloInicial(R) {
     <h3>Resultado esperado</h3>${par(e.resultadoEsperado, 'Que resultado esperamos e em quanto tempo.')}
     <h3>Métrica chave</h3>${par(meta, 'Qual número decide se o teste deu certo (escolha no cadastro para acompanhar a meta sozinho).')}
     <h3>Investimento</h3>${par(invest, 'Quanto será investido (mídia, ferramentas, horas).')}
+    ${rotuloEscopo(e).length ? `<h3>Escopo</h3><p>${esc(rotuloEscopo(e).join(' · '))}. Os números do relatório são só os dessa fatia: o negócio precisa bater com todos os itens do escopo.</p>` : ''}
     <h3>Evidências e referências</h3>${par(e.evidencias, 'Links, benchmarks e dados que sustentam a hipótese.')}
     <h2>Resultados</h2>
     ${ordemBlocos.map((id) => bloco(id, R)).join('')}

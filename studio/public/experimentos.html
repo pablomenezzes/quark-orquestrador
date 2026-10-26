@@ -105,6 +105,7 @@
     table.plan .pend { outline: 2px solid var(--m-laranja); outline-offset: -2px; border-radius: 6px; }
     table.plan tr.rascunho td { background: var(--accent-soft); }
     table.plan tr.cancelado td { opacity: .55; }
+    .tag.escopo { border-color: var(--m-turquesa); }
     .linha-acoes { display: flex; gap: 6px; align-items: center; white-space: nowrap; }
     .btn-mini { font: inherit; font-size: 12px; padding: 3px 9px; border: 1px solid var(--m-line); border-radius: 6px; background: var(--m-card); color: var(--m-ink); cursor: pointer; }
     .btn-mini.doc-ok { border-color: var(--m-turquesa); }
@@ -161,6 +162,11 @@
     .papel .kpi span { display: block; font-size: 12px; color: #55595e; }
     .papel .kpi b { display: block; font-size: 22px; margin: 2px 0; }
     .papel .kpi small { font-size: 12px; color: #55595e; }
+    .papel .kpi.hero { grid-column: 1 / -1; border: 2px solid #EA8C0C; background: #fffaf2; }
+    .papel .kpi.hero b { font-size: 34px; }
+    .papel .kpi.hero .real { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .06em; padding: 1px 8px; border-radius: 999px; background: #EA8C0C; color: #212529; margin-right: 6px; vertical-align: middle; }
+    .papel .escopo-doc { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+    .papel .escopo-doc span { border: 1px solid #39B4B6; border-radius: 999px; padding: 1px 10px; font-size: 12.5px; }
     .papel .delta { font-weight: 700; margin-right: 4px; }
     .papel .delta.bom { color: #2f7d1f; }
     .papel .delta.ruim { color: #b3261e; }
@@ -241,6 +247,7 @@
       </ul>
     </details>
   </main>
+  <div id="dl-escopo" hidden></div>
   <aside id="ficha" class="gaveta" hidden aria-label="Ficha do experimento"></aside>
   <div id="doc" hidden role="dialog" aria-modal="true" aria-label="Documentação do experimento"></div>
   <script src="/s/nav.js" type="module"></script>

@@ -7,7 +7,8 @@ import type { Server } from 'node:http';
 import { createStudioServer } from '../studio/server';
 import { PainelInvalido, PainelNotFound } from '../studio/lib/painel-repo';
 import { somaDias, ZERO, type CanalId, type DadosMonitor, type Soma } from '../studio/lib/monitor';
-import { acompanhavel, calcularProgresso, calibracaoPor, desfechoDe, documentacaoValida, METRICAS_EXP, montarRelatorio, PgExperimentosRepo, validarEntrada, valorMetrica, type Experimento, type ExperimentosRepo } from '../studio/lib/experimentos';
+import { lerDadosEscopo, normalizarCampanha, normalizarPagina } from '../studio/lib/experimentos-escopo';
+import { acompanhavel, calcularProgresso, calibracaoPor, desfechoDe, documentacaoValida, METRICAS_EXP, montarRelatorio, PgExperimentosRepo, rotuloEscopo, validarEntrada, valorMetrica, type Experimento, type ExperimentosRepo } from '../studio/lib/experimentos';
 
 const soma = (o: Partial<Soma>): Soma => ({ ...ZERO, ...o });
 const vazio = (): Record<CanalId, Map<string, Soma>> => ({ google: new Map(), meta: new Map(), social: new Map(), organico: new Map() });
@@ -209,6 +210,74 @@ describe('Experimentos: sem métrica, relatório e documentação', () => {
   });
 });
 
+describe('Experimentos: escopo (página de destino, campanha e identificador de conversão)', () => {
+  it('normaliza a página: endereço completo, só o caminho ou texto inválido', () => {
+    expect(normalizarPagina('https://www.QuarkRH.com.br/Blog/Post/?utm=1#x')).toEqual({ host: 'quarkrh.com.br', caminho: '/blog/post' });
+    expect(normalizarPagina('quarkrh.com.br')).toEqual({ host: 'quarkrh.com.br', caminho: '/' });
+    expect(normalizarPagina('/diagnostico/')).toEqual({ host: null, caminho: '/diagnostico' });
+    expect(normalizarPagina('isto nao e pagina')).toBeNull();
+    expect(normalizarPagina('   ')).toBeNull();
+  });
+  it('campanha: "nome (id)" e só o id viram id; qualquer outro texto vira nome (o id fica como texto: passa de 2^53)', () => {
+    expect(normalizarCampanha('Black Friday RH (120219876543210987)')).toEqual({ id: '120219876543210987', nome: 'Black Friday RH' });
+    expect(normalizarCampanha('120219876543210987')).toEqual({ id: '120219876543210987', nome: null });
+    expect(normalizarCampanha('[GROWTH][80] Diagnóstico')).toEqual({ id: null, nome: '[GROWTH][80] Diagnóstico' });
+    expect(normalizarCampanha(' ')).toBeNull();
+  });
+  it('o cadastro aceita os três campos, limpa com vazio e recusa página inválida', () => {
+    const v = validarEntrada({ titulo: 'x', paginaDestino: 'https://quarkrh.com.br/diagnostico/', campanha: 'Diag (120219876543210987)', identificadorConversao: ' Diagnóstico RH ' }, 'criar');
+    expect(v).toMatchObject({ paginaHost: 'quarkrh.com.br', paginaCaminho: '/diagnostico', campanhaId: '120219876543210987', campanhaNome: 'Diag', identificadorConversao: 'Diagnóstico RH' });
+    expect(validarEntrada({ paginaDestino: '', campanha: null, identificadorConversao: '' }, 'editar')).toMatchObject({ paginaHost: null, paginaCaminho: null, campanhaId: null, campanhaNome: null, identificadorConversao: null });
+    expect(() => validarEntrada({ titulo: 'x', paginaDestino: 'sem dominio' }, 'criar')).toThrow(/página de destino inválida/);
+  });
+  it('custo exige campanha da Meta quando há escopo; contagem vale com qualquer escopo', () => {
+    expect(() => validarEntrada({ titulo: 'x', metrica: 'cpl', meta: 30, paginaDestino: '/diagnostico' }, 'criar')).toThrow(/só existe com uma campanha/);
+    expect(() => validarEntrada({ titulo: 'x', metrica: 'cpl', meta: 30, identificadorConversao: 'Diagnóstico' }, 'criar')).toThrow(/só existe com uma campanha/);
+    expect(validarEntrada({ titulo: 'x', metrica: 'cpl', meta: 30, campanha: 'Diag', canal: 'social' }, 'criar').metrica).toBe('cpl'); // com campanha, o canal deixa de importar
+    expect(validarEntrada({ titulo: 'x', metrica: 'leads', meta: 30, paginaDestino: '/diagnostico' }, 'criar').metrica).toBe('leads');
+    // na edição vale o conjunto
+    expect(() => validarEntrada({ metrica: 'cpl' }, 'editar', { produto: 'rh', canal: 'meta', metrica: 'leads', meta: 50, inicio: null, fim: null, paginaCaminho: '/x' })).toThrow(/só existe com uma campanha/);
+  });
+  const esc = { produto: 'rh', paginaHost: null, paginaCaminho: null, campanhaId: null, campanhaNome: null, identificadorConversao: null } as const;
+  it('lê só a fatia: negócios do escopo, gasto da campanha e SQL parametrizado', async () => {
+    const sqls: Array<{ sql: string; params: unknown[] }> = [];
+    const db = { query: async (sql: string, params: unknown[] = []) => { sqls.push({ sql: sql.replace(/\s+/g, ' '), params }); return { rows: /meta_desempenho_dia/.test(sql) ? [{ dia: '2026-10-02', gasto: 100, impressoes: 5000, cliques: 80 }] : /group by 1 *$|group by 1$/.test(sql.trim()) && /criado_em/.test(sql) ? [{ dia: '2026-10-02', leads: 4, mql: 2 }] : [] }; } } as never;
+    const d = await lerDadosEscopo(db, { ...esc, campanhaId: '120219876543210987', identificadorConversao: "x'); drop table crm.deals; --", paginaHost: 'quarkrh.com.br', paginaCaminho: '/diagnostico' }, '10:00', '2026-09-01');
+    const todos = sqls.map((s) => s.sql).join(' ');
+    expect(todos).not.toContain('drop table');
+    expect(sqls[0]!.params).toEqual(['2026-09-01', 'rh', '120219876543210987', "x'); drop table crm.deals; --", '/diagnostico', 'quarkrh.com.br']);
+    expect(todos).toContain('analytics.negocios_meta');
+    expect(todos).toContain('analytics.conversoes_pipe_negocios');
+    expect(todos).toContain('analytics.negocios_url');
+    expect(todos).not.toContain('site_paginas_dia'); // com campanha, o topo é a mídia da campanha, não as visitas da página
+    expect(d.diario.meta.get('2026-10-02')).toMatchObject({ leads: 4, mql: 2, invest: 100, impressoes: 5000, cliques: 80, leadsT: 4 });
+    expect(d.diario.google.size + d.diario.social.size + d.diario.organico.size).toBe(0);
+  });
+  it('só página: o topo são as visualizações dela no GA4 e não há investimento', async () => {
+    const sqls: string[] = [];
+    const db = { query: async (sql: string) => { sqls.push(sql); return { rows: /site_paginas_dia/.test(sql) ? [{ dia: '2026-10-02', v: 300 }] : [] }; } } as never;
+    const d = await lerDadosEscopo(db, { ...esc, paginaCaminho: '/diagnostico' }, '10:00', '2026-09-01');
+    expect(sqls.some((s) => s.includes('meta_desempenho_dia'))).toBe(false);
+    expect(d.diario.meta.get('2026-10-02')).toMatchObject({ sessoes: 300, invest: 0 });
+  });
+  it('o repositório lê a fatia do experimento com escopo e o Monitor para o resto, e calcula o real sobre a fatia', async () => {
+    const linhaE = (o: Record<string, unknown>) => ({ id: 5, titulo: 'T', tipo: 'experimento', produto: 'rh', canal: 'social', metrica: 'leads', meta: 100, inicio: '2026-10-01', fim: '2026-10-10', status: 'rodando', criado_em: new Date(), atualizado_em: new Date(), ...o });
+    const rows = [linhaE({ id: 5, identificador_conversao: 'Diagnóstico RH' }), linhaE({ id: 6 })];
+    const db = { query: async (sql: string) => ({ rows: /from mkt\.experimentos/.test(sql) ? rows : [] }) } as never;
+    const fatia: Record<CanalId, Map<string, Soma>> = { google: new Map(), meta: new Map(), social: new Map(), organico: new Map() };
+    for (const dia of dias('2026-10-01', '2026-10-10')) fatia.meta.set(dia, soma({ leads: 3 }));
+    const lidosEscopo: string[] = [];
+    const repo = new PgExperimentosRepo(db, () => new Date('2026-10-11T15:00:00Z'),
+      async () => ({ diario: vazio(), ontemMesmaHora: { google: ZERO, meta: ZERO, social: ZERO, organico: ZERO }, hora: '10:00', trafegoAte: null }),
+      async (_db, e) => { lidosEscopo.push(String(e.identificadorConversao)); return { diario: fatia, ontemMesmaHora: { google: ZERO, meta: ZERO, social: ZERO, organico: ZERO }, hora: '10:00', trafegoAte: null }; });
+    const l = await repo.listar();
+    expect(lidosEscopo).toEqual(['Diagnóstico RH']);
+    expect(l.experimentos.find((e) => e.id === 5)!.progresso.atual).toBe(30); // o REAL da fatia, não o do canal (que está vazio)
+    expect(l.experimentos.find((e) => e.id === 6)!.progresso.atual).toBe(0); // sem escopo, vale o canal (vazio no teste)
+    expect(rotuloEscopo(l.experimentos[0]!)).toEqual(['Identificador Diagnóstico RH']);
+  });
+});
+
 describe('Experimentos: repositório (banco simulado)', () => {
   const linha = (o: Record<string, unknown> = {}) => ({ id: 5, titulo: 'T', hipotese: null, produto: 'rh', canal: 'meta', metrica: 'leads', meta: 300, linha_base: null, investimento: null, inicio: '2026-10-01', fim: '2026-10-30', status: 'rodando', ice_impacto: 8, ice_confianca: 6, ice_facilidade: 7, ice_score: 7, valor_final: null, atingimento_final: null, desfecho: null, aprendizado: null, criado_em: new Date('2026-10-01T10:00:00Z'), atualizado_em: new Date('2026-10-01T10:00:00Z'), ...o });
   const dados = (): DadosMonitor => { const diario = vazio(); meta(diario, '2026-10-01', '2026-10-10', { leads: 8, invest: 400 }); return { diario, ontemMesmaHora: { google: ZERO, meta: ZERO, social: ZERO, organico: ZERO }, hora: '10:00', trafegoAte: null }; };
@@ -290,6 +359,7 @@ describe('Experimentos: API do Studio e página', () => {
   const repo: ExperimentosRepo = {
     async listar() { chamadas.push('listar'); return { hoje: '2026-10-11', metricas: METRICAS_EXP, canais: [] as never, tipos: [] as never, experimentos: [], calibracao: [] }; },
     async relatorio(id) { chamadas.push(`relatorio:${id}`); return { id } as never; },
+    async opcoes(produto) { chamadas.push(`opcoes:${produto ?? ''}`); return { paginas: [], campanhas: [], identificadores: [] }; },
     async salvarDocumentacao(id, b) { chamadas.push(`doc:${id}`); documentacaoValida(b); return { id, atualizadoEm: 'x' }; },
     async criar(b) { chamadas.push('criar'); validarEntrada(b, 'criar'); return { id: 1 } as never; },
     async atualizar(id, b) { chamadas.push(`atualizar:${id}`); validarEntrada(b, 'editar'); return { id } as never; },
@@ -313,12 +383,14 @@ describe('Experimentos: API do Studio e página', () => {
     const ok = { titulo: 'T', produto: 'rh', metrica: 'cpl', meta: 50, inicio: '2026-10-01', fim: '2026-10-30' };
     expect((await fetch(`${base}/api/experimentos`, json('POST', ok))).status).toBe(201);
     expect((await fetch(`${base}/api/experimentos/7`, json('PUT', { titulo: 'Outro' }))).status).toBe(200);
+    expect((await fetch(`${base}/api/experimentos/opcoes?produto=rh`)).status).toBe(200);
+    expect((await fetch(`${base}/api/experimentos/opcoes`, json('POST', {}))).status).toBe(405);
     expect((await fetch(`${base}/api/experimentos/7/relatorio`)).status).toBe(200);
     expect((await fetch(`${base}/api/experimentos/7/documentacao`, json('PUT', { html: '<p>ok</p>' }))).status).toBe(200);
     expect((await fetch(`${base}/api/experimentos/7/documentacao`, json('PUT', { html: '<script>x</script>' }))).status).toBe(400);
     expect((await fetch(`${base}/api/experimentos/7/relatorio`, json('PUT', {}))).status).toBe(405);
     expect((await fetch(`${base}/api/experimentos/7/documentacao`)).status).toBe(405);
-    expect(chamadas).toEqual(['listar', 'criar', 'atualizar:7', 'relatorio:7', 'doc:7', 'doc:7']);
+    expect(chamadas).toEqual(['listar', 'criar', 'atualizar:7', 'opcoes:rh', 'relatorio:7', 'doc:7', 'doc:7']);
     expect((await fetch(`${base}/api/experimentos/7`, { method: 'DELETE', headers: { 'content-type': 'application/json' } })).status).toBe(405);
     expect((await fetch(`${base}/api/experimentos`, { method: 'DELETE', headers: { 'content-type': 'application/json' } })).status).toBe(405);
     expect((await fetch(`${base}/api/experimentos/abc`, json('PUT', {}))).status).toBe(404);

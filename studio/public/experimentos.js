@@ -7,9 +7,23 @@ import { abrirDocumentacao } from './experimentos-doc.js';
 const guardado = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch { /* armazenamento indisponível: segue sem lembrar */ } return null; };
 const S = {
   dados: null, vista: guardado('exp.vista') === 'kanban' ? 'kanban' : 'planilha', filtro: 'ativos', tipo: '', produto: '', busca: '',
-  ficha: null, rascunho: null, pend: {}, enviando: false,
+  ficha: null, rascunho: null, pend: {}, enviando: false, opcoes: null,
 };
 const COLUNAS_KANBAN = ['backlog', 'planejado', 'rodando', 'bloqueado', 'concluido', 'cancelado'];
+const paginaTexto = (host, caminho) => (caminho ? `${host ?? ''}${caminho}` : '');
+const campanhaTexto = (e) => (e.campanhaId ? `${e.campanhaNome ?? 'Campanha'} (${e.campanhaId})` : (e.campanhaNome ?? ''));
+const temEscopo = (e) => !!(e.paginaCaminho || e.campanhaId || e.campanhaNome || e.identificadorConversao);
+const escopoRotulos = (e) => [e.paginaCaminho ? `Página ${paginaTexto(e.paginaHost, e.paginaCaminho)}` : '', campanhaTexto(e) ? `Campanha ${campanhaTexto(e)}` : '', e.identificadorConversao ? `Identificador ${e.identificadorConversao}` : ''].filter(Boolean);
+/** Páginas do Analytics, campanhas da Meta e identificadores do Pipedrive para escolher; tudo também pode ser digitado à mão. */
+async function carregarOpcoes() {
+  try { S.opcoes = await api('/api/experimentos/opcoes'); } catch { S.opcoes = null; }
+  const o = S.opcoes;
+  $('#dl-escopo').innerHTML = o
+    ? `<datalist id="dl-paginas">${o.paginas.map((p) => `<option value="${esc(p.host + p.caminho)}" label="${esc(nf0.format(p.visualizacoes))} visualizações em 90 dias"></option>`).join('')}</datalist>
+       <datalist id="dl-campanhas">${o.campanhas.map((c) => `<option value="${esc(`${c.nome} (${c.id})`)}" label="gasto ${esc(brl0.format(c.gasto))}"></option>`).join('')}</datalist>
+       <datalist id="dl-ident">${o.identificadores.map((i) => `<option value="${esc(i.evento)}" label="${esc(nf0.format(i.negocios))} negócios"></option>`).join('')}</datalist>`
+    : '';
+}
 const mdef = (id) => S.dados.metricas.find((m) => m.id === id) ?? null;
 const exp = (id) => S.dados.experimentos.find((x) => x.id === Number(id));
 const acompanhavel = (e) => !!(e.metrica && e.meta != null && e.inicio && e.fim);
@@ -30,6 +44,7 @@ async function carregar() {
     $('#lista').classList.remove('carregando');
     return;
   }
+  carregarOpcoes();
   $('#et-dados').textContent = `Dados completos até ontem · ${dmy(S.dados.hoje)}`;
   if ($('#f-tipo-lista').options.length < 2) $('#f-tipo-lista').insertAdjacentHTML('beforeend', S.dados.tipos.map((t) => `<option value="${esc(t.id)}">${esc(t.nome)}</option>`).join(''));
   desenhar();
@@ -146,7 +161,10 @@ function linha(e) {
     ${tdTxt('responsavel', e.responsavel, { extra: 'maxlength="120"' })}
     ${tdTxt('areaImpacto', e.areaImpacto, { extra: 'maxlength="80"' })}
     ${tdSel('produto', optsHtml(OPT_PROD, e.produto), e.produto)}
-    ${tdSel('canal', optsHtml(canaisPara(e).map((c) => [c.id, c.nome]), e.canal), e.canal)}
+    ${tdSel('canal', optsHtml(canaisPara(e).map((c) => [c.id, c.nome]), e.canal), e.canal, temEscopo(e) ? 'disabled title="Com página, campanha ou identificador, o resultado é o da fatia e o canal não é usado"' : '')}
+    ${tdTxt('paginaDestino', e.paginaDestino ?? paginaTexto(e.paginaHost, e.paginaCaminho), { extra: 'list="dl-paginas" maxlength="300" placeholder="escolha ou digite" aria-label="Página de destino"' })}
+    ${tdTxt('campanha', e.campanha ?? campanhaTexto(e), { extra: 'list="dl-campanhas" maxlength="200" placeholder="escolha ou digite" aria-label="Campanha da Meta"' })}
+    ${tdTxt('identificadorConversao', e.identificadorConversao, { extra: 'list="dl-ident" maxlength="200" placeholder="escolha ou digite" aria-label="Identificador de conversão"' })}
     ${tdSel('metrica', `<option value="">— sem métrica —</option>${optsHtml(S.dados.metricas.map((x) => [x.id, x.rotulo]), efetiva)}`, efetiva)}
     <td class="num"><input data-campo="meta" inputmode="decimal" class="${pend ? 'pend' : ''}" value="${esc(paraTela(m, e.meta))}" ${efetiva ? '' : 'disabled'} placeholder="${pend ? 'informe a meta' : ''}" aria-label="Meta"></td>
     ${tdTxt('resultadoEsperado', e.resultadoEsperado, { extra: 'maxlength="2000" title="Resultado esperado"' })}
@@ -162,7 +180,7 @@ function linha(e) {
 }
 
 function planilha(lista) {
-  const cab = ['Título', 'Tipo', 'Status', 'Responsável', 'Área de impacto', 'Produto', 'Canal', 'Métrica chave', 'Meta', 'Resultado esperado', 'Investimento previsto (R$)', 'Gasto real', 'Início', 'Fim', 'I', 'C', 'E', 'ICE', 'Avaliação', 'Acompanhamento', ''];
+  const cab = ['Título', 'Tipo', 'Status', 'Responsável', 'Área de impacto', 'Produto', 'Canal', 'Página de destino', 'Campanha (Meta)', 'Identificador de conversão', 'Métrica chave', 'Meta', 'Resultado esperado', 'Investimento previsto (R$)', 'Gasto real', 'Início', 'Fim', 'I', 'C', 'E', 'ICE', 'Avaliação', 'Acompanhamento', ''];
   const th = cab.map((c, i) => `<th class="${i === 0 ? 'col-tit' : ''}" ${c === 'I' ? 'title="ICE: impacto"' : c === 'C' ? 'title="ICE: confiança"' : c === 'E' ? 'title="ICE: facilidade"' : ''}>${esc(c)}</th>`).join('');
   return `<div class="barra-ctl"><button type="button" class="btn-s" id="nova-linha">+ Nova linha</button><span class="nota">Edite direto nas células: cada alteração é salva ao sair do campo. Meta e investimento em R$ (percentuais em %).</span></div>
     <div class="plan-wrap"><table class="plan"><thead><tr>${th}</tr></thead><tbody>${S.rascunho ? linha(S.rascunho) : ''}${lista.map(linha).join('')}</tbody></table>
@@ -180,6 +198,7 @@ function card(e) {
     <div class="tags"><span class="tag">${esc(tipoNome(e.tipo))}</span><span class="tag">${esc(PRODUTO_ROTULO[e.produto])}</span>${e.areaImpacto ? `<span class="tag">${esc(e.areaImpacto)}</span>` : ''}${ice}</div>
     ${e.responsavel ? `<p class="mini">${esc(e.responsavel)}</p>` : ''}
     ${m ? `<p class="mini">${esc(m.rotulo)}: meta ${esc(fmtM(m, e.meta))}${e.inicio && e.fim ? ` · ${esc(dm(e.inicio))} a ${esc(dm(e.fim))}` : ''}</p>` : ''}
+    ${temEscopo(e) ? `<div class="tags">${escopoRotulos(e).map((t) => `<span class="tag escopo">${esc(t)}</span>`).join('')}</div>` : ''}
     ${e.investimento ? `<p class="mini">Investimento previsto ${esc(brl0.format(e.investimento))}</p>` : ''}
     ${barras}
     <div class="tags">${acompanhavel(e) ? chipEstado(e) : ''}${chipResultado(e)}<button type="button" class="btn-mini ${e.temDocumentacao ? 'doc-ok' : ''}" data-acao="doc">Documentação</button></div>
@@ -268,7 +287,7 @@ async function editarCelula(el) {
 
 function novaLinha() {
   S.vista = 'planilha'; guardado('exp.vista', 'planilha');
-  S.rascunho = { id: 'novo', titulo: '', tipo: 'experimento', status: 'backlog', produto: 'rh', canal: 'total', metrica: null, meta: null, responsavel: null, areaImpacto: null, resultadoEsperado: null, investimento: null, inicio: null, fim: null, iceImpacto: null, iceConfianca: null, iceFacilidade: null, iceScore: null, avaliacao: null, progresso: { estado: 'sem_metrica' } };
+  S.rascunho = { id: 'novo', titulo: '', tipo: 'experimento', status: 'backlog', produto: 'rh', canal: 'total', metrica: null, meta: null, responsavel: null, areaImpacto: null, resultadoEsperado: null, investimento: null, inicio: null, fim: null, paginaDestino: null, campanha: null, identificadorConversao: null, iceImpacto: null, iceConfianca: null, iceFacilidade: null, iceScore: null, avaliacao: null, progresso: { estado: 'sem_metrica' } };
   desenhar();
   $('tr.rascunho input[data-campo="titulo"]')?.focus();
 }
@@ -276,7 +295,7 @@ async function adicionarLinha() {
   const d = S.rascunho;
   if (!d || S.enviando) return;
   if (!d.titulo.trim()) { mostrarErro('Dê um título à nova linha.'); $('tr.rascunho input[data-campo="titulo"]')?.focus(); return; }
-  const campos = ['titulo', 'tipo', 'status', 'produto', 'canal', 'responsavel', 'areaImpacto', 'resultadoEsperado', 'metrica', 'meta', 'investimento', 'inicio', 'fim', 'iceImpacto', 'iceConfianca', 'iceFacilidade', 'avaliacao'];
+  const campos = ['titulo', 'tipo', 'status', 'produto', 'canal', 'responsavel', 'areaImpacto', 'resultadoEsperado', 'metrica', 'meta', 'investimento', 'inicio', 'fim', 'paginaDestino', 'campanha', 'identificadorConversao', 'iceImpacto', 'iceConfianca', 'iceFacilidade', 'avaliacao'];
   const corpo = Object.fromEntries(campos.filter((k) => d[k] != null && d[k] !== '').map((k) => [k, d[k]]));
   S.enviando = true;
   try {
@@ -299,12 +318,14 @@ function fichaDesenhar() {
     titulo: e?.titulo ?? '', tipo: e?.tipo ?? 'experimento', status: e?.status ?? 'backlog', responsavel: e?.responsavel ?? '', areaImpacto: e?.areaImpacto ?? '',
     hipotese: e?.hipotese ?? '', resultadoEsperado: e?.resultadoEsperado ?? '', produto: e?.produto ?? 'rh', canal: e?.canal ?? 'total', metrica: e?.metrica ?? '',
     meta: e?.meta, linhaBase: e?.linhaBase, investimento: e?.investimento, inicio: e?.inicio ?? '', fim: e?.fim ?? '', avaliacao: e?.avaliacao ?? '',
+    paginaDestino: e ? paginaTexto(e.paginaHost, e.paginaCaminho) : '', campanha: e ? campanhaTexto(e) : '', identificadorConversao: e?.identificadorConversao ?? '',
     ice: [e?.iceImpacto, e?.iceConfianca, e?.iceFacilidade], evidencias: e?.evidencias ?? '', aprendizado: e?.aprendizado ?? '',
   };
   const chave = String(S.ficha);
   if (f.dataset.montado === chave) Object.assign(v, lerFicha(true)); // preserva o que se digitou ao trocar de métrica
   const m = mdef(v.metrica);
-  const canais = S.dados.canais.filter((c) => c.pago || !m?.precisaVerba);
+  const comEscopo = !!(v.paginaDestino?.trim() || v.campanha?.trim() || v.identificadorConversao?.trim());
+  const canais = comEscopo ? S.dados.canais : S.dados.canais.filter((c) => c.pago || !m?.precisaVerba);
   if (!canais.some((c) => c.id === v.canal)) v.canal = 'total';
   const sel = (id, opts, val) => `<select id="${id}">${optsHtml(opts, val)}</select>`;
   const unidade = m?.formato === 'pct' ? ' (em %)' : m?.formato === 'int' || !m ? '' : ' (em R$)';
@@ -313,6 +334,7 @@ function fichaDesenhar() {
   f.innerHTML = `<button type="button" class="btn-s" id="fx" style="float:right">Fechar</button>
     <h2 style="margin:0 0 4px">${e ? esc(e.titulo) : 'Novo experimento'}</h2>
     ${e ? `<div class="tags">${chipEstado(e)}${chipResultado(e)}</div><div class="acoes-ex"><button type="button" class="btn-p" id="fx-doc">Documentação</button><span class="nota">Editor de texto com relatório diário, semanal e geral; exporta em PDF.</span></div>` : ''}
+    ${e && temEscopo(e) ? `<div class="tags">${escopoRotulos(e).map((t) => `<span class="tag escopo">${esc(t)}</span>`).join('')}</div>` : ''}
     ${e ? `<div class="cartao">${progressoCompleto(e)}</div>` : ''}
     <section class="cartao form-ex"><h2>${e ? 'Dados do experimento' : 'Cadastro'}</h2>
       <p class="sub">${esc(m ? `${m.rotulo}: ${m.nota}. ` : '')}${m ? (m.tipo === 'soma' ? 'A meta é o total a atingir no período.' : 'A meta é o valor a atingir; a trajetória parte da linha de base.') : 'Sem métrica chave, o experimento fica só documentado (sem acompanhamento automático).'}</p>
@@ -323,7 +345,11 @@ function fichaDesenhar() {
         <label>Responsável<input id="f-responsavel" maxlength="120" value="${esc(v.responsavel)}"></label>
         <label>Área de impacto<input id="f-area" maxlength="80" value="${esc(v.areaImpacto)}" placeholder="Anúncio, CRO, Dados..."></label>
         <label>Produto${sel('f-produto', OPT_PROD, v.produto)}</label>
-        <label>Canal${sel('f-canal', canais.map((c) => [c.id, c.nome]), v.canal)}</label>
+        <label>Canal${comEscopo ? `<select id="f-canal" disabled title="Com escopo, o canal não é usado">${optsHtml(canais.map((c) => [c.id, c.nome]), v.canal)}</select>` : sel('f-canal', canais.map((c) => [c.id, c.nome]), v.canal)}</label>
+        <div class="todo escopo-bloco" style="grid-column:1/-1"><p class="sub" style="margin:4px 0 0"><b>Escopo (opcional).</b> Amarre o teste a uma fatia: escolha da lista (vem das contas reais) ou digite. Com mais de um, vale o conjunto: o negócio precisa bater com todos. O resultado real da métrica chave passa a ser só o dessa fatia. Custo (CPL, CAC...) exige campanha.</p></div>
+        <label class="largo">Página de destino (Analytics)<input id="f-pagina" list="dl-paginas" maxlength="300" value="${esc(v.paginaDestino)}" placeholder="quarkrh.com.br/diagnostico ou /diagnostico"></label>
+        <label>Identificador de conversão (Pipedrive)<input id="f-ident" list="dl-ident" maxlength="200" value="${esc(v.identificadorConversao)}" placeholder="ex.: o identificador do RD"></label>
+        <label class="todo">Campanha (Meta Ads)<input id="f-campanha" list="dl-campanhas" maxlength="200" value="${esc(v.campanha)}" placeholder="escolha pelo nome ou digite o nome ou o ID"></label>
         <label class="todo">Hipótese<textarea id="f-hipotese" rows="2" maxlength="2000" placeholder="Se fizermos X, esperamos Y, porque Z.">${esc(v.hipotese)}</textarea></label>
         <label class="todo">Resultado esperado<textarea id="f-esperado" rows="2" maxlength="2000" placeholder="Que resultado esperamos? Ex.: CPL abaixo de R$ 35 sem perder a taxa de agendamento.">${esc(v.resultadoEsperado)}</textarea></label>
         <label class="largo">Métrica chave<select id="f-metrica"><option value="">— sem métrica (sem acompanhamento) —</option>${optsHtml(S.dados.metricas.map((x) => [x.id, x.rotulo]), v.metrica)}</select></label>
@@ -342,6 +368,7 @@ function fichaDesenhar() {
       <div class="acoes"><button type="button" class="btn-p" id="f-salvar">${e ? 'Salvar alterações' : 'Criar experimento'}</button><button type="button" class="btn-s" id="f-cancelar">Cancelar</button><span class="dica" id="f-msg" role="status"></span></div>
     </section>`;
   $('#f-metrica').addEventListener('change', () => fichaDesenhar());
+  for (const id of ['f-pagina', 'f-campanha', 'f-ident']) $(`#${id}`).addEventListener('change', () => fichaDesenhar());
   $('#f-produto').addEventListener('change', () => fichaDesenhar());
   $('#f-salvar').addEventListener('click', salvarFicha);
   $('#f-cancelar').addEventListener('click', fecharFicha);
@@ -354,7 +381,7 @@ function lerFicha(cru) {
   const g = (id) => $(`#${id}`)?.value ?? '';
   const out = {
     titulo: g('f-titulo'), tipo: g('f-tipo'), status: g('f-status'), responsavel: g('f-responsavel'), areaImpacto: g('f-area'), hipotese: g('f-hipotese'), resultadoEsperado: g('f-esperado'),
-    produto: g('f-produto'), canal: g('f-canal'), metrica: g('f-metrica'), inicio: g('f-inicio'), fim: g('f-fim'), avaliacao: g('f-avaliacao'), evidencias: g('f-evid'), aprendizado: g('f-aprend'),
+    produto: g('f-produto'), canal: g('f-canal'), metrica: g('f-metrica'), inicio: g('f-inicio'), fim: g('f-fim'), avaliacao: g('f-avaliacao'), paginaDestino: g('f-pagina'), campanha: g('f-campanha'), identificadorConversao: g('f-ident'), evidencias: g('f-evid'), aprendizado: g('f-aprend'),
     ice: [g('f-ice0'), g('f-ice1'), g('f-ice2')].map((x) => (x === '' ? null : x)),
   };
   if (cru) return { ...out, meta: g('f-meta'), investimento: g('f-invest'), linhaBase: g('f-base') };
@@ -373,7 +400,7 @@ async function salvarFicha() {
   const corpo = {
     titulo: v.titulo, tipo: v.tipo, status: v.status, responsavel: nulo(v.responsavel), areaImpacto: nulo(v.areaImpacto), hipotese: nulo(v.hipotese), resultadoEsperado: nulo(v.resultadoEsperado),
     produto: v.produto, canal: v.canal, metrica: nulo(v.metrica), meta: v.metrica ? v.meta : null, linhaBase: v.metrica ? v.linhaBase : null, investimento: v.investimento,
-    inicio: nulo(v.inicio), fim: nulo(v.fim), avaliacao: nulo(v.avaliacao), evidencias: nulo(v.evidencias), aprendizado: nulo(v.aprendizado),
+    inicio: nulo(v.inicio), fim: nulo(v.fim), paginaDestino: nulo(v.paginaDestino?.trim()), campanha: nulo(v.campanha?.trim()), identificadorConversao: nulo(v.identificadorConversao?.trim()), avaliacao: nulo(v.avaliacao), evidencias: nulo(v.evidencias), aprendizado: nulo(v.aprendizado),
     iceImpacto: v.ice[0] == null ? null : Number(v.ice[0]), iceConfianca: v.ice[1] == null ? null : Number(v.ice[1]), iceFacilidade: v.ice[2] == null ? null : Number(v.ice[2]),
   };
   S.enviando = true; $('#f-salvar').disabled = true; msg.textContent = 'Salvando…';

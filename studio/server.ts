@@ -275,6 +275,10 @@ export function createStudioHandler(opts: StudioOptions): (req: IncomingMessage,
         if (method === 'POST') return send(res, 201, await repo.criar(await readJson(req)));
         return send(res, 405, { error: 'method_not_allowed' });
       }
+      if (path === '/api/experimentos/opcoes') {
+        if (method !== 'GET') return send(res, 405, { error: 'method_not_allowed' });
+        return send(res, 200, await repo.opcoes(url.searchParams.get('produto') || undefined));
+      }
       // Documentação: relatório (diário, semanal e geral) + o HTML do editor, gravado à parte para a lista não carregar texto grande.
       const sub = /^\/api\/experimentos\/(\d{1,15})\/(relatorio|documentacao)$/.exec(path);
       if (sub) {

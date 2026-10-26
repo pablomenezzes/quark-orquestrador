@@ -11,6 +11,7 @@
  */
 import type pg from 'pg';
 import { PainelInvalido, PainelNotFound } from './painel-repo.js';
+import { campanhaTexto, lerDadosEscopo, listarOpcoes, normalizarCampanha, normalizarPagina, temCampanha, temEscopo, type Escopo, type LeitorEscopo, type OpcoesEscopo } from './experimentos-escopo.js';
 import { agoraLocal, lerDadosMonitor, metricasDe, somaDias, type CanalId, type DadosMonitor, type Janela, type ProdutoMonitor } from './monitor.js';
 
 type Db = Pick<pg.Pool, 'query'>;
@@ -76,6 +77,8 @@ export interface Experimento {
   /** Investimento previsto (R$). O gasto real vem sozinho das visões do Monitor. */
   investimento: number | null; inicio: string | null; fim: string | null; status: ExpStatus;
   avaliacao: Avaliacao | null; evidencias: string | null; temDocumentacao: boolean;
+  /** Escopo opcional: página de destino (GA4), campanha da Meta e identificador de conversão do Pipedrive. */
+  paginaHost: string | null; paginaCaminho: string | null; campanhaId: string | null; campanhaNome: string | null; identificadorConversao: string | null;
   iceImpacto: number | null; iceConfianca: number | null; iceFacilidade: number | null; iceScore: number | null;
   valorFinal: number | null; atingimentoFinal: number | null; desfecho: Desfecho | null; aprendizado: string | null;
   criadoEm: string; atualizadoEm: string;
@@ -117,6 +120,7 @@ export interface ExperimentoEntrada {
   produto?: string; canal?: string; metrica?: string | null; meta?: number | null; linhaBase?: number | null; investimento?: number | null;
   inicio?: string | null; fim?: string | null; status?: string; avaliacao?: string | null; evidencias?: string | null;
   iceImpacto?: number | null; iceConfianca?: number | null; iceFacilidade?: number | null; aprendizado?: string | null;
+  paginaHost?: string | null; paginaCaminho?: string | null; campanhaId?: string | null; campanhaNome?: string | null; identificadorConversao?: string | null;
 }
 const num = (v: unknown, nome: string): number => { if (typeof v !== 'number' || !isFinite(v)) throw inv(`${nome} deve ser um número`); return v; };
 const numOuNulo = (v: unknown, nome: string): number | null => (v == null ? null : num(v, nome));
@@ -136,7 +140,7 @@ const dataOuNula = (v: unknown, nome: string): string | null => {
   return v;
 };
 
-type Atual = Pick<Experimento, 'produto' | 'canal' | 'metrica' | 'meta' | 'inicio' | 'fim'>;
+type Atual = Pick<Experimento, 'produto' | 'canal' | 'metrica' | 'meta' | 'inicio' | 'fim'> & Partial<Escopo>;
 /** Confere uma entrada (só o título é obrigatório na criação) e devolve só os campos válidos. `atual` completa as checagens cruzadas na edição. */
 export function validarEntrada(b: unknown, modo: 'criar' | 'editar', atual?: Atual): ExperimentoEntrada {
   if (!b || typeof b !== 'object' || Array.isArray(b)) throw inv('corpo inválido');
@@ -169,6 +173,18 @@ export function validarEntrada(b: unknown, modo: 'criar' | 'editar', atual?: Atu
   if (tem('iceConfianca')) out.iceConfianca = ice(e.iceConfianca, 'confiança');
   if (tem('iceFacilidade')) out.iceFacilidade = ice(e.iceFacilidade, 'facilidade');
   if (tem('aprendizado')) out.aprendizado = texto(e.aprendizado, 'aprendizado', 4000);
+  if (tem('paginaDestino')) {
+    const t = texto(e.paginaDestino, 'página de destino', 300);
+    const p = t ? normalizarPagina(t) : null;
+    if (t && !p) throw inv('página de destino inválida: escolha uma da lista ou digite o endereço (https://site.com.br/pagina) ou só o caminho (/pagina)');
+    out.paginaHost = p?.host ?? null; out.paginaCaminho = p?.caminho ?? null;
+  }
+  if (tem('campanha')) {
+    const t = texto(e.campanha, 'campanha', 200);
+    const c = t ? normalizarCampanha(t) : null;
+    out.campanhaId = c?.id ?? null; out.campanhaNome = c?.nome ?? null;
+  }
+  if (tem('identificadorConversao')) out.identificadorConversao = texto(e.identificadorConversao, 'identificador de conversão', 200);
 
   const inicio = out.inicio !== undefined ? out.inicio : atual?.inicio, fim = out.fim !== undefined ? out.fim : atual?.fim;
   if (inicio && fim && fim < inicio) throw inv('o fim não pode ser antes do início');
@@ -178,7 +194,17 @@ export function validarEntrada(b: unknown, modo: 'criar' | 'editar', atual?: Atu
   if (idMetrica && meta == null) throw inv('informe a meta da métrica chave');
   if (!idMetrica && meta != null) throw inv('escolha a métrica chave da meta');
   const metrica = idMetrica ? METRICA_POR_ID.get(idMetrica) : undefined;
-  if (metrica?.precisaVerba && !EXP_CANAIS.find((c) => c.id === canal)!.pago) throw inv(`${metrica.rotulo} depende de investimento: Social e Orgânico não têm verba. Escolha outro canal ou outra métrica`);
+  const esc: Partial<Escopo> = {
+    paginaCaminho: out.paginaCaminho !== undefined ? out.paginaCaminho : atual?.paginaCaminho,
+    campanhaId: out.campanhaId !== undefined ? out.campanhaId : atual?.campanhaId,
+    campanhaNome: out.campanhaNome !== undefined ? out.campanhaNome : atual?.campanhaNome,
+    identificadorConversao: out.identificadorConversao !== undefined ? out.identificadorConversao : atual?.identificadorConversao,
+  };
+  if (metrica?.precisaVerba) {
+    // com escopo, o investimento só existe se houver campanha da Meta; sem escopo vale a regra do canal
+    if (temEscopo(esc)) { if (!temCampanha(esc)) throw inv(`${metrica.rotulo} depende de investimento, que só existe com uma campanha da Meta no escopo. Escolha uma campanha ou outra métrica`); }
+    else if (!EXP_CANAIS.find((c) => c.id === canal)!.pago) throw inv(`${metrica.rotulo} depende de investimento: Social e Orgânico não têm verba. Escolha outro canal ou outra métrica`);
+  }
   return out;
 }
 
@@ -330,6 +356,7 @@ export function montarRelatorio(e: Pick<Experimento, 'canal' | 'metrica' | 'inic
 /* ---------- banco ---------- */
 const COLUNAS = `id, titulo, tipo, responsavel, area_impacto, hipotese, resultado_esperado, produto, canal, metrica, meta::float8 as meta, linha_base::float8 as linha_base,
   investimento::float8 as investimento, inicio::text as inicio, fim::text as fim, status, avaliacao, evidencias, documentacao is not null as tem_documentacao,
+  pagina_host, pagina_caminho, campanha_id::text as campanha_id, campanha_nome, identificador_conversao,
   ice_impacto, ice_confianca, ice_facilidade, ice_score::float8 as ice_score,
   valor_final::float8 as valor_final, atingimento_final::float8 as atingimento_final, desfecho, aprendizado, criado_em, atualizado_em`;
 const nn = (v: unknown): number | null => (v == null ? null : Number(v));
@@ -341,6 +368,7 @@ function deLinha(r: Record<string, unknown>): Experimento {
     hipotese: ns(r.hipotese), resultadoEsperado: ns(r.resultado_esperado), produto: r.produto as ProdutoMonitor, canal: r.canal as ExpCanal,
     metrica: ns(r.metrica), meta: nn(r.meta), linhaBase: nn(r.linha_base), investimento: nn(r.investimento), inicio: ns(r.inicio), fim: ns(r.fim), status: r.status as ExpStatus,
     avaliacao: (r.avaliacao as Avaliacao | null) ?? null, evidencias: ns(r.evidencias), temDocumentacao: r.tem_documentacao === true,
+    paginaHost: ns(r.pagina_host), paginaCaminho: ns(r.pagina_caminho), campanhaId: ns(r.campanha_id), campanhaNome: ns(r.campanha_nome), identificadorConversao: ns(r.identificador_conversao),
     iceImpacto: nn(r.ice_impacto), iceConfianca: nn(r.ice_confianca), iceFacilidade: nn(r.ice_facilidade), iceScore: nn(r.ice_score),
     valorFinal: nn(r.valor_final), atingimentoFinal: nn(r.atingimento_final), desfecho: (r.desfecho as Desfecho | null) ?? null, aprendizado: ns(r.aprendizado),
     criadoEm: iso(r.criado_em), atualizadoEm: iso(r.atualizado_em),
@@ -350,6 +378,7 @@ const CAMPO_SQL: Record<keyof ExperimentoEntrada, string> = {
   titulo: 'titulo', tipo: 'tipo', responsavel: 'responsavel', areaImpacto: 'area_impacto', hipotese: 'hipotese', resultadoEsperado: 'resultado_esperado',
   produto: 'produto', canal: 'canal', metrica: 'metrica', meta: 'meta', linhaBase: 'linha_base', investimento: 'investimento', inicio: 'inicio', fim: 'fim',
   status: 'status', avaliacao: 'avaliacao', evidencias: 'evidencias', iceImpacto: 'ice_impacto', iceConfianca: 'ice_confianca', iceFacilidade: 'ice_facilidade', aprendizado: 'aprendizado',
+  paginaHost: 'pagina_host', paginaCaminho: 'pagina_caminho', campanhaId: 'campanha_id', campanhaNome: 'campanha_nome', identificadorConversao: 'identificador_conversao',
 };
 
 export interface ListaExperimentos {
@@ -376,26 +405,36 @@ export interface ExperimentosRepo {
   atualizar(id: number, entrada: unknown): Promise<ExperimentoComProgresso>;
   relatorio(id: number): Promise<RelatorioExperimento>;
   salvarDocumentacao(id: number, corpo: unknown): Promise<{ id: number; atualizadoEm: string }>;
+  /** Páginas do Analytics, campanhas da Meta e identificadores de conversão do Pipedrive para escolher no cadastro. */
+  opcoes(produto?: string): Promise<OpcoesEscopo>;
 }
 
 export type LeitorDados = (db: Db, hoje: string, hora: string, produto: ProdutoMonitor, desde: string) => Promise<DadosMonitor>;
+/** Com escopo (página, campanha ou identificador), os dados da fatia ficam na chave `meta` (ver experimentos-escopo.ts). */
+const efetivo = <T extends Pick<Experimento, 'canal'> & Partial<Escopo>>(e: T): T => (temEscopo(e) ? { ...e, canal: 'meta' } : e);
+export const rotuloEscopo = (e: Pick<Experimento, 'paginaHost' | 'paginaCaminho' | 'campanhaId' | 'campanhaNome' | 'identificadorConversao'>): string[] =>
+  [e.paginaCaminho ? `Página ${e.paginaHost ?? ''}${e.paginaCaminho}` : '', campanhaTexto(e) ? `Campanha ${campanhaTexto(e)}` : '', e.identificadorConversao ? `Identificador ${e.identificadorConversao}` : ''].filter(Boolean);
 const SEM_DADOS = { diario: { google: new Map(), meta: new Map(), social: new Map(), organico: new Map() } } as Pick<DadosMonitor, 'diario'>;
 
 export class PgExperimentosRepo implements ExperimentosRepo {
-  constructor(private readonly db: Db, private readonly agora: () => Date = () => new Date(), private readonly ler: LeitorDados = lerDadosMonitor) {}
+  constructor(private readonly db: Db, private readonly agora: () => Date = () => new Date(), private readonly ler: LeitorDados = lerDadosMonitor, private readonly lerEscopo: LeitorEscopo = lerDadosEscopo) {}
 
-  private async dadosPor(exps: Experimento[], hoje: string, hora: string): Promise<Map<ProdutoMonitor, DadosMonitor>> {
-    const out = new Map<ProdutoMonitor, DadosMonitor>();
+  /** Dados por experimento: os sem escopo leem o Monitor uma vez por produto; os com escopo leem só a fatia deles. */
+  private async dadosPor(exps: Experimento[], hoje: string, hora: string): Promise<Map<number, Pick<DadosMonitor, 'diario'>>> {
+    const out = new Map<number, Pick<DadosMonitor, 'diario'>>();
+    const ativos = exps.filter((e) => e.status !== 'cancelado' && e.inicio && e.fim);
+    const desdeDe = (e: Experimento) => somaDias(e.inicio!, -diasEntre(e.inicio!, e.fim!));
     for (const produto of EXP_PRODUTOS) {
-      const meus = exps.filter((e) => e.produto === produto && e.status !== 'cancelado' && e.inicio && e.fim);
+      const meus = ativos.filter((e) => e.produto === produto && !temEscopo(e));
       if (!meus.length) continue;
-      const desde = meus.map((e) => somaDias(e.inicio!, -diasEntre(e.inicio!, e.fim!))).sort()[0]!;
-      out.set(produto, await this.ler(this.db, hoje, hora, produto, desde));
+      const d = await this.ler(this.db, hoje, hora, produto, meus.map(desdeDe).sort()[0]!);
+      for (const e of meus) out.set(e.id, d);
     }
+    for (const e of ativos.filter((x) => temEscopo(x))) out.set(e.id, await this.lerEscopo(this.db, e, hora, desdeDe(e)));
     return out;
   }
-  private comProgresso(exps: Experimento[], dados: Map<ProdutoMonitor, DadosMonitor>, hoje: string): ExperimentoComProgresso[] {
-    return exps.map((e) => ({ ...e, progresso: calcularProgresso(e, dados.get(e.produto) ?? SEM_DADOS, hoje) }));
+  private comProgresso(exps: Experimento[], dados: Map<number, Pick<DadosMonitor, 'diario'>>, hoje: string): ExperimentoComProgresso[] {
+    return exps.map((e) => ({ ...e, progresso: calcularProgresso(efetivo(e), dados.get(e.id) ?? SEM_DADOS, hoje) }));
   }
 
   async listar(): Promise<ListaExperimentos> {
@@ -449,15 +488,19 @@ export class PgExperimentosRepo implements ExperimentosRepo {
   async relatorio(id: number): Promise<RelatorioExperimento> {
     const e = await this.um(id);
     const { hoje, hora } = agoraLocal(this.agora());
-    const dados = e.inicio && e.fim ? await this.dadosPor([e], hoje, hora) : new Map<ProdutoMonitor, DadosMonitor>();
-    const d = dados.get(e.produto) ?? SEM_DADOS;
+    const d = (e.inicio && e.fim ? await this.dadosPor([e], hoje, hora) : new Map<number, Pick<DadosMonitor, 'diario'>>()).get(e.id) ?? SEM_DADOS;
     const doc = await this.db.query(`select documentacao from mkt.experimentos where id = $1`, [id]);
     return {
       hoje, metricas: METRICAS_EXP, canais: EXP_CANAIS, tipos: EXP_TIPOS,
-      experimento: { ...e, progresso: calcularProgresso(e, d, hoje) },
-      relatorio: montarRelatorio(e, d, hoje),
+      experimento: { ...e, progresso: calcularProgresso(efetivo(e), d, hoje) },
+      relatorio: montarRelatorio(efetivo(e), d, hoje),
       documentacao: ns(doc.rows[0]?.documentacao),
     };
+  }
+
+  async opcoes(produto?: string): Promise<OpcoesEscopo> {
+    if (produto && !(EXP_PRODUTOS as readonly string[]).includes(produto)) throw new PainelInvalido('produto deve ser rh ou clinic');
+    return listarOpcoes(this.db, produto as ProdutoMonitor | undefined);
   }
 
   async salvarDocumentacao(id: number, corpo: unknown): Promise<{ id: number; atualizadoEm: string }> {
