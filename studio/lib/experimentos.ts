@@ -11,6 +11,7 @@
  */
 import type pg from 'pg';
 import { PainelInvalido, PainelNotFound } from './painel-repo.js';
+import { CAMPOS, CONTABILIZACOES, RegraInvalida, camposUsados, conferirOrigens, criarMedidor, lerCampos, validarRegras, type Contabilizacao, type LeitorCampos, type Medir, type Regra } from './experimentos-regras.js';
 import { ESCOPO_MODOS, campanhaTexto, lerDadosEscopo, lerDetalheEscopo, listarOpcoes, normalizarCampanhas, normalizarPagina, temCampanha, temEscopo, type CampanhaEscopo, type Detalhe, type EscopoModo, type Escopo, type LeitorDetalhe, type LeitorEscopo, type OpcoesEscopo } from './experimentos-escopo.js';
 import { agoraLocal, lerDadosMonitor, metricasDe, somaDias, type CanalId, type DadosMonitor, type Janela, type ProdutoMonitor } from './monitor.js';
 
@@ -79,6 +80,8 @@ export interface Experimento {
   avaliacao: Avaliacao | null; evidencias: string | null; temDocumentacao: boolean;
   /** Escopo opcional: página de destino (GA4), campanha da Meta e identificador de conversão do Pipedrive. */
   paginaHost: string | null; paginaCaminho: string | null; campanhas: CampanhaEscopo[]; identificadorConversao: string | null; escopoModo: EscopoModo;
+  /** Automática: o Studio conta pelo escopo. Manual: cada métrica pode ter uma regra (fórmula com campos, métricas e números). */
+  contabilizacao: Contabilizacao; regras: Regra[];
   iceImpacto: number | null; iceConfianca: number | null; iceFacilidade: number | null; iceScore: number | null;
   valorFinal: number | null; atingimentoFinal: number | null; desfecho: Desfecho | null; aprendizado: string | null;
   criadoEm: string; atualizadoEm: string;
@@ -121,6 +124,7 @@ export interface ExperimentoEntrada {
   inicio?: string | null; fim?: string | null; status?: string; avaliacao?: string | null; evidencias?: string | null;
   iceImpacto?: number | null; iceConfianca?: number | null; iceFacilidade?: number | null; aprendizado?: string | null;
   paginaHost?: string | null; paginaCaminho?: string | null; campanhas?: CampanhaEscopo[]; identificadorConversao?: string | null; escopoModo?: EscopoModo;
+  contabilizacao?: Contabilizacao; regras?: Regra[];
 }
 const num = (v: unknown, nome: string): number => { if (typeof v !== 'number' || !isFinite(v)) throw inv(`${nome} deve ser um número`); return v; };
 const numOuNulo = (v: unknown, nome: string): number | null => (v == null ? null : num(v, nome));
@@ -140,7 +144,7 @@ const dataOuNula = (v: unknown, nome: string): string | null => {
   return v;
 };
 
-type Atual = Pick<Experimento, 'produto' | 'canal' | 'metrica' | 'meta' | 'inicio' | 'fim'> & Partial<Escopo>;
+type Atual = Pick<Experimento, 'produto' | 'canal' | 'metrica' | 'meta' | 'inicio' | 'fim'> & Partial<Escopo> & { regras?: Regra[] };
 /** Confere uma entrada (só o título é obrigatório na criação) e devolve só os campos válidos. `atual` completa as checagens cruzadas na edição. */
 export function validarEntrada(b: unknown, modo: 'criar' | 'editar', atual?: Atual): ExperimentoEntrada {
   if (!b || typeof b !== 'object' || Array.isArray(b)) throw inv('corpo inválido');
@@ -184,6 +188,7 @@ export function validarEntrada(b: unknown, modo: 'criar' | 'editar', atual?: Atu
     if (e.campanhas != null && (!Array.isArray(e.campanhas) || e.campanhas.length > 60 || e.campanhas.some((t) => typeof t !== 'string' || t.length > 200))) throw inv('campanhas deve ser uma lista de até 40 textos');
     out.campanhas = normalizarCampanhas((e.campanhas as string[] | null) ?? []);
   }
+  if (tem('contabilizacao')) { if (!(CONTABILIZACOES as readonly unknown[]).includes(e.contabilizacao)) throw inv(`contabilização inválida (${CONTABILIZACOES.join(', ')})`); out.contabilizacao = e.contabilizacao as Contabilizacao; }
   if (tem('escopoModo')) { if (!(ESCOPO_MODOS as readonly unknown[]).includes(e.escopoModo)) throw inv(`escopoModo inválido (${ESCOPO_MODOS.join(', ')})`); out.escopoModo = e.escopoModo as EscopoModo; }
   if (tem('identificadorConversao')) out.identificadorConversao = texto(e.identificadorConversao, 'identificador de conversão', 200);
 
@@ -200,6 +205,11 @@ export function validarEntrada(b: unknown, modo: 'criar' | 'editar', atual?: Atu
     campanhas: out.campanhas !== undefined ? out.campanhas : atual?.campanhas,
     identificadorConversao: out.identificadorConversao !== undefined ? out.identificadorConversao : atual?.identificadorConversao,
   };
+  // regras da contabilização manual: validadas contra o escopo que ficará valendo
+  try {
+    if (tem('regras')) out.regras = validarRegras(e.regras, new Set(METRICAS_EXP.map((m) => m.id)), esc);
+    else if (atual?.regras?.length) conferirOrigens(atual.regras, esc);
+  } catch (err) { if (err instanceof RegraInvalida) throw inv(err.message); throw err; }
   if (metrica?.precisaVerba) {
     // com escopo, o investimento só existe se houver campanha da Meta; sem escopo vale a regra do canal
     if (temEscopo(esc)) { if (!temCampanha(esc)) throw inv(`${metrica.rotulo} depende de investimento, que só existe com uma campanha da Meta no escopo. Escolha uma campanha ou outra métrica`); }
@@ -214,6 +224,13 @@ const diasEntre = (de: string, ate: string) => Math.round((Date.parse(`${ate}T00
 const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
 
 /** Valor de uma métrica em uma janela, para um canal (ou o total, ou só a mídia paga). Custos do total usam os leads, MQL, reuniões e ganhos dos canais pagos. */
+/** Dados do experimento: o Monitor (ou a fatia do escopo) e, na contabilização manual, o medidor das regras. */
+export type DadosExp = Pick<DadosMonitor, 'diario'> & { medir?: Medir };
+/** O valor da métrica numa janela: pela regra manual, se ela existe; senão, pelo cálculo automático. */
+export function medirMetrica(d: DadosExp, canal: ExpCanal, metrica: string, j: Janela): number | null {
+  const v = d.medir?.(metrica, j);
+  return v !== undefined ? v : valorMetrica(d, canal, metrica, j);
+}
 export function valorMetrica(d: Pick<DadosMonitor, 'diario'>, canal: ExpCanal, metrica: string, j: Janela): number | null {
   const m = metricasDe(d, canal as CanalId | 'total' | 'pagos', j);
   const pg = canal === 'total' ? metricasDe(d, 'pagos', j) : m;
@@ -230,7 +247,7 @@ export type EntradaProgresso = Pick<Experimento, 'canal' | 'metrica' | 'meta' | 
 /** Tem tudo o que o acompanhamento automático precisa: métrica chave do catálogo, meta e período. */
 export const acompanhavel = (e: Pick<Experimento, 'metrica' | 'meta' | 'inicio' | 'fim'>): boolean => !!e.metrica && METRICA_POR_ID.has(e.metrica) && e.meta != null && !!e.inicio && !!e.fim;
 
-export function calcularProgresso(exp: EntradaProgresso, d: Pick<DadosMonitor, 'diario'>, hoje: string): Progresso {
+export function calcularProgresso(exp: EntradaProgresso, d: DadosExp, hoje: string): Progresso {
   if (!acompanhavel(exp)) {
     return { estado: exp.status === 'cancelado' ? 'cancelado' : 'sem_metrica', dadosAte: somaDias(hoje, -1), diasCompletos: 0, totalDias: 0, decorrido: 0, atual: null, esperado: null, linhaBase: exp.linhaBase, linhaBaseAuto: exp.linhaBase == null, atingimento: null, projecao: null, gasto: 0, usoOrcamento: null, orcamentoAdiantado: false, serie: [], trajetoria: null };
   }
@@ -245,7 +262,7 @@ export function calcularProgresso(exp: EntradaProgresso, d: Pick<DadosMonitor, '
   // linha de base: valor combinado, ou o mesmo número de dias imediatamente antes do início
   const auto = e.linhaBase == null;
   const baseJ = janela(somaDias(e.inicio, -totalDias), somaDias(e.inicio, -1));
-  const baseAuto = met ? valorMetrica(d, e.canal, e.metrica, baseJ) : null;
+  const baseAuto = met ? medirMetrica(d, e.canal, e.metrica, baseJ) : null;
   const linhaBase = e.linhaBase ?? baseAuto;
 
   const vazio: Progresso = { estado: 'sem_dados', dadosAte, diasCompletos, totalDias, decorrido, atual: null, esperado: null, linhaBase, linhaBaseAuto: auto, atingimento: null, projecao: null, gasto: 0, usoOrcamento: null, orcamentoAdiantado: false, serie: [], trajetoria: null };
@@ -256,7 +273,7 @@ export function calcularProgresso(exp: EntradaProgresso, d: Pick<DadosMonitor, '
   if (diasCompletos === 0) return { ...vazio, estado: 'nao_iniciou', trajetoria };
 
   const atualJ = janela(e.inicio, dadosAte);
-  const atual = valorMetrica(d, e.canal, e.metrica, atualJ);
+  const atual = medirMetrica(d, e.canal, e.metrica, atualJ);
   const gasto = metricasDe(d, e.canal as CanalId | 'total' | 'pagos', atualJ).invest;
   const usoOrcamento = e.investimento != null && e.investimento > 0 ? gasto / e.investimento : null;
 
@@ -282,7 +299,7 @@ export function calcularProgresso(exp: EntradaProgresso, d: Pick<DadosMonitor, '
   const serie: PontoSerie[] = [];
   for (let k = 0; k < diasCompletos; k++) {
     const dia = somaDias(e.inicio, k);
-    serie.push({ dia, real: valorMetrica(d, e.canal, e.metrica, janela(e.inicio, dia)), esperado: esperadoEm((k + 1) / totalDias) });
+    serie.push({ dia, real: medirMetrica(d, e.canal, e.metrica, janela(e.inicio, dia)), esperado: esperadoEm((k + 1) / totalDias) });
   }
   return { estado, dadosAte, diasCompletos, totalDias, decorrido, atual, esperado, linhaBase, linhaBaseAuto: auto, atingimento, projecao, gasto, usoOrcamento, orcamentoAdiantado: usoOrcamento != null && usoOrcamento > decorrido + 0.15, serie, trajetoria };
 }
@@ -324,14 +341,16 @@ export interface Relatorio {
   /** O mesmo número de dias imediatamente antes do início, para comparar. */
   base: LinhaRel | null;
 }
-function linhaRel(d: Pick<DadosMonitor, 'diario'>, e: Pick<Experimento, 'canal' | 'metrica'>, j: Janela, rotulo: string): LinhaRel {
+function linhaRel(d: DadosExp, e: Pick<Experimento, 'canal' | 'metrica'>, j: Janela, rotulo: string): LinhaRel {
   const m = metricasDe(d, e.canal as CanalId | 'total' | 'pagos', j);
+  // na contabilização manual, as colunas do funil seguem as regras (ex.: Leads pelo identificador); o que não tem regra segue o automático
+  const reg = (id: string, auto: number | null): number | null => { const v = d.medir?.(id, j); return v !== undefined ? v : auto; };
   return {
-    rotulo, de: j.de, ate: j.ate, dias: j.dias, leads: m.leads, mql: m.mql, reunioes: m.reunioes, ganhos: m.ganhos, mrr: m.mrr, invest: m.invest, impressoes: m.impressoes, cliques: m.cliques,
-    cpl: m.cpl, valor: e.metrica ? valorMetrica(d, e.canal, e.metrica, j) : null,
+    rotulo, de: j.de, ate: j.ate, dias: j.dias, leads: reg('leads', m.leads) ?? 0, mql: reg('mql', m.mql) ?? 0, reunioes: reg('reunioes', m.reunioes) ?? 0, ganhos: reg('ganhos', m.ganhos) ?? 0, mrr: reg('mrr', m.mrr) ?? 0, invest: m.invest, impressoes: m.impressoes, cliques: m.cliques,
+    cpl: reg('cpl', m.cpl), valor: e.metrica ? medirMetrica(d, e.canal as ExpCanal, e.metrica, j) : null,
   };
 }
-export function montarRelatorio(e: Pick<Experimento, 'canal' | 'metrica' | 'inicio' | 'fim'>, d: Pick<DadosMonitor, 'diario'>, hoje: string): Relatorio {
+export function montarRelatorio(e: Pick<Experimento, 'canal' | 'metrica' | 'inicio' | 'fim'>, d: DadosExp, hoje: string): Relatorio {
   const ontem = somaDias(hoje, -1);
   if (!e.inicio || !e.fim) return { dadosAte: ontem, diario: [], semanal: [], geral: null, base: null };
   const dadosAte = e.fim < ontem ? e.fim : ontem;
@@ -356,7 +375,7 @@ export function montarRelatorio(e: Pick<Experimento, 'canal' | 'metrica' | 'inic
 /* ---------- banco ---------- */
 const COLUNAS = `id, titulo, tipo, responsavel, area_impacto, hipotese, resultado_esperado, produto, canal, metrica, meta::float8 as meta, linha_base::float8 as linha_base,
   investimento::float8 as investimento, inicio::text as inicio, fim::text as fim, status, avaliacao, evidencias, documentacao is not null as tem_documentacao,
-  pagina_host, pagina_caminho, campanhas, campanha_id::text as campanha_id, campanha_nome, identificador_conversao, escopo_modo,
+  pagina_host, pagina_caminho, campanhas, campanha_id::text as campanha_id, campanha_nome, identificador_conversao, escopo_modo, contabilizacao, regras,
   ice_impacto, ice_confianca, ice_facilidade, ice_score::float8 as ice_score,
   valor_final::float8 as valor_final, atingimento_final::float8 as atingimento_final, desfecho, aprendizado, criado_em, atualizado_em`;
 const nn = (v: unknown): number | null => (v == null ? null : Number(v));
@@ -374,6 +393,7 @@ function deLinha(r: Record<string, unknown>): Experimento {
     metrica: ns(r.metrica), meta: nn(r.meta), linhaBase: nn(r.linha_base), investimento: nn(r.investimento), inicio: ns(r.inicio), fim: ns(r.fim), status: r.status as ExpStatus,
     avaliacao: (r.avaliacao as Avaliacao | null) ?? null, evidencias: ns(r.evidencias), temDocumentacao: r.tem_documentacao === true,
     paginaHost: ns(r.pagina_host), paginaCaminho: ns(r.pagina_caminho), campanhas: campanhasDe(r), identificadorConversao: ns(r.identificador_conversao), escopoModo: ((ESCOPO_MODOS as readonly unknown[]).includes(r.escopo_modo) ? r.escopo_modo : 'todos') as EscopoModo,
+    contabilizacao: (r.contabilizacao === 'manual' ? 'manual' : 'automatica') as Contabilizacao, regras: Array.isArray(r.regras) ? (r.regras as Regra[]) : [],
     iceImpacto: nn(r.ice_impacto), iceConfianca: nn(r.ice_confianca), iceFacilidade: nn(r.ice_facilidade), iceScore: nn(r.ice_score),
     valorFinal: nn(r.valor_final), atingimentoFinal: nn(r.atingimento_final), desfecho: (r.desfecho as Desfecho | null) ?? null, aprendizado: ns(r.aprendizado),
     criadoEm: iso(r.criado_em), atualizadoEm: iso(r.atualizado_em),
@@ -383,17 +403,19 @@ const CAMPO_SQL: Record<keyof ExperimentoEntrada, string> = {
   titulo: 'titulo', tipo: 'tipo', responsavel: 'responsavel', areaImpacto: 'area_impacto', hipotese: 'hipotese', resultadoEsperado: 'resultado_esperado',
   produto: 'produto', canal: 'canal', metrica: 'metrica', meta: 'meta', linhaBase: 'linha_base', investimento: 'investimento', inicio: 'inicio', fim: 'fim',
   status: 'status', avaliacao: 'avaliacao', evidencias: 'evidencias', iceImpacto: 'ice_impacto', iceConfianca: 'ice_confianca', iceFacilidade: 'ice_facilidade', aprendizado: 'aprendizado',
-  paginaHost: 'pagina_host', paginaCaminho: 'pagina_caminho', campanhas: 'campanhas', identificadorConversao: 'identificador_conversao', escopoModo: 'escopo_modo',
+  paginaHost: 'pagina_host', paginaCaminho: 'pagina_caminho', campanhas: 'campanhas', identificadorConversao: 'identificador_conversao', escopoModo: 'escopo_modo', contabilizacao: 'contabilizacao', regras: 'regras',
 };
 
 /** A lista de campanhas vai como JSON (o pg mandaria um array do Postgres, não jsonb). */
-const valorSql = (k: keyof ExperimentoEntrada, v: unknown): unknown => (k === 'campanhas' ? JSON.stringify(v ?? []) : v);
+const valorSql = (k: keyof ExperimentoEntrada, v: unknown): unknown => (k === 'campanhas' || k === 'regras' ? JSON.stringify(v ?? []) : v);
 
 export interface ListaExperimentos {
   hoje: string;
   metricas: readonly MetricaExp[];
   canais: typeof EXP_CANAIS;
   tipos: typeof EXP_TIPOS;
+  /** Campos que as regras da contabilização manual podem usar. */
+  campos: typeof CAMPOS;
   experimentos: ExperimentoComProgresso[];
   calibracao: Calibracao[];
 }
@@ -402,6 +424,7 @@ export interface RelatorioExperimento {
   metricas: readonly MetricaExp[];
   canais: typeof EXP_CANAIS;
   tipos: typeof EXP_TIPOS;
+  campos: typeof CAMPOS;
   experimento: ExperimentoComProgresso;
   relatorio: Relatorio;
   /** Funil, perfil, perdas, safra, criativos e conferência dos negócios do escopo; nulo sem escopo ou sem período. */
@@ -424,14 +447,14 @@ export type LeitorDados = (db: Db, hoje: string, hora: string, produto: ProdutoM
 const efetivo = <T extends Pick<Experimento, 'canal'> & Partial<Escopo>>(e: T): T => (temEscopo(e) ? { ...e, canal: 'meta' } : e);
 export const rotuloEscopo = (e: Pick<Experimento, 'paginaHost' | 'paginaCaminho' | 'campanhas' | 'identificadorConversao'> & Partial<Pick<Experimento, 'escopoModo'>>): string[] =>
   [e.paginaCaminho ? `Página ${e.paginaHost ?? ''}${e.paginaCaminho}` : '', e.campanhas.length ? `${e.campanhas.length === 1 ? 'Campanha' : 'Campanhas (somadas)'} ${e.campanhas.map(campanhaTexto).join(', ')}` : '', e.identificadorConversao ? `Identificador ${e.identificadorConversao}` : ''].filter(Boolean);
-const SEM_DADOS = { diario: { google: new Map(), meta: new Map(), social: new Map(), organico: new Map() } } as Pick<DadosMonitor, 'diario'>;
+const SEM_DADOS = { diario: { google: new Map(), meta: new Map(), social: new Map(), organico: new Map() } } as DadosExp;
 
 export class PgExperimentosRepo implements ExperimentosRepo {
-  constructor(private readonly db: Db, private readonly agora: () => Date = () => new Date(), private readonly ler: LeitorDados = lerDadosMonitor, private readonly lerEscopo: LeitorEscopo = lerDadosEscopo, private readonly lerDetalhe: LeitorDetalhe = lerDetalheEscopo) {}
+  constructor(private readonly db: Db, private readonly agora: () => Date = () => new Date(), private readonly ler: LeitorDados = lerDadosMonitor, private readonly lerEscopo: LeitorEscopo = lerDadosEscopo, private readonly lerDetalhe: LeitorDetalhe = lerDetalheEscopo, private readonly lerCamposManuais: LeitorCampos = lerCampos) {}
 
   /** Dados por experimento: os sem escopo leem o Monitor uma vez por produto; os com escopo leem só a fatia deles. */
-  private async dadosPor(exps: Experimento[], hoje: string, hora: string): Promise<Map<number, Pick<DadosMonitor, 'diario'>>> {
-    const out = new Map<number, Pick<DadosMonitor, 'diario'>>();
+  private async dadosPor(exps: Experimento[], hoje: string, hora: string): Promise<Map<number, DadosExp>> {
+    const out = new Map<number, DadosExp>();
     const ativos = exps.filter((e) => e.status !== 'cancelado' && e.inicio && e.fim);
     const desdeDe = (e: Experimento) => somaDias(e.inicio!, -diasEntre(e.inicio!, e.fim!));
     for (const produto of EXP_PRODUTOS) {
@@ -441,9 +464,17 @@ export class PgExperimentosRepo implements ExperimentosRepo {
       for (const e of meus) out.set(e.id, d);
     }
     for (const e of ativos.filter((x) => temEscopo(x))) out.set(e.id, await this.lerEscopo(this.db, e, hora, desdeDe(e)));
+    // contabilização manual: lê só os campos que as regras usam e põe o medidor junto dos dados
+    for (const e of ativos.filter((x) => x.contabilizacao === 'manual' && x.regras.length)) {
+      const base = out.get(e.id);
+      if (!base) continue;
+      const campos = await this.lerCamposManuais(this.db, e, camposUsados(e.regras), desdeDe(e));
+      const canal = temEscopo(e) ? 'meta' : e.canal;
+      out.set(e.id, { ...base, medir: criarMedidor(e.regras, campos, (m, j) => valorMetrica(base, canal, m, j)) });
+    }
     return out;
   }
-  private comProgresso(exps: Experimento[], dados: Map<number, Pick<DadosMonitor, 'diario'>>, hoje: string): ExperimentoComProgresso[] {
+  private comProgresso(exps: Experimento[], dados: Map<number, DadosExp>, hoje: string): ExperimentoComProgresso[] {
     return exps.map((e) => ({ ...e, progresso: calcularProgresso(efetivo(e), dados.get(e.id) ?? SEM_DADOS, hoje) }));
   }
 
@@ -452,7 +483,7 @@ export class PgExperimentosRepo implements ExperimentosRepo {
     const r = await this.db.query(`select ${COLUNAS} from mkt.experimentos order by (status = 'rodando') desc, ice_score desc nulls last, id desc`);
     const exps = r.rows.map(deLinha);
     const dados = await this.dadosPor(exps, hoje, hora);
-    return { hoje, metricas: METRICAS_EXP, canais: EXP_CANAIS, tipos: EXP_TIPOS, experimentos: this.comProgresso(exps, dados, hoje), calibracao: calibracaoPor(exps) };
+    return { hoje, metricas: METRICAS_EXP, canais: EXP_CANAIS, tipos: EXP_TIPOS, campos: CAMPOS, experimentos: this.comProgresso(exps, dados, hoje), calibracao: calibracaoPor(exps) };
   }
 
   private async um(id: number): Promise<Experimento> {
@@ -498,10 +529,10 @@ export class PgExperimentosRepo implements ExperimentosRepo {
   async relatorio(id: number): Promise<RelatorioExperimento> {
     const e = await this.um(id);
     const { hoje, hora } = agoraLocal(this.agora());
-    const d = (e.inicio && e.fim ? await this.dadosPor([e], hoje, hora) : new Map<number, Pick<DadosMonitor, 'diario'>>()).get(e.id) ?? SEM_DADOS;
+    const d = (e.inicio && e.fim ? await this.dadosPor([e], hoje, hora) : new Map<number, DadosExp>()).get(e.id) ?? SEM_DADOS;
     const doc = await this.db.query(`select documentacao from mkt.experimentos where id = $1`, [id]);
     return {
-      hoje, metricas: METRICAS_EXP, canais: EXP_CANAIS, tipos: EXP_TIPOS,
+      hoje, metricas: METRICAS_EXP, canais: EXP_CANAIS, tipos: EXP_TIPOS, campos: CAMPOS,
       experimento: { ...e, progresso: calcularProgresso(efetivo(e), d, hoje) },
       relatorio: montarRelatorio(efetivo(e), d, hoje),
       detalhe: temEscopo(e) && e.inicio && e.fim && e.inicio <= somaDias(hoje, -1) ? await this.lerDetalhe(this.db, e, e.inicio, e.fim < somaDias(hoje, -1) ? e.fim : somaDias(hoje, -1)) : null,

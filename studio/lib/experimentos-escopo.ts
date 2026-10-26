@@ -111,7 +111,7 @@ export const MODO_ROTULO: Record<EscopoModo, string> = {
 
 interface Alvo { sql: string; ids: string[]; nomes: string[] }
 /** Monta a condição de negócios (alias `d` = analytics.negocios_bi). `p` já traz o produto no índice `ip` (1 = $1); os critérios entram no fim, na ordem campanha, identificador, página. */
-function montarAlvo(e: Escopo & { produto: ProdutoMonitor }, p: unknown[], ip: number): Alvo {
+export function montarAlvo(e: Escopo & { produto: ProdutoMonitor }, p: unknown[], ip: number): Alvo {
   const add = (v: unknown) => `$${p.push(v)}`;
   const ids = e.campanhas.map((c) => c.id).filter((x): x is string => !!x);
   const nomes = e.campanhas.filter((c) => !c.id && c.nome).map((c) => (c.nome as string).toLowerCase());

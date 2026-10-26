@@ -121,7 +121,7 @@ describe('Acesso: servidor publicado (login, papéis e Studio de testes desligad
     async remover(id) { feitos.push(`remover:${id}`); },
   };
   const exp: ExperimentosRepo = {
-    async listar() { feitos.push('listar'); return { hoje: '2026-10-11', metricas: METRICAS_EXP, canais: [] as never, tipos: [] as never, experimentos: [], calibracao: [] }; },
+    async listar() { feitos.push('listar'); return { hoje: '2026-10-11', metricas: METRICAS_EXP, canais: [] as never, tipos: [] as never, campos: [] as never, experimentos: [], calibracao: [] }; },
     async criar() { feitos.push('criar-exp'); return { id: 1 } as never; },
     async atualizar(id) { return { id } as never; },
     async relatorio(id) { return { id } as never; },

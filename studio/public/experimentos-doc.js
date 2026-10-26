@@ -74,6 +74,15 @@ function rotuloEscopo(e) {
   const camps = (e.campanhas ?? []).map((c) => (c.id ? `${c.nome ?? 'Campanha'} (${c.id})` : (c.nome ?? '')));
   return [e.paginaCaminho ? `Página ${e.paginaHost ?? ''}${e.paginaCaminho}` : '', camps.length ? `${camps.length === 1 ? 'Campanha' : 'Campanhas (somadas)'} ${camps.join(', ')}` : '', e.identificadorConversao ? `Identificador ${e.identificadorConversao}` : ''].filter(Boolean);
 }
+/** Regras da contabilização manual em texto: "CPL = Investimento das campanhas (Meta) ÷ Leads". */
+const OPS = { '+': '+', '-': '−', '*': '×', '/': '÷' };
+function regrasTexto(R) {
+  const e = R.experimento;
+  if (e.contabilizacao !== 'manual' || !e.regras?.length) return [];
+  const metrica = (id) => R.metricas.find((m) => m.id === id)?.rotulo ?? id;
+  const termo = (t) => (t.k === 'op' ? OPS[t.v] : t.k === 'campo' ? (R.campos?.find((c) => c.id === t.v)?.rotulo ?? t.v) : t.k === 'metrica' ? metrica(t.v) : nf.format(t.v));
+  return e.regras.map((r) => `${metrica(r.metrica)} = ${r.formula.map(termo).join(' ')}`);
+}
 function ctx(R) {
   const e = R.experimento, p = e.progresso, rel = R.relatorio;
   const m = R.metricas.find((x) => x.id === e.metrica) || null;
@@ -96,7 +105,7 @@ function blocoKpis(R) {
   const por = (campo, melhor) => delta(dia(g, campo), dia(b, campo), melhor);
   const antes = (campo) => (b ? `antes: ${nf.format(dia(b, campo))}/dia` : 'antes: —');
   return `<h2>Resumo do resultado</h2><p class="nota">${esc(atualizado)} · ${g.dias} ${g.dias === 1 ? 'dia completo' : 'dias completos'} de ${p.totalDias}. Variações comparam a média por dia com a do período anterior ao teste.</p>
-    <div class="kpis">${hero}${escopo.length ? `<div class="escopo-doc" style="grid-column:1/-1">${escopo.map((t) => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
+    <div class="kpis">${hero}${regrasTexto(R).length ? `<div class="escopo-doc" style="grid-column:1/-1"><span><b>Contabilização manual:</b> ${esc(regrasTexto(R).join(' · '))}</span></div>` : ''}${escopo.length ? `<div class="escopo-doc" style="grid-column:1/-1">${escopo.map((t) => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
       ${k('Leads', num(g.leads), `${por('leads', 'subir')} ${antes('leads')}`)}
       ${k('MQL', num(g.mql), `${por('mql', 'subir')} ${antes('mql')}`)}
       ${k('Reuniões', num(g.reunioes), `${por('reunioes', 'subir')} ${antes('reunioes')}`)}
@@ -241,7 +250,8 @@ function blocoConferencia(R) {
   const maior = Math.max(c.porIdentificador ?? 0, c.porPagina ?? 0);
   const aviso = c.porCampanhas != null && maior > c.porCampanhas * 1.5 && d.modo === 'todos'
     ? `<p class="aviso">A ligação com a Meta atribui às campanhas só ${num(c.porCampanhas)} dos ${num(maior)} negócios da página ou do identificador: os outros chegam sem UTM de campanha ou com um nome diferente do da campanha. Com "todos os critérios" o resultado fica restrito aos ${num(c.porCampanhas)}. Para contar os ${num(maior)} e manter o investimento das campanhas, escolha <b>Campanha só para o investimento</b> no cadastro.</p>` : '';
-  return `<h2>Conferência dos dados</h2><p class="nota">${esc(periodoDetalhe(d))} Compare estes números com o Pipedrive (filtro por data de criação do negócio) para validar o relatório.</p>
+  const regrasLinhas = regrasTexto(R);
+  return `<h2>Conferência dos dados</h2>${regrasLinhas.length ? `<p class="aviso"><b>Contabilização manual ativa.</b> Os números de Leads, CPL e demais métricas deste relatório seguem estas regras: ${esc(regrasLinhas.join(' · '))}. O resto desta seção (funil, perfil, perdas e safra) usa o escopo combinado (${esc(MODO_ROTULO[d.modo])}).</p>` : ''}<p class="nota">${esc(periodoDetalhe(d))} Compare estes números com o Pipedrive (filtro por data de criação do negócio) para validar o relatório.</p>
     <table class="rel-tab"><thead><tr><th>Critério</th><th>Negócios</th></tr></thead><tbody>${linhas.map(([r, v]) => `<tr><td>${esc(r)}</td><td class="n">${num(v)}</td></tr>`).join('')}
       <tr><td><b>Combinação usada: ${esc(MODO_ROTULO[d.modo])}</b></td><td class="n"><b>${num(d.negocios)}</b></td></tr><tr><td>Desses, contam como lead (regra D-36)</td><td class="n">${num(d.leads)}</td></tr></tbody></table>
     ${aviso}

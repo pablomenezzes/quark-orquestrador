@@ -7,10 +7,17 @@ import { abrirDocumentacao } from './experimentos-doc.js';
 const guardado = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch { /* armazenamento indisponível: segue sem lembrar */ } return null; };
 const S = {
   dados: null, vista: guardado('exp.vista') === 'kanban' ? 'kanban' : 'planilha', filtro: 'ativos', tipo: '', produto: '', busca: '',
-  ficha: null, rascunho: null, pend: {}, enviando: false, opcoes: null, campFicha: [],
+  ficha: null, rascunho: null, pend: {}, enviando: false, opcoes: null, campFicha: [], contabFicha: 'automatica', regrasFicha: [],
 };
 const COLUNAS_KANBAN = ['backlog', 'planejado', 'rodando', 'bloqueado', 'concluido', 'cancelado'];
 const paginaTexto = (host, caminho) => (caminho ? `${host ?? ''}${caminho}` : '');
+const OPS = { '+': '+', '-': '−', '*': '×', '/': '÷' };
+/** Regra em texto: "CPL = Investimento das campanhas (Meta) ÷ Leads". */
+function formulaTexto(r) {
+  const nomeMetrica = (id) => S.dados.metricas.find((m) => m.id === id)?.rotulo ?? id;
+  const termo = (t) => (t.k === 'op' ? OPS[t.v] : t.k === 'campo' ? (S.dados.campos.find((c) => c.id === t.v)?.rotulo ?? t.v) : t.k === 'metrica' ? nomeMetrica(t.v) : nf.format(t.v));
+  return `${nomeMetrica(r.metrica)} = ${r.formula.map(termo).join(' ')}`;
+}
 const MODOS = { todos: 'Todos os critérios ao mesmo tempo (E)', qualquer: 'Qualquer um dos critérios (OU)', campanha_so_investimento: 'Campanha só para o investimento; negócios pela página e pelo identificador' };
 const campanhaItem = (c) => (typeof c === 'string' ? c : c.id ? `${c.nome ?? 'Campanha'} (${c.id})` : (c.nome ?? ''));
 /** Várias campanhas: os resultados somam. Na célula da planilha ficam separadas por ";". */
@@ -27,6 +34,7 @@ async function carregarOpcoes() {
        <datalist id="dl-ident">${o.identificadores.map((i) => `<option value="${esc(i.evento)}" label="${esc(nf0.format(i.negocios))} negócios"></option>`).join('')}</datalist>`
     : '';
 }
+const origemOk = (v) => ({ identificador: !!v.identificadorConversao?.trim(), pagina: !!v.paginaDestino?.trim(), campanhas: S.campFicha.length > 0, escopo: !!(v.identificadorConversao?.trim() || v.paginaDestino?.trim() || S.campFicha.length) });
 const mdef = (id) => S.dados.metricas.find((m) => m.id === id) ?? null;
 const exp = (id) => S.dados.experimentos.find((x) => x.id === Number(id));
 const acompanhavel = (e) => !!(e.metrica && e.meta != null && e.inicio && e.fim);
@@ -201,6 +209,7 @@ function card(e) {
     <div class="tags"><span class="tag">${esc(tipoNome(e.tipo))}</span><span class="tag">${esc(PRODUTO_ROTULO[e.produto])}</span>${e.areaImpacto ? `<span class="tag">${esc(e.areaImpacto)}</span>` : ''}${ice}</div>
     ${e.responsavel ? `<p class="mini">${esc(e.responsavel)}</p>` : ''}
     ${m ? `<p class="mini">${esc(m.rotulo)}: meta ${esc(fmtM(m, e.meta))}${e.inicio && e.fim ? ` · ${esc(dm(e.inicio))} a ${esc(dm(e.fim))}` : ''}</p>` : ''}
+    ${e.contabilizacao === 'manual' && e.regras?.length ? `<div class="tags"><span class="tag escopo">Contabilização manual (${e.regras.length} ${e.regras.length === 1 ? 'regra' : 'regras'})</span></div>` : ''}
     ${temEscopo(e) ? `<div class="tags">${escopoRotulos(e).map((t) => `<span class="tag escopo">${esc(t)}</span>`).join('')}</div>` : ''}
     ${e.investimento ? `<p class="mini">Investimento previsto ${esc(brl0.format(e.investimento))}</p>` : ''}
     ${barras}
@@ -314,6 +323,65 @@ async function adicionarLinha() {
 function abrirFicha(id) { S.ficha = id; delete $('#ficha').dataset.montado; fichaDesenhar(); $('#ficha').hidden = false; $('#ficha').scrollTop = 0; $('#f-titulo')?.focus(); }
 function fecharFicha() { S.ficha = null; const f = $('#ficha'); f.hidden = true; f.innerHTML = ''; delete f.dataset.montado; }
 
+/** Editor das regras da contabilização manual: "métrica = termo op termo ...", com campos do escopo, outras métricas e números. */
+function regrasHtml(v) {
+  const ok = origemOk(v);
+  const grupos = new Map();
+  for (const c of S.dados.campos) grupos.set(c.grupo, [...(grupos.get(c.grupo) ?? []), c]);
+  const termoSel = (i, j, t, propria) => {
+    const sel = t.k === 'num' ? 'num' : `${t.k}:${t.v}`;
+    return `<select data-r="termo" data-i="${i}" data-j="${j}" aria-label="Termo ${j / 2 + 1}">
+      ${[...grupos].map(([g, lista]) => `<optgroup label="${esc(g)}">${lista.map((c) => `<option value="campo:${esc(c.id)}" ${sel === `campo:${c.id}` ? 'selected' : ''} ${ok[c.origem] || sel === `campo:${c.id}` ? '' : 'disabled'}>${esc(c.rotulo)}${ok[c.origem] ? '' : ' (exige o item no escopo)'}</option>`).join('')}</optgroup>`).join('')}
+      <optgroup label="Métricas (use o resultado de outra regra ou o automático)">${S.dados.metricas.filter((m) => m.id !== propria).map((m) => `<option value="metrica:${esc(m.id)}" ${sel === `metrica:${m.id}` ? 'selected' : ''}>${esc(m.rotulo)}</option>`).join('')}</optgroup>
+      <option value="num" ${sel === 'num' ? 'selected' : ''}>Número…</option></select>${t.k === 'num' ? `<input data-r="num" data-i="${i}" data-j="${j}" inputmode="decimal" value="${esc(String(t.v).replace('.', ','))}" style="width:90px" aria-label="Número">` : ''}`;
+  };
+  const usadas = new Set(S.regrasFicha.map((r) => r.metrica));
+  const regras = S.regrasFicha.map((r, i) => `<div class="regra" data-i="${i}" style="border:1px solid var(--m-line);border-radius:10px;padding:8px 10px;margin:8px 0">
+      <div class="acoes-ex" style="margin:0;gap:6px;flex-wrap:wrap">
+        <select data-r="metrica" data-i="${i}" aria-label="Métrica da regra">${S.dados.metricas.filter((m) => m.id === r.metrica || !usadas.has(m.id)).map((m) => `<option value="${esc(m.id)}" ${m.id === r.metrica ? 'selected' : ''}>${esc(m.rotulo)}</option>`).join('')}</select><b>=</b>
+        ${r.formula.map((t, j) => (j % 2 === 0 ? termoSel(i, j, t, r.metrica) : `<select data-r="op" data-i="${i}" data-j="${j}" aria-label="Operação">${Object.entries(OPS).map(([k, s]) => `<option value="${k}" ${t.v === k ? 'selected' : ''}>${s}</option>`).join('')}</select>`)).join('')}
+        <button type="button" class="btn-mini" data-r="mais" data-i="${i}" ${r.formula.length >= 15 ? 'disabled' : ''}>+ operação</button>
+        <button type="button" class="btn-mini" data-r="menos" data-i="${i}" ${r.formula.length <= 1 ? 'disabled' : ''}>− última</button>
+        <button type="button" class="btn-mini" data-r="del" data-i="${i}">Excluir regra</button>
+      </div><p class="dica" style="margin:6px 0 0">${esc(formulaTexto(r))}</p></div>`).join('');
+  return `<div id="f-regras"><p class="sub" style="margin:8px 0 4px"><b>Regras manuais.</b> Cada regra define como uma métrica é calculada; a métrica sem regra continua automática. A conta usa os totais do período (CPL = total investido ÷ total de leads), com × e ÷ antes de + e −, sem parênteses. Divisão por zero dá "sem resultado".</p>
+    ${regras || '<p class="dica">Nenhuma regra ainda: tudo segue o automático.</p>'}
+    <div class="acoes-ex" style="gap:8px"><button type="button" class="btn-s" data-r="nova" ${usadas.size >= S.dados.metricas.length ? 'disabled' : ''}>+ Regra</button><button type="button" class="btn-s" data-r="modelo" title="Leads = leads do identificador; CPL = investimento das campanhas ÷ Leads">Modelo: leads pelo identificador e CPL = investimento ÷ leads</button></div></div>`;
+}
+const termoDe = (valor) => (valor === 'num' ? { k: 'num', v: 0 } : { k: valor.slice(0, valor.indexOf(':')), v: valor.slice(valor.indexOf(':') + 1) });
+function regrasEvento(ev) {
+  const el = ev.target.closest('[data-r]');
+  if (!el) return false;
+  const i = Number(el.dataset.i), j = Number(el.dataset.j);
+  const r = S.regrasFicha[i];
+  const v = lerFicha(true);
+  const ok = origemOk(v);
+  const primeiroCampo = S.dados.campos.find((c) => ok[c.origem]);
+  const acao = el.dataset.r;
+  if (ev.type === 'change') {
+    if (acao === 'metrica') r.metrica = el.value;
+    else if (acao === 'termo') r.formula[j] = termoDe(el.value);
+    else if (acao === 'op') r.formula[j] = { k: 'op', v: el.value };
+    else if (acao === 'num') { const n = doCampo(null, el.value); r.formula[j] = { k: 'num', v: Number.isNaN(n) || n == null ? 0 : n }; }
+    else return false;
+  } else if (ev.type === 'click') {
+    if (acao === 'mais') r.formula.push({ k: 'op', v: '/' }, primeiroCampo ? { k: 'campo', v: primeiroCampo.id } : { k: 'num', v: 1 });
+    else if (acao === 'menos') r.formula.splice(-2, 2);
+    else if (acao === 'del') S.regrasFicha.splice(i, 1);
+    else if (acao === 'nova') {
+      const livre = S.dados.metricas.find((m) => !S.regrasFicha.some((x) => x.metrica === m.id));
+      if (livre) S.regrasFicha.push({ metrica: livre.id, formula: [primeiroCampo ? { k: 'campo', v: primeiroCampo.id } : { k: 'num', v: 0 }] });
+    } else if (acao === 'modelo') {
+      const campoDe = (id, origem) => (ok[origem] ? [{ k: 'campo', v: id }] : [{ k: 'num', v: 0 }]);
+      S.regrasFicha = [
+        { metrica: 'leads', formula: ok.identificador ? campoDe('identificador.leads', 'identificador') : campoDe('escopo.leads', 'escopo') },
+        { metrica: 'cpl', formula: [...campoDe('campanhas.invest', 'campanhas'), { k: 'op', v: '/' }, { k: 'metrica', v: 'leads' }] },
+      ];
+    } else return false;
+  } else return false;
+  fichaDesenhar();
+  return true;
+}
 function fichaDesenhar() {
   const f = $('#ficha');
   const e = S.ficha === 'novo' ? null : exp(S.ficha);
@@ -326,6 +394,7 @@ function fichaDesenhar() {
     ice: [e?.iceImpacto, e?.iceConfianca, e?.iceFacilidade], evidencias: e?.evidencias ?? '', aprendizado: e?.aprendizado ?? '',
   };
   const chave = String(S.ficha);
+  if (f.dataset.montado !== chave) { S.contabFicha = e?.contabilizacao ?? 'automatica'; S.regrasFicha = JSON.parse(JSON.stringify(e?.regras ?? [])); }
   if (f.dataset.montado !== chave) S.campFicha = (e?.campanhas ?? []).map(campanhaItem); // campanhas escolhidas: ficam em memória enquanto a ficha está aberta
   if (f.dataset.montado === chave) Object.assign(v, lerFicha(true)); // preserva o que se digitou ao trocar de métrica
   const m = mdef(v.metrica);
@@ -357,6 +426,8 @@ function fichaDesenhar() {
         <label>Identificador de conversão (Pipedrive)<input id="f-ident" list="dl-ident" maxlength="200" value="${esc(v.identificadorConversao)}" placeholder="ex.: o identificador do RD"></label>
         <div class="todo" style="grid-column:1/-1"><label>Campanhas (Meta Ads): escolha uma ou mais; os resultados somam<input id="f-camp-add" list="dl-campanhas" maxlength="200" placeholder="escolha pelo nome da lista (ou digite o nome ou o ID) e tecle Enter"></label>
           <div class="tags" id="f-camp-chips" style="margin-top:8px">${S.campFicha.map((c, i) => `<span class="tag escopo">${esc(c)} <button type="button" class="btn-mini" data-rm="${i}" aria-label="Remover ${esc(c)}">×</button></span>`).join('') || '<span class="dica">Nenhuma campanha escolhida.</span>'}</div></div>
+        <div class="todo" style="grid-column:1/-1"><label>Contabilização<select id="f-contab"><option value="automatica" ${S.contabFicha === 'automatica' ? 'selected' : ''}>Automática: o Studio conta pelo escopo (como combinado acima)</option><option value="manual" ${S.contabFicha === 'manual' ? 'selected' : ''}>Manual: eu defino as regras de cada métrica</option></select></label>
+          ${S.contabFicha === 'manual' ? regrasHtml(v) : ''}</div>
         <label class="todo">Hipótese<textarea id="f-hipotese" rows="2" maxlength="2000" placeholder="Se fizermos X, esperamos Y, porque Z.">${esc(v.hipotese)}</textarea></label>
         <label class="todo">Resultado esperado<textarea id="f-esperado" rows="2" maxlength="2000" placeholder="Que resultado esperamos? Ex.: CPL abaixo de R$ 35 sem perder a taxa de agendamento.">${esc(v.resultadoEsperado)}</textarea></label>
         <label class="largo">Métrica chave<select id="f-metrica"><option value="">— sem métrica (sem acompanhamento) —</option>${optsHtml(S.dados.metricas.map((x) => [x.id, x.rotulo]), v.metrica)}</select></label>
@@ -379,6 +450,9 @@ function fichaDesenhar() {
   const juntar = () => { const inp = $('#f-camp-add'); const t = inp.value.trim(); if (!t) return false; inp.value = ''; if (!S.campFicha.includes(t)) S.campFicha.push(t); fichaDesenhar(); $('#f-camp-add').focus(); return true; };
   $('#f-camp-add').addEventListener('change', juntar);
   $('#f-camp-add').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); juntar(); } });
+  $('#f-contab').addEventListener('change', (ev) => { S.contabFicha = ev.target.value; fichaDesenhar(); });
+  const regrasBox = $('#f-regras');
+  if (regrasBox) for (const tipo of ['change', 'click']) regrasBox.addEventListener(tipo, regrasEvento);
   $('#f-camp-chips').addEventListener('click', (ev) => { const b = ev.target.closest('[data-rm]'); if (b) { S.campFicha.splice(Number(b.dataset.rm), 1); fichaDesenhar(); } });
   $('#f-produto').addEventListener('change', () => fichaDesenhar());
   $('#f-salvar').addEventListener('click', salvarFicha);
@@ -411,7 +485,7 @@ async function salvarFicha() {
   const corpo = {
     titulo: v.titulo, tipo: v.tipo, status: v.status, responsavel: nulo(v.responsavel), areaImpacto: nulo(v.areaImpacto), hipotese: nulo(v.hipotese), resultadoEsperado: nulo(v.resultadoEsperado),
     produto: v.produto, canal: v.canal, metrica: nulo(v.metrica), meta: v.metrica ? v.meta : null, linhaBase: v.metrica ? v.linhaBase : null, investimento: v.investimento,
-    inicio: nulo(v.inicio), fim: nulo(v.fim), escopoModo: v.escopoModo || 'todos', paginaDestino: nulo(v.paginaDestino?.trim()), campanhas: [...S.campFicha, ...($('#f-camp-add')?.value.trim() ? [$('#f-camp-add').value.trim()] : [])], identificadorConversao: nulo(v.identificadorConversao?.trim()), avaliacao: nulo(v.avaliacao), evidencias: nulo(v.evidencias), aprendizado: nulo(v.aprendizado),
+    inicio: nulo(v.inicio), fim: nulo(v.fim), escopoModo: v.escopoModo || 'todos', contabilizacao: S.contabFicha, regras: S.regrasFicha, paginaDestino: nulo(v.paginaDestino?.trim()), campanhas: [...S.campFicha, ...($('#f-camp-add')?.value.trim() ? [$('#f-camp-add').value.trim()] : [])], identificadorConversao: nulo(v.identificadorConversao?.trim()), avaliacao: nulo(v.avaliacao), evidencias: nulo(v.evidencias), aprendizado: nulo(v.aprendizado),
     iceImpacto: v.ice[0] == null ? null : Number(v.ice[0]), iceConfianca: v.ice[1] == null ? null : Number(v.ice[1]), iceFacilidade: v.ice[2] == null ? null : Number(v.ice[2]),
   };
   S.enviando = true; $('#f-salvar').disabled = true; msg.textContent = 'Salvando…';
