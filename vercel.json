@@ -1,3 +1,10 @@
 {
-  "regions": ["gru1"]
+  "regions": ["gru1"],
+  "functions": {
+    "api/studio.ts": { "includeFiles": "studio/public/**" }
+  },
+  "rewrites": [
+    { "source": "/api/ingest", "destination": "/api/ingest" },
+    { "source": "/(.*)", "destination": "/api/studio" }
+  ]
 }

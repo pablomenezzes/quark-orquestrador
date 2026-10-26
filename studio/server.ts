@@ -3,6 +3,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { FormsStore, StoreError } from './lib/forms-store.js';
 import { FORM_ID_RE } from './lib/form-schema.js';
+import { AuthErro, LimiteLogin, VigenciaCache, assinar, cookieLimpo, cookieSessao, emailValido, lerCookie, PAPEIS, SESSAO_SEGUNDOS, senhaValida, verificar, type AuthService, type Papel, type Sessao } from './lib/auth.js';
 import { PRODUTOS_MONITOR, type MonitorRepo, type ProdutoMonitor } from './lib/monitor.js';
 import type { ExperimentosRepo } from './lib/experimentos.js';
 import { BI_PRODUTOS, BiNotFound, type BiFiltros, type BiProduto, type BiRepo } from './lib/bi.js';
@@ -26,6 +27,11 @@ export type StudioOptions = {
   monitor?: MonitorRepo | null;
   /** Experimentos de growth: cadastro e acompanhamento automático pelas visões de analytics. */
   experimentos?: ExperimentosRepo | null;
+  /**
+   * Modo publicado: exige login (cookie assinado), separa admin de editor, desliga o Studio de testes (formulários e envio) e libera qualquer Host.
+   * Sem isto, o servidor é o local de sempre (só 127.0.0.1, sem login).
+   */
+  acesso?: { servico: AuthService; segredo: string; seguro?: boolean; agora?: () => number } | null;
 };
 
 const MIME: Record<string, string> = {
@@ -36,6 +42,13 @@ const MIME: Record<string, string> = {
   '.svg': 'image/svg+xml',
 };
 const MAX_BODY = 1_000_000;
+/** Só no modo publicado: sem iframe, sem script de terceiros; fontes do Google e estilos embutidos das páginas. */
+const CABECALHOS_PUBLICO = {
+  'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+  'x-frame-options': 'DENY',
+  'referrer-policy': 'same-origin',
+  'strict-transport-security': 'max-age=31536000',
+};
 
 class HttpError extends Error {
   constructor(
@@ -51,13 +64,13 @@ class HttpError extends Error {
  * Servidor local do Studio. Só escuta em 127.0.0.1, confere Host (anti DNS-rebinding)
  * e Origin/Content-Type nas escritas (anti CSRF). Não é para ser exposto na internet.
  */
-export function createStudioServer(opts: StudioOptions): Server {
+export function createStudioHandler(opts: StudioOptions): (req: IncomingMessage, res: ServerResponse) => void {
   const store = new FormsStore(opts.formsDir);
   const publicRoot = resolve(opts.publicDir);
 
   const send = (res: ServerResponse, status: number, body: unknown, type = 'application/json; charset=utf-8') => {
     const data = typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body);
-    res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+    res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', ...(opts.acesso ? CABECALHOS_PUBLICO : {}) });
     res.end(data);
   };
 
@@ -93,6 +106,15 @@ export function createStudioServer(opts: StudioOptions): Server {
     });
 
   const guard = (req: IncomingMessage) => {
+    if (opts.acesso) {
+      // publicado: o Host é o do domínio; nas escritas a Origin precisa ser a própria página (anti CSRF) e o corpo, JSON
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        const origin = req.headers.origin;
+        if (!origin || !/^https?:\/\//.test(origin) || new URL(origin).host !== (req.headers.host ?? '')) throw new HttpError(403, 'forbidden_origin');
+        if (!/^application\/json/i.test(req.headers['content-type'] ?? '')) throw new HttpError(415, 'content_type_must_be_json');
+      }
+      return;
+    }
     const host = (req.headers.host ?? '').toLowerCase();
     if (!/^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(host)) throw new HttpError(403, 'forbidden_host');
     if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -102,11 +124,111 @@ export function createStudioServer(opts: StudioOptions): Server {
     }
   };
 
+  const acesso = opts.acesso ?? null;
+  const agora = acesso?.agora ?? Date.now;
+  const vigencia = acesso ? new VigenciaCache(acesso.servico, 5 * 60_000, agora) : null;
+  const limite = new LimiteLogin(5, 15 * 60_000, agora);
+  const ip = (req: IncomingMessage) => String(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress ?? '').split(',')[0]!.trim();
+  const sessaoDe = async (req: IncomingMessage): Promise<Sessao | null> => {
+    if (!acesso || !vigencia) return null;
+    const s = verificar(lerCookie(req.headers.cookie), acesso.segredo, agora());
+    if (!s) return null;
+    const papel = await vigencia.papel(s.id); // o papel vale o de agora, não o do dia do login
+    return papel ? { ...s, papel } : null;
+  };
+
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
     guard(req);
     const url = new URL(req.url ?? '/', 'http://localhost');
     const path = url.pathname;
     const method = req.method ?? 'GET';
+
+    let sessao: Sessao | null = null;
+    if (acesso) {
+      const ativos = ['/login', '/s/login.js', '/s/studio.css', '/api/login', '/api/logout'];
+      if (method === 'GET' && path === '/login') return sendFile(res, join(opts.publicDir, 'login.html'));
+      if (method === 'POST' && path === '/api/login') {
+        const b = await readJson(req);
+        const email = typeof b?.email === 'string' ? b.email.trim().toLowerCase() : '';
+        const chave = `${ip(req)}|${email}`;
+        if (limite.bloqueado(chave)) { res.setHeader('retry-after', '900'); throw new HttpError(429, 'muitas_tentativas', { detail: 'Muitas tentativas. Aguarde 15 minutos e tente de novo.' }); }
+        const u = emailValido(email) && typeof b?.senha === 'string' && b.senha.length <= 200 ? await acesso.servico.entrar(email, b.senha) : null;
+        if (!u) { limite.falhou(chave); throw new HttpError(401, 'credenciais_invalidas', { detail: 'E-mail ou senha incorretos, ou o acesso foi desativado.' }); }
+        limite.limpar(chave);
+        const exp = Math.floor(agora() / 1000) + SESSAO_SEGUNDOS;
+        res.setHeader('set-cookie', cookieSessao(assinar({ id: u.id, email: u.email, nome: u.nome, papel: u.papel, exp }, acesso.segredo), acesso.seguro !== false));
+        return send(res, 200, { ok: true });
+      }
+      if (method === 'POST' && path === '/api/logout') {
+        res.setHeader('set-cookie', cookieLimpo(acesso.seguro !== false));
+        return send(res, 200, { ok: true });
+      }
+      sessao = await sessaoDe(req);
+      if (!sessao && !(method === 'GET' && ativos.includes(path))) {
+        if (path.startsWith('/api/')) return send(res, 401, { error: 'nao_autenticado' });
+        res.writeHead(302, { location: `/login?voltar=${encodeURIComponent(path)}`, 'cache-control': 'no-store' });
+        return res.end();
+      }
+      // O Studio de testes (formulários e envio ao pipeline) só existe na máquina local.
+      if (path === '/studio' || path === '/attribution.js' || path.startsWith('/f/') || path.startsWith('/api/forms') || path.startsWith('/api/submit') || path === '/api/meta') return send(res, 404, { error: 'not_found' });
+      if (sessao) {
+        const soAdmin = path === '/usuarios' || path.startsWith('/api/usuarios') || (path.startsWith('/api/painel/') && method !== 'GET');
+        if (soAdmin && sessao.papel !== 'admin') {
+          if (path.startsWith('/api/')) return send(res, 403, { error: 'sem_permissao', detail: 'Só o admin pode fazer isso.' });
+          res.writeHead(302, { location: '/', 'cache-control': 'no-store' });
+          return res.end();
+        }
+        if (method === 'GET' && path === '/api/me') return send(res, 200, { publico: true, id: sessao.id, nome: sessao.nome, email: sessao.email, papel: sessao.papel });
+        if (method === 'GET' && path === '/usuarios') return sendFile(res, join(opts.publicDir, 'usuarios.html'));
+        if (method === 'GET' && path === '/conta') return sendFile(res, join(opts.publicDir, 'conta.html'));
+        if (method === 'POST' && path === '/api/senha') {
+          const b = await readJson(req);
+          if (typeof b?.atual !== 'string' || !(await acesso.servico.entrar(sessao.email, b.atual))) throw new HttpError(403, 'senha_atual_incorreta', { detail: 'A senha atual não confere.' });
+          await acesso.servico.atualizar(sessao.id, { senha: senhaValida(b?.nova) });
+          return send(res, 200, { ok: true });
+        }
+        if (path === '/api/usuarios' || path.startsWith('/api/usuarios/')) {
+          const svc = acesso.servico;
+          if (path === '/api/usuarios') {
+            if (method === 'GET') return send(res, 200, await svc.listar());
+            if (method === 'POST') {
+              const b = await readJson(req);
+              const email = typeof b?.email === 'string' ? b.email.trim().toLowerCase() : '';
+              if (!emailValido(email)) throw new HttpError(400, 'email_invalido', { detail: 'Informe um e-mail válido.' });
+              if (!(PAPEIS as readonly unknown[]).includes(b?.papel)) throw new HttpError(400, 'papel_invalido', { validos: [...PAPEIS] });
+              const nome = typeof b?.nome === 'string' && b.nome.trim() ? b.nome.trim().slice(0, 120) : null;
+              return send(res, 201, await svc.criar({ email, nome, papel: b.papel as Papel, senha: senhaValida(b?.senha) }));
+            }
+            return send(res, 405, { error: 'method_not_allowed' });
+          }
+          const uid = /^\/api\/usuarios\/([0-9a-f-]{36})$/.exec(path)?.[1];
+          if (!uid) return send(res, 404, { error: 'not_found' });
+          const eu = uid === sessao.id;
+          if (method === 'DELETE') {
+            if (eu) throw new HttpError(400, 'nao_pode_em_si_mesmo', { detail: 'Você não pode remover o próprio usuário.' });
+            await svc.remover(uid);
+            vigencia!.esquecer(uid);
+            return send(res, 200, { ok: true });
+          }
+          if (method === 'PUT') {
+            const b = await readJson(req);
+            const e: { papel?: Papel; nome?: string | null; bloqueado?: boolean; senha?: string } = {};
+            if ('papel' in (b ?? {})) { if (!(PAPEIS as readonly unknown[]).includes(b.papel)) throw new HttpError(400, 'papel_invalido', { validos: [...PAPEIS] }); e.papel = b.papel; }
+            if ('nome' in (b ?? {})) e.nome = typeof b.nome === 'string' && b.nome.trim() ? b.nome.trim().slice(0, 120) : null;
+            if ('bloqueado' in (b ?? {})) { if (typeof b.bloqueado !== 'boolean') throw new HttpError(400, 'bloqueado_invalido'); e.bloqueado = b.bloqueado; }
+            if ('senha' in (b ?? {})) e.senha = senhaValida(b.senha);
+            if (!Object.keys(e).length) throw new HttpError(400, 'nada_para_gravar');
+            if (eu && (e.papel === 'editor' || e.bloqueado)) throw new HttpError(400, 'nao_pode_em_si_mesmo', { detail: 'Você não pode rebaixar nem bloquear o próprio usuário.' });
+            const r = await svc.atualizar(uid, e);
+            vigencia!.esquecer(uid);
+            return send(res, 200, r);
+          }
+          return send(res, 405, { error: 'method_not_allowed' });
+        }
+      }
+    } else if (method === 'GET' && path === '/api/me') {
+      return send(res, 200, { publico: false, papel: 'admin' });
+    }
 
     if (method === 'GET' && path === '/') return sendFile(res, join(opts.publicDir, 'inicio.html'));    if (method === 'GET' && path === '/attribution.js') return sendFile(res, join(opts.trackingDir, 'attribution.js'));
 
@@ -460,14 +582,19 @@ export function createStudioServer(opts: StudioOptions): Server {
     return send(res, 404, { error: 'not_found' });
   };
 
-  return createServer((req, res) => {
+  return (req: IncomingMessage, res: ServerResponse) => {
     handle(req, res).catch((e: unknown) => {
       if (e instanceof HttpError) return send(res, e.status, { error: e.message, ...e.extra });
       if (e instanceof StoreError) return send(res, 400, { error: e.message, issues: e.issues });
       if (e instanceof PainelNotFound || e instanceof BiNotFound) return send(res, 404, { error: 'nao_encontrado', detail: e.message });
       if (e instanceof PainelInvalido) return send(res, 400, { error: 'invalido', detail: e.message });
+      if (e instanceof AuthErro) return send(res, e.status, { error: 'auth', detail: e.message });
       console.error('studio:', e instanceof Error ? e.message : e);
       send(res, 500, { error: 'internal_error' });
     });
-  });
+  };
+}
+
+export function createStudioServer(opts: StudioOptions): Server {
+  return createServer(createStudioHandler(opts));
 }

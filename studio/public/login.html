@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Entrar · Quark Dados</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    :root { --bg: #ffffff; --ink: #212529; --ink2: #55595e; --line: #d4d6d8; --card: #ffffff; --laranja: #EA8C0C; --azul: #00ABE4; --ruim: #b3261e; --ruim-bg: rgba(179, 38, 30, .10); }
+    @media (prefers-color-scheme: dark) { :root { --bg: #212529; --ink: #ffffff; --ink2: #c9cbcd; --line: #3a3f44; --card: #2a2e33; --ruim: #ff8a80; --ruim-bg: rgba(255, 138, 128, .14); } }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--bg); color: var(--ink); font-family: 'Red Hat Display', system-ui, -apple-system, 'Segoe UI', sans-serif; padding: 16px; }
+    main { width: min(400px, 100%); }
+    .faixa { height: 4px; border-radius: 2px; background: linear-gradient(90deg, #EA8C0C 0 25%, #39B4B6 25% 50%, #98BF12 50% 75%, #00ABE4 75% 100%); margin-bottom: 18px; }
+    h1 { font-size: 24px; margin: 0 0 4px; }
+    p { color: var(--ink2); margin: 0 0 18px; }
+    form { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; display: grid; gap: 14px; }
+    label { display: grid; gap: 4px; font-size: 13px; color: var(--ink2); }
+    input { font: inherit; padding: 9px 11px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+    input:focus-visible, button:focus-visible { outline: 2px solid var(--azul); outline-offset: 2px; }
+    button { font: inherit; font-weight: 700; padding: 10px 16px; border: 0; border-radius: 8px; background: var(--laranja); color: #212529; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: default; }
+    .erro { background: var(--ruim-bg); color: var(--ruim); border-radius: 8px; padding: 9px 12px; font-size: 13.5px; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="faixa" aria-hidden="true"></div>
+    <h1>Quark Dados</h1>
+    <p>Entre com o e-mail e a senha que o admin criou para você.</p>
+    <form id="f" novalidate>
+      <label>E-mail<input id="email" type="email" autocomplete="username" required autofocus></label>
+      <label>Senha<input id="senha" type="password" autocomplete="current-password" required></label>
+      <div id="erro" class="erro" role="alert" hidden></div>
+      <button id="ok" type="submit">Entrar</button>
+    </form>
+  </main>
+  <script src="/s/login.js"></script>
+</body>
+</html>

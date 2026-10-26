@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Usuários · Quark Dados</title>
+  <link rel="stylesheet" href="/s/studio.css">
+  <style>
+    .wrap { max-width: 1000px; margin: 0 auto; padding: 24px 20px; }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    .card { padding: 16px 18px; margin-top: 16px; }
+    .card h2 { font-size: 15px; margin: 0 0 10px; }
+    .grade { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px 14px; }
+    .grade label { display: grid; gap: 4px; font-size: 12.5px; color: var(--muted); }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); padding: 8px 10px; border-bottom: 1px solid var(--border); }
+    td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    .acoes { display: flex; gap: 6px; flex-wrap: wrap; }
+    .acoes .btn { padding: 4px 10px; font-size: 13px; }
+    #msg { margin-top: 12px; min-height: 22px; font-size: 14px; }
+    #msg.erro { color: var(--danger); }
+    .scroll { overflow-x: auto; }
+    @media (max-width: 800px) { .grade { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  </style>
+</head>
+<body>
+  <header class="top" data-pagina="usuarios"></header>
+  <main class="wrap">
+    <h1>Usuários do time</h1>
+    <p class="muted">Só o admin vê esta página. <b>Editor</b> vê tudo e edita experimentos. <b>Admin</b> também gerencia usuários e a configuração do Painel de Dados. Não existe cadastro aberto: quem não está aqui não entra.</p>
+    <section class="card">
+      <h2>Novo usuário</h2>
+      <form id="novo" class="grade" novalidate>
+        <label>Nome<input class="field-input" id="n-nome" maxlength="120" autocomplete="off"></label>
+        <label>E-mail<input class="field-input" id="n-email" type="email" autocomplete="off" required></label>
+        <label>Papel<select class="field-input" id="n-papel"><option value="editor">Editor</option><option value="admin">Admin</option></select></label>
+        <label>Senha provisória (mín. 10, letras e números)<input class="field-input" id="n-senha" type="text" autocomplete="off" required></label>
+        <div><button class="btn" type="submit" id="n-ok">Criar usuário</button></div>
+      </form>
+      <p class="muted" style="margin:10px 0 0">Combine a senha provisória com a pessoa por um canal privado; ela troca em "Minha conta" depois de entrar.</p>
+    </section>
+    <div id="msg" role="status"></div>
+    <section class="card scroll"><table><thead><tr><th>Nome</th><th>E-mail</th><th>Papel</th><th>Situação</th><th>Último acesso</th><th></th></tr></thead><tbody id="lista"><tr><td colspan="6" class="muted">Carregando…</td></tr></tbody></table></section>
+  </main>
+  <script src="/s/nav.js" type="module"></script>
+  <script src="/s/usuarios.js" type="module"></script>
+</body>
+</html>

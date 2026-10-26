@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Minha conta · Quark Dados</title>
+  <link rel="stylesheet" href="/s/studio.css">
+  <style>
+    .wrap { max-width: 520px; margin: 0 auto; padding: 24px 20px; }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    form { display: grid; gap: 12px; padding: 18px; margin-top: 16px; }
+    label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+    #msg { min-height: 22px; font-size: 14px; }
+    #msg.erro { color: var(--danger); }
+  </style>
+</head>
+<body>
+  <header class="top" data-pagina="conta"></header>
+  <main class="wrap">
+    <h1>Minha conta</h1>
+    <p class="muted" id="quem"></p>
+    <form class="card" id="f" novalidate>
+      <label>Senha atual<input class="field-input" id="atual" type="password" autocomplete="current-password" required></label>
+      <label>Nova senha (mín. 10, letras e números)<input class="field-input" id="nova" type="password" autocomplete="new-password" required></label>
+      <label>Repita a nova senha<input class="field-input" id="rep" type="password" autocomplete="new-password" required></label>
+      <div id="msg" role="status"></div>
+      <div><button class="btn" id="ok" type="submit">Trocar senha</button></div>
+    </form>
+  </main>
+  <script src="/s/nav.js" type="module"></script>
+  <script src="/s/conta.js" type="module"></script>
+</body>
+</html>
