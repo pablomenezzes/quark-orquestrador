@@ -20,7 +20,7 @@ const run = describe.skipIf(!ready);
 run('experimentos (transação com rollback)', () => {
   const c = () => client!;
   const repo = () => new PgExperimentosRepo(c() as never);
-  const nova = { titulo: 'FICTÍCIO leads Meta RH', produto: 'rh', canal: 'meta', metrica: 'leads', meta: 2000, orcamento: 30000, inicio: '2026-10-01', fim: '2026-10-31', iceImpacto: 8, iceConfianca: 6, iceFacilidade: 7 };
+  const nova = { titulo: 'FICTÍCIO leads Meta RH', produto: 'rh', canal: 'meta', metrica: 'leads', meta: 2000, investimento: 30000, inicio: '2026-10-01', fim: '2026-10-31', iceImpacto: 8, iceConfianca: 6, iceFacilidade: 7 };
   async function recusado(sql: string, params: unknown[] = []): Promise<string> {
     await c().query('savepoint d');
     try { await c().query(sql, params); return 'NO_ERROR'; } catch (e) { return (e as { code?: string }).code ?? 'UNKNOWN'; } finally { await c().query('rollback to savepoint d'); }
@@ -47,6 +47,16 @@ run('experimentos (transação com rollback)', () => {
     expect(await recusado(`delete from mkt.experimentos`)).toBe('42501');
     expect(await recusado(`insert into mkt.experimentos (titulo, produto, metrica, meta, inicio, fim) values ('x', 'rh', 'leads', 1, '2026-10-10', '2026-10-01')`)).toBe('23514');
     expect(await recusado(`insert into mkt.experimentos (titulo, produto, metrica, meta, inicio, fim, ice_impacto) values ('x', 'rh', 'leads', 1, '2026-10-01', '2026-10-02', 11)`)).toBe('23514');
+  });
+  it('ideia só com título, métrica sem meta recusada e documentação gravada à parte', async () => {
+    const e = await repo().criar({ titulo: 'FICTÍCIO ideia solta', tipo: 'ideia' });
+    expect(e.status).toBe('backlog');
+    expect(e.progresso.estado).toBe('sem_metrica');
+    expect(await recusado(`insert into mkt.experimentos (titulo, metrica) values ('x', 'leads')`)).toBe('23514');
+    await repo().salvarDocumentacao(e.id, { html: '<h1>Relatório</h1>' });
+    const r = await repo().relatorio(e.id);
+    expect(r.documentacao).toBe('<h1>Relatório</h1>');
+    expect(r.experimento.temDocumentacao).toBe(true);
   });
   it('experimento que não existe devolve "não encontrado"', async () => {
     await expect(repo().atualizar(987654321, { titulo: 'x' })).rejects.toThrow(PainelNotFound);

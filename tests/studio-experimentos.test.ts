@@ -7,7 +7,7 @@ import type { Server } from 'node:http';
 import { createStudioServer } from '../studio/server';
 import { PainelInvalido, PainelNotFound } from '../studio/lib/painel-repo';
 import { somaDias, ZERO, type CanalId, type DadosMonitor, type Soma } from '../studio/lib/monitor';
-import { calcularProgresso, calibracaoPor, desfechoDe, METRICAS_EXP, PgExperimentosRepo, validarEntrada, valorMetrica, type Experimento, type ExperimentosRepo } from '../studio/lib/experimentos';
+import { acompanhavel, calcularProgresso, calibracaoPor, desfechoDe, documentacaoValida, METRICAS_EXP, montarRelatorio, PgExperimentosRepo, validarEntrada, valorMetrica, type Experimento, type ExperimentosRepo } from '../studio/lib/experimentos';
 
 const soma = (o: Partial<Soma>): Soma => ({ ...ZERO, ...o });
 const vazio = (): Record<CanalId, Map<string, Soma>> => ({ google: new Map(), meta: new Map(), social: new Map(), organico: new Map() });
@@ -15,7 +15,7 @@ const dias = (de: string, ate: string) => { const o: string[] = []; for (let d =
 /** Meta Ads com o mesmo dia repetido em todo o intervalo. */
 const meta = (d: Record<CanalId, Map<string, Soma>>, de: string, ate: string, s: Partial<Soma>) => { for (const dia of dias(de, ate)) d.meta.set(dia, soma(s)); };
 
-const base = { canal: 'meta', metrica: 'leads', meta: 300, linhaBase: null, orcamento: null, inicio: '2026-10-01', fim: '2026-10-30', status: 'rodando' } as const;
+const base = { canal: 'meta', metrica: 'leads', meta: 300, linhaBase: null, investimento: null, inicio: '2026-10-01', fim: '2026-10-30', status: 'rodando' } as const;
 const HOJE = '2026-10-11'; // dias completos: 01 a 10 (10 de 30 dias)
 
 describe('Experimentos: cadastro validado', () => {
@@ -23,14 +23,20 @@ describe('Experimentos: cadastro validado', () => {
   it('aceita um cadastro mínimo e só devolve campos válidos', () => {
     expect(validarEntrada({ ...ok, canal: 'meta', iceImpacto: 8 }, 'criar')).toMatchObject({ titulo: 'Diagnóstico', canal: 'meta', iceImpacto: 8 });
   });
-  it('exige os campos do cadastro e rejeita valores fora do catálogo', () => {
-    expect(() => validarEntrada({ titulo: 'x' }, 'criar')).toThrow(PainelInvalido);
+  it('exige só o título: o resto (inclusive a métrica chave) pode vir depois', () => {
+    expect(validarEntrada({ titulo: 'Ideia solta' }, 'criar')).toEqual({ titulo: 'Ideia solta' });
+    expect(() => validarEntrada({}, 'criar')).toThrow(/falta titulo/);
+  });
+  it('rejeita valores fora do catálogo', () => {
     expect(() => validarEntrada({ ...ok, metrica: 'inventada' }, 'criar')).toThrow(/métrica inválida/);
     expect(() => validarEntrada({ ...ok, produto: 'outro' }, 'criar')).toThrow(/produto/);
     expect(() => validarEntrada({ ...ok, canal: 'tv' }, 'criar')).toThrow(/canal inválido/);
     expect(() => validarEntrada({ ...ok, iceImpacto: 11 }, 'criar')).toThrow(/1 a 10/);
-    expect(() => validarEntrada({ ...ok, orcamento: -5 }, 'criar')).toThrow(/negativo/);
+    expect(() => validarEntrada({ ...ok, investimento: -5 }, 'criar')).toThrow(/negativo/);
     expect(() => validarEntrada({ ...ok, inicio: '2026-02-30' }, 'criar')).toThrow(/início/);
+    expect(() => validarEntrada({ ...ok, tipo: 'outro' }, 'criar')).toThrow(/tipo inválido/);
+    expect(() => validarEntrada({ ...ok, avaliacao: 'talvez' }, 'criar')).toThrow(/avaliação inválida/);
+    expect(() => validarEntrada({ ...ok, status: 'pausado' }, 'criar')).toThrow(/status inválido/);
     expect(() => validarEntrada({ ...ok, fim: '2026-09-01' }, 'criar')).toThrow(/antes do início/);
     expect(() => validarEntrada({ ...ok, meta: '50' }, 'criar')).toThrow(/número/);
   });
@@ -38,10 +44,19 @@ describe('Experimentos: cadastro validado', () => {
     expect(() => validarEntrada({ ...ok, canal: 'social' }, 'criar')).toThrow(/depende de investimento/);
     expect(validarEntrada({ ...ok, canal: 'social', metrica: 'leads' }, 'criar').canal).toBe('social');
     // na edição vale o conjunto: trocar só o canal de um experimento de CPL também é recusado
-    expect(() => validarEntrada({ canal: 'organico' }, 'editar', { produto: 'rh', canal: 'meta', metrica: 'cpl', inicio: '2026-10-01', fim: '2026-10-30' })).toThrow(/depende de investimento/);
+    expect(() => validarEntrada({ canal: 'organico' }, 'editar', { produto: 'rh', canal: 'meta', metrica: 'cpl', meta: 50, inicio: '2026-10-01', fim: '2026-10-30' })).toThrow(/depende de investimento/);
   });
   it('na edição, o fim é conferido contra o início que já existe', () => {
-    expect(() => validarEntrada({ fim: '2026-09-15' }, 'editar', { produto: 'rh', canal: 'meta', metrica: 'cpl', inicio: '2026-10-01', fim: '2026-10-30' })).toThrow(/antes do início/);
+    expect(() => validarEntrada({ fim: '2026-09-15' }, 'editar', { produto: 'rh', canal: 'meta', metrica: 'cpl', meta: 50, inicio: '2026-10-01', fim: '2026-10-30' })).toThrow(/antes do início/);
+  });
+  it('métrica chave e meta andam juntas; limpar a métrica limpa a meta', () => {
+    expect(() => validarEntrada({ titulo: 'x', metrica: 'cpl' }, 'criar')).toThrow(/informe a meta/);
+    expect(() => validarEntrada({ titulo: 'x', meta: 3 }, 'criar')).toThrow(/escolha a métrica/);
+    expect(validarEntrada({ metrica: null }, 'editar', { produto: 'rh', canal: 'meta', metrica: 'cpl', meta: 50, inicio: null, fim: null })).toMatchObject({ metrica: null, meta: null, linhaBase: null });
+  });
+  it('aceita os campos de documentação do experimento', () => {
+    const v = validarEntrada({ titulo: 'x', tipo: 'ideia', responsavel: ' Dimitri ', areaImpacto: 'CRO', resultadoEsperado: 'Mais leads', avaliacao: 'sucesso', evidencias: 'link', status: 'bloqueado', inicio: null, fim: null }, 'criar');
+    expect(v).toMatchObject({ tipo: 'ideia', responsavel: 'Dimitri', areaImpacto: 'CRO', resultadoEsperado: 'Mais leads', avaliacao: 'sucesso', status: 'bloqueado', inicio: null, fim: null });
   });
   it('todas as métricas do catálogo têm rótulo, formato e direção', () => {
     for (const m of METRICAS_EXP) { expect(m.rotulo.length).toBeGreaterThan(1); expect(['int', 'brl', 'brl2', 'pct']).toContain(m.formato); expect(['subir', 'descer']).toContain(m.melhor); }
@@ -54,7 +69,7 @@ describe('Experimentos: acompanhamento automático (métrica de contagem)', () =
   meta(d, '2026-09-01', '2026-09-30', { leads: 6, invest: 300 }); // período anterior: 180 leads
   meta(d, '2026-10-01', '2026-10-10', { leads: 8, invest: 400 }); // 10 dias completos: 80 leads, R$ 4.000
   it('usa só dias completos (até ontem) e a linha de base automática do mesmo número de dias antes', () => {
-    const p = calcularProgresso({ ...base, orcamento: 9000 }, { diario: d }, HOJE);
+    const p = calcularProgresso({ ...base, investimento: 9000 }, { diario: d }, HOJE);
     expect(p.dadosAte).toBe('2026-10-10');
     expect(p.diasCompletos).toBe(10);
     expect(p.totalDias).toBe(30);
@@ -67,11 +82,11 @@ describe('Experimentos: acompanhamento automático (métrica de contagem)', () =
     expect(p.estado).toBe('atencao'); // 26,7% do caminho contra 33,3% do prazo: 6,7 pontos atrás
   });
   it('o gasto vem do investimento do canal e o orçamento adiantado é sinalizado', () => {
-    const p = calcularProgresso({ ...base, orcamento: 5000 }, { diario: d }, HOJE);
+    const p = calcularProgresso({ ...base, investimento: 5000 }, { diario: d }, HOJE);
     expect(p.gasto).toBe(4000);
     expect(p.usoOrcamento).toBeCloseTo(0.8, 6);
     expect(p.orcamentoAdiantado).toBe(true); // 80% do orçamento com 33% do prazo
-    expect(calcularProgresso({ ...base, orcamento: 50_000 }, { diario: d }, HOJE).orcamentoAdiantado).toBe(false);
+    expect(calcularProgresso({ ...base, investimento: 50_000 }, { diario: d }, HOJE).orcamentoAdiantado).toBe(false);
   });
   it('linha de base combinada vale mais que a automática', () => {
     const p = calcularProgresso({ ...base, linhaBase: 150 }, { diario: d }, HOJE);
@@ -157,8 +172,45 @@ describe('Experimentos: desfecho e calibração', () => {
   });
 });
 
+describe('Experimentos: sem métrica, relatório e documentação', () => {
+  const d = vazio();
+  meta(d, '2026-09-24', '2026-09-30', { leads: 2, invest: 70 }); // 7 dias antes do teste
+  meta(d, '2026-10-05', '2026-10-14', { leads: 4, invest: 100 }); // 05/10 é segunda-feira
+  const exp = { canal: 'meta', metrica: 'leads', inicio: '2026-10-05', fim: '2026-10-11' } as const; // 7 dias, segunda a domingo
+  it('ideia sem métrica, meta ou período não tem acompanhamento automático e não quebra', () => {
+    const sem = { canal: 'total', metrica: null, meta: null, linhaBase: null, investimento: null, inicio: null, fim: null, status: 'backlog' } as const;
+    expect(acompanhavel(sem)).toBe(false);
+    expect(calcularProgresso(sem, { diario: d }, HOJE).estado).toBe('sem_metrica');
+    expect(calcularProgresso({ ...sem, status: 'cancelado' }, { diario: d }, HOJE).estado).toBe('cancelado');
+    expect(acompanhavel({ metrica: 'cpl', meta: 40, inicio: '2026-10-01', fim: '2026-10-30' })).toBe(true);
+  });
+  it('relatório: um dia por linha, semanas de segunda a domingo e o geral contra o período anterior', () => {
+    const r = montarRelatorio({ ...exp, fim: '2026-10-19' }, { diario: d }, '2026-10-16'); // dados até 15/10 (quinta)
+    expect(r.dadosAte).toBe('2026-10-15');
+    expect(r.diario).toHaveLength(11);
+    expect(r.diario[0]).toMatchObject({ rotulo: '2026-10-05', leads: 4, invest: 100, valor: 4 });
+    expect(r.diario[10]).toMatchObject({ leads: 0, valor: 0 }); // 15/10 sem dado
+    expect(r.semanal.map((x) => [x.rotulo, x.de, ate(x), x.leads])).toEqual([['Semana 1', '2026-10-05', '2026-10-11', 28], ['Semana 2', '2026-10-12', '2026-10-15', 12]]);
+    expect(r.geral).toMatchObject({ de: '2026-10-05', ate: '2026-10-15', leads: 40, invest: 1000, cpl: 25 });
+    expect(r.base).toMatchObject({ de: '2026-09-20', ate: '2026-10-04', leads: 14 }); // o teste dura 15 dias (05 a 19/10): a base são os 15 dias antes, 20/09 a 04/10
+  });
+  const ate = (x: { ate: string }) => x.ate;
+  it('semana cortada no início quando o teste começa no meio dela; sem período não há relatório', () => {
+    const r = montarRelatorio({ ...exp, inicio: '2026-10-07', fim: '2026-10-20' }, { diario: d }, '2026-10-14');
+    expect(r.semanal[0]).toMatchObject({ de: '2026-10-07', ate: '2026-10-11', dias: 5 });
+    expect(montarRelatorio({ canal: 'meta', metrica: null, inicio: null, fim: null }, { diario: d }, HOJE)).toMatchObject({ diario: [], semanal: [], geral: null, base: null });
+    expect(montarRelatorio(exp, { diario: d }, '2026-10-05').diario).toEqual([]); // ainda não fechou nenhum dia
+  });
+  it('a documentação aceita texto formatado e SVG, mas recusa script, iframe e atributo de evento', () => {
+    expect(documentacaoValida({ html: '<h1>Relatório</h1><svg viewBox="0 0 10 10"><rect width="3" height="3"/></svg>' })).toContain('<svg');
+    for (const ruim of ['<script>alert(1)</script>', '<IFRAME src="x"></iframe>', '<img src=x onerror=alert(1)>', '<a href="javascript:alert(1)">x</a>']) expect(() => documentacaoValida({ html: ruim })).toThrow(PainelInvalido);
+    expect(() => documentacaoValida({ html: 'x'.repeat(400_001) })).toThrow(/limite/);
+    expect(() => documentacaoValida({ html: 5 })).toThrow(PainelInvalido);
+  });
+});
+
 describe('Experimentos: repositório (banco simulado)', () => {
-  const linha = (o: Record<string, unknown> = {}) => ({ id: 5, titulo: 'T', hipotese: null, produto: 'rh', canal: 'meta', metrica: 'leads', meta: 300, linha_base: null, orcamento: null, inicio: '2026-10-01', fim: '2026-10-30', status: 'rodando', ice_impacto: 8, ice_confianca: 6, ice_facilidade: 7, ice_score: 7, valor_final: null, atingimento_final: null, desfecho: null, aprendizado: null, criado_em: new Date('2026-10-01T10:00:00Z'), atualizado_em: new Date('2026-10-01T10:00:00Z'), ...o });
+  const linha = (o: Record<string, unknown> = {}) => ({ id: 5, titulo: 'T', hipotese: null, produto: 'rh', canal: 'meta', metrica: 'leads', meta: 300, linha_base: null, investimento: null, inicio: '2026-10-01', fim: '2026-10-30', status: 'rodando', ice_impacto: 8, ice_confianca: 6, ice_facilidade: 7, ice_score: 7, valor_final: null, atingimento_final: null, desfecho: null, aprendizado: null, criado_em: new Date('2026-10-01T10:00:00Z'), atualizado_em: new Date('2026-10-01T10:00:00Z'), ...o });
   const dados = (): DadosMonitor => { const diario = vazio(); meta(diario, '2026-10-01', '2026-10-10', { leads: 8, invest: 400 }); return { diario, ontemMesmaHora: { google: ZERO, meta: ZERO, social: ZERO, organico: ZERO }, hora: '10:00', trafegoAte: null }; };
   const montar = (rows: Array<Record<string, unknown>>) => {
     const sqls: Array<{ sql: string; params: unknown[] }> = [];
@@ -167,6 +219,7 @@ describe('Experimentos: repositório (banco simulado)', () => {
       sqls.push({ sql: sql.replace(/\s+/g, ' '), params });
       if (/^\s*insert into mkt\.experimentos/i.test(sql)) return { rows: [{ id: 5 }] };
       if (/^\s*update mkt\.experimentos/i.test(sql)) return { rows: [] };
+      if (/^s*update mkt.experimentos set documentacao/i.test(sql)) return { rows: [{ atualizado_em: new Date('2026-10-11T15:00:00Z') }] };
       return { rows: sql.includes('where id = $1') ? rows.filter((r) => r.id === params[0]) : rows };
     } } as never;
     const repo = new PgExperimentosRepo(db, () => new Date('2026-10-11T15:00:00Z'), async (_db, _hoje, _hora, produto, desde) => { lidos.push({ produto, desde }); return dados(); });
@@ -205,6 +258,25 @@ describe('Experimentos: repositório (banco simulado)', () => {
     expect(up.sql).toContain('desfecho');
     expect(up.params).toEqual(expect.arrayContaining(['concluido', 80, 1, 'atingiu']));
   });
+  it('ideia sem métrica não força leitura de dados e conclui sem fotografia', async () => {
+    const { repo, sqls, lidos } = montar([linha({ metrica: null, meta: null, inicio: null, fim: null, status: 'backlog' })]);
+    const l = await repo.listar();
+    expect(l.experimentos[0]!.progresso.estado).toBe('sem_metrica');
+    expect(lidos).toEqual([]);
+    await repo.atualizar(5, { status: 'concluido' });
+    expect(sqls.find((x) => /^update/i.test(x.sql))!.sql).not.toContain('valor_final');
+  });
+  it('relatório devolve a documentação salva; salvar grava só a documentação, parametrizada', async () => {
+    const { repo, sqls } = montar([linha({ documentacao: '<h1>x</h1>' })]);
+    const r = await repo.relatorio(5);
+    expect(r.relatorio.diario).toHaveLength(10);
+    expect(r.experimento.progresso.atual).toBe(80);
+    await repo.salvarDocumentacao(5, { html: "<p>o'brien</p>" });
+    const up = sqls.find((x) => /set documentacao/i.test(x.sql))!;
+    expect(up.sql).not.toContain('brien');
+    expect(up.params).toEqual(["<p>o'brien</p>", 5]);
+    await expect(repo.salvarDocumentacao(5, { html: '<script>x</script>' })).rejects.toThrow(PainelInvalido);
+  });
   it('edição simples não fotografa nada', async () => {
     const { repo, sqls } = montar([linha()]);
     await repo.atualizar(5, { titulo: 'Novo nome' });
@@ -216,7 +288,9 @@ describe('Experimentos: API do Studio e página', () => {
   let server: Server; let semRepo: Server; let base: string; let baseSem: string; let dir: string;
   const chamadas: string[] = [];
   const repo: ExperimentosRepo = {
-    async listar() { chamadas.push('listar'); return { hoje: '2026-10-11', metricas: METRICAS_EXP, canais: [] as never, experimentos: [], calibracao: [] }; },
+    async listar() { chamadas.push('listar'); return { hoje: '2026-10-11', metricas: METRICAS_EXP, canais: [] as never, tipos: [] as never, experimentos: [], calibracao: [] }; },
+    async relatorio(id) { chamadas.push(`relatorio:${id}`); return { id } as never; },
+    async salvarDocumentacao(id, b) { chamadas.push(`doc:${id}`); documentacaoValida(b); return { id, atualizadoEm: 'x' }; },
     async criar(b) { chamadas.push('criar'); validarEntrada(b, 'criar'); return { id: 1 } as never; },
     async atualizar(id, b) { chamadas.push(`atualizar:${id}`); validarEntrada(b, 'editar'); return { id } as never; },
   };
@@ -239,7 +313,12 @@ describe('Experimentos: API do Studio e página', () => {
     const ok = { titulo: 'T', produto: 'rh', metrica: 'cpl', meta: 50, inicio: '2026-10-01', fim: '2026-10-30' };
     expect((await fetch(`${base}/api/experimentos`, json('POST', ok))).status).toBe(201);
     expect((await fetch(`${base}/api/experimentos/7`, json('PUT', { titulo: 'Outro' }))).status).toBe(200);
-    expect(chamadas).toEqual(['listar', 'criar', 'atualizar:7']);
+    expect((await fetch(`${base}/api/experimentos/7/relatorio`)).status).toBe(200);
+    expect((await fetch(`${base}/api/experimentos/7/documentacao`, json('PUT', { html: '<p>ok</p>' }))).status).toBe(200);
+    expect((await fetch(`${base}/api/experimentos/7/documentacao`, json('PUT', { html: '<script>x</script>' }))).status).toBe(400);
+    expect((await fetch(`${base}/api/experimentos/7/relatorio`, json('PUT', {}))).status).toBe(405);
+    expect((await fetch(`${base}/api/experimentos/7/documentacao`)).status).toBe(405);
+    expect(chamadas).toEqual(['listar', 'criar', 'atualizar:7', 'relatorio:7', 'doc:7', 'doc:7']);
     expect((await fetch(`${base}/api/experimentos/7`, { method: 'DELETE', headers: { 'content-type': 'application/json' } })).status).toBe(405);
     expect((await fetch(`${base}/api/experimentos`, { method: 'DELETE', headers: { 'content-type': 'application/json' } })).status).toBe(405);
     expect((await fetch(`${base}/api/experimentos/abc`, json('PUT', {}))).status).toBe(404);
@@ -264,5 +343,13 @@ describe('Experimentos: API do Studio e página', () => {
     expect(js).toContain('/api/experimentos');
     expect(js).not.toMatch(/\b(select|insert into|delete from|drop table)\b[^`'"]*\bfrom\b/i);
     expect(readFileSync(new URL('../studio/public/nav.js', import.meta.url), 'utf8')).toContain("'/experimentos'");
+    // documentação: editor e relatório moram em módulo próprio, também sem SQL
+    const doc = readFileSync(new URL('../studio/public/experimentos-doc.js', import.meta.url), 'utf8');
+    expect(doc).toContain('/documentacao');
+    expect(doc).toContain('/relatorio');
+    expect(doc).toContain('window.print');
+    expect(doc).not.toMatch(/\b(select|insert into|delete from|drop table)\b[^`'"]*\bfrom\b/i);
+    expect(html).toContain('@media print');
+    expect(html).toContain('id="v-kanban"');
   });
 });

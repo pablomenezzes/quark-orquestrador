@@ -1,6 +1,7 @@
 /**
- * Experimentos de growth (pedido do Pablo, 2026-10-26): cadastro simples (hipótese, produto, canal, métrica, meta, período, orçamento e ICE) e
- * acompanhamento AUTOMÁTICO. O resultado, a linha de base, o gasto e o ritmo contra o previsto vêm das mesmas visões de analytics do Monitor
+ * Experimentos de growth (pedido do Pablo, 2026-10-26): cadastro, documentação e monitoramento num lugar só (substitui as planilhas "Growth e
+ * Experimentos"): ideia, hipótese, responsável, produto, canal, resultado esperado, métrica chave, meta, período, investimento, ICE, avaliação e
+ * aprendizado, em planilha ou kanban, mais a documentação editável com relatório diário, semanal e geral. O acompanhamento é AUTOMÁTICO. O resultado, a linha de base, o gasto e o ritmo contra o previsto vêm das mesmas visões de analytics do Monitor
  * (studio/lib/monitor.ts); nada é digitado depois do cadastro.
  *
  * Regras: dia fecha à meia-noite em America/Fortaleza; só dias COMPLETOS entram (até ontem). Linha de base automática = o mesmo número de dias
@@ -24,8 +25,19 @@ export const EXP_CANAIS = [
   { id: 'organico', nome: 'Orgânico', pago: false },
 ] as const;
 export type ExpCanal = (typeof EXP_CANAIS)[number]['id'];
-export const EXP_STATUS = ['planejado', 'rodando', 'concluido', 'cancelado'] as const;
+export const EXP_STATUS = ['backlog', 'planejado', 'rodando', 'bloqueado', 'concluido', 'cancelado'] as const;
 export type ExpStatus = (typeof EXP_STATUS)[number];
+export const EXP_TIPOS = [
+  { id: 'experimento', nome: 'Experimento' },
+  { id: 'ideia', nome: 'Ideia' },
+  { id: 'melhoria', nome: 'Melhoria implementada' },
+  { id: 'documentacao', nome: 'Documentação de processo' },
+] as const;
+export type ExpTipo = (typeof EXP_TIPOS)[number]['id'];
+export const EXP_AVALIACOES = ['sucesso', 'falha', 'inconclusivo'] as const;
+export type Avaliacao = (typeof EXP_AVALIACOES)[number];
+/** Tamanho máximo da documentação (HTML do editor), em caracteres. */
+export const DOC_MAX = 400_000;
 export type Desfecho = 'atingiu' | 'parcial' | 'nao_atingiu';
 
 export type FormatoMetrica = 'int' | 'brl' | 'brl2' | 'pct';
@@ -57,16 +69,21 @@ export const METRICAS_EXP: readonly MetricaExp[] = [
 const METRICA_POR_ID = new Map(METRICAS_EXP.map((m) => [m.id, m]));
 
 export interface Experimento {
-  id: number; titulo: string; hipotese: string | null; produto: ProdutoMonitor; canal: ExpCanal; metrica: string;
-  meta: number; linhaBase: number | null; orcamento: number | null; inicio: string; fim: string; status: ExpStatus;
+  id: number; titulo: string; tipo: ExpTipo; responsavel: string | null; areaImpacto: string | null; hipotese: string | null; resultadoEsperado: string | null;
+  produto: ProdutoMonitor; canal: ExpCanal;
+  /** Métrica chave (do catálogo) e a meta dela; nulas = sem acompanhamento automático. */
+  metrica: string | null; meta: number | null; linhaBase: number | null;
+  /** Investimento previsto (R$). O gasto real vem sozinho das visões do Monitor. */
+  investimento: number | null; inicio: string | null; fim: string | null; status: ExpStatus;
+  avaliacao: Avaliacao | null; evidencias: string | null; temDocumentacao: boolean;
   iceImpacto: number | null; iceConfianca: number | null; iceFacilidade: number | null; iceScore: number | null;
   valorFinal: number | null; atingimentoFinal: number | null; desfecho: Desfecho | null; aprendizado: string | null;
   criadoEm: string; atualizadoEm: string;
 }
 
-export type Estado = 'cancelado' | 'nao_iniciou' | 'cedo' | 'sem_dados' | 'atingida' | 'em_linha' | 'atencao' | 'fora';
+export type Estado = 'sem_metrica' | 'cancelado' | 'nao_iniciou' | 'cedo' | 'sem_dados' | 'atingida' | 'em_linha' | 'atencao' | 'fora';
 export const ESTADO_ROTULO: Record<Estado, string> = {
-  cancelado: 'Cancelado', nao_iniciou: 'Ainda não começou', cedo: 'Poucos dias de dados', sem_dados: 'Sem dados no período',
+  sem_metrica: 'Sem acompanhamento automático', cancelado: 'Cancelado', nao_iniciou: 'Ainda não começou', cedo: 'Poucos dias de dados', sem_dados: 'Sem dados no período',
   atingida: 'Meta atingida', em_linha: 'Em linha', atencao: 'Atenção', fora: 'Abaixo do previsto',
 };
 export interface PontoSerie { dia: string; real: number | null; esperado: number | null }
@@ -96,9 +113,10 @@ const dataValida = (v: unknown): v is string => typeof v === 'string' && DATA_RE
 const inv = (m: string) => new PainelInvalido(m);
 
 export interface ExperimentoEntrada {
-  titulo?: string; hipotese?: string | null; produto?: string; canal?: string; metrica?: string; meta?: number; linhaBase?: number | null;
-  orcamento?: number | null; inicio?: string; fim?: string; status?: string; iceImpacto?: number | null; iceConfianca?: number | null;
-  iceFacilidade?: number | null; aprendizado?: string | null;
+  titulo?: string; tipo?: string; responsavel?: string | null; areaImpacto?: string | null; hipotese?: string | null; resultadoEsperado?: string | null;
+  produto?: string; canal?: string; metrica?: string | null; meta?: number | null; linhaBase?: number | null; investimento?: number | null;
+  inicio?: string | null; fim?: string | null; status?: string; avaliacao?: string | null; evidencias?: string | null;
+  iceImpacto?: number | null; iceConfianca?: number | null; iceFacilidade?: number | null; aprendizado?: string | null;
 }
 const num = (v: unknown, nome: string): number => { if (typeof v !== 'number' || !isFinite(v)) throw inv(`${nome} deve ser um número`); return v; };
 const numOuNulo = (v: unknown, nome: string): number | null => (v == null ? null : num(v, nome));
@@ -107,34 +125,59 @@ const ice = (v: unknown, nome: string): number | null => {
   if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > 10) throw inv(`${nome} deve ser um número inteiro de 1 a 10`);
   return v;
 };
+const texto = (v: unknown, nome: string, max: number): string | null => {
+  if (v == null) return null;
+  if (typeof v !== 'string' || v.length > max) throw inv(`${nome} deve ter até ${max} caracteres`);
+  return v.trim() ? v.trim() : null;
+};
+const dataOuNula = (v: unknown, nome: string): string | null => {
+  if (v == null || v === '') return null;
+  if (!dataValida(v)) throw inv(`${nome} deve ser AAAA-MM-DD`);
+  return v;
+};
 
-/** Confere uma entrada (completa na criação, parcial na edição) e devolve só os campos válidos. `atual` completa as checagens cruzadas na edição. */
-export function validarEntrada(b: unknown, modo: 'criar' | 'editar', atual?: Pick<Experimento, 'produto' | 'canal' | 'metrica' | 'inicio' | 'fim'>): ExperimentoEntrada {
+type Atual = Pick<Experimento, 'produto' | 'canal' | 'metrica' | 'meta' | 'inicio' | 'fim'>;
+/** Confere uma entrada (só o título é obrigatório na criação) e devolve só os campos válidos. `atual` completa as checagens cruzadas na edição. */
+export function validarEntrada(b: unknown, modo: 'criar' | 'editar', atual?: Atual): ExperimentoEntrada {
   if (!b || typeof b !== 'object' || Array.isArray(b)) throw inv('corpo inválido');
   const e = b as Record<string, unknown>;
   const out: ExperimentoEntrada = {};
   const tem = (k: string) => k in e;
-  if (modo === 'criar') for (const k of ['titulo', 'produto', 'metrica', 'meta', 'inicio', 'fim']) if (!tem(k)) throw inv(`falta ${k}`);
+  if (modo === 'criar' && !tem('titulo')) throw inv('falta titulo');
   if (tem('titulo')) { if (typeof e.titulo !== 'string' || !e.titulo.trim() || e.titulo.trim().length > 160) throw inv('título deve ter de 1 a 160 caracteres'); out.titulo = e.titulo.trim(); }
-  if (tem('hipotese')) { if (e.hipotese != null && (typeof e.hipotese !== 'string' || e.hipotese.length > 2000)) throw inv('hipótese deve ter até 2000 caracteres'); out.hipotese = typeof e.hipotese === 'string' && e.hipotese.trim() ? e.hipotese.trim() : null; }
+  if (tem('tipo')) { if (!EXP_TIPOS.some((t) => t.id === e.tipo)) throw inv(`tipo inválido (${EXP_TIPOS.map((t) => t.id).join(', ')})`); out.tipo = e.tipo as string; }
+  if (tem('responsavel')) out.responsavel = texto(e.responsavel, 'responsável', 120);
+  if (tem('areaImpacto')) out.areaImpacto = texto(e.areaImpacto, 'área de impacto', 80);
+  if (tem('hipotese')) out.hipotese = texto(e.hipotese, 'hipótese', 2000);
+  if (tem('resultadoEsperado')) out.resultadoEsperado = texto(e.resultadoEsperado, 'resultado esperado', 2000);
   if (tem('produto')) { if (!(EXP_PRODUTOS as readonly unknown[]).includes(e.produto)) throw inv('produto deve ser rh ou clinic'); out.produto = e.produto as string; }
   if (tem('canal')) { if (!EXP_CANAIS.some((c) => c.id === e.canal)) throw inv(`canal inválido (${EXP_CANAIS.map((c) => c.id).join(', ')})`); out.canal = e.canal as string; }
-  if (tem('metrica')) { if (typeof e.metrica !== 'string' || !METRICA_POR_ID.has(e.metrica)) throw inv(`métrica inválida (${METRICAS_EXP.map((m) => m.id).join(', ')})`); out.metrica = e.metrica; }
-  if (tem('meta')) out.meta = num(e.meta, 'meta');
-  if (tem('linhaBase')) out.linhaBase = numOuNulo(e.linhaBase, 'linhaBase');
-  if (tem('orcamento')) { const o = numOuNulo(e.orcamento, 'orçamento'); if (o != null && o < 0) throw inv('orçamento não pode ser negativo'); out.orcamento = o; }
-  if (tem('inicio')) { if (!dataValida(e.inicio)) throw inv('início deve ser AAAA-MM-DD'); out.inicio = e.inicio; }
-  if (tem('fim')) { if (!dataValida(e.fim)) throw inv('fim deve ser AAAA-MM-DD'); out.fim = e.fim; }
+  if (tem('metrica')) {
+    if (e.metrica != null && (typeof e.metrica !== 'string' || !METRICA_POR_ID.has(e.metrica))) throw inv(`métrica inválida (${METRICAS_EXP.map((m) => m.id).join(', ')})`);
+    out.metrica = (e.metrica as string | null | undefined) ?? null;
+    if (out.metrica === null) { out.meta = null; out.linhaBase = null; } // sem métrica chave não há meta nem linha de base
+  }
+  if (tem('meta') && out.metrica !== null) out.meta = numOuNulo(e.meta, 'meta');
+  if (tem('linhaBase') && out.metrica !== null) out.linhaBase = numOuNulo(e.linhaBase, 'linhaBase');
+  if (tem('investimento')) { const o = numOuNulo(e.investimento, 'investimento'); if (o != null && o < 0) throw inv('investimento não pode ser negativo'); out.investimento = o; }
+  if (tem('inicio')) out.inicio = dataOuNula(e.inicio, 'início');
+  if (tem('fim')) out.fim = dataOuNula(e.fim, 'fim');
   if (tem('status')) { if (!(EXP_STATUS as readonly unknown[]).includes(e.status)) throw inv(`status inválido (${EXP_STATUS.join(', ')})`); out.status = e.status as string; }
+  if (tem('avaliacao')) { if (e.avaliacao != null && !(EXP_AVALIACOES as readonly unknown[]).includes(e.avaliacao)) throw inv(`avaliação inválida (${EXP_AVALIACOES.join(', ')})`); out.avaliacao = (e.avaliacao as string | null) ?? null; }
+  if (tem('evidencias')) out.evidencias = texto(e.evidencias, 'evidências', 4000);
   if (tem('iceImpacto')) out.iceImpacto = ice(e.iceImpacto, 'impacto');
   if (tem('iceConfianca')) out.iceConfianca = ice(e.iceConfianca, 'confiança');
   if (tem('iceFacilidade')) out.iceFacilidade = ice(e.iceFacilidade, 'facilidade');
-  if (tem('aprendizado')) { if (e.aprendizado != null && (typeof e.aprendizado !== 'string' || e.aprendizado.length > 4000)) throw inv('aprendizado deve ter até 4000 caracteres'); out.aprendizado = typeof e.aprendizado === 'string' && e.aprendizado.trim() ? e.aprendizado.trim() : null; }
+  if (tem('aprendizado')) out.aprendizado = texto(e.aprendizado, 'aprendizado', 4000);
 
-  const inicio = out.inicio ?? atual?.inicio, fim = out.fim ?? atual?.fim;
+  const inicio = out.inicio !== undefined ? out.inicio : atual?.inicio, fim = out.fim !== undefined ? out.fim : atual?.fim;
   if (inicio && fim && fim < inicio) throw inv('o fim não pode ser antes do início');
   const canal = (out.canal ?? atual?.canal ?? 'total') as ExpCanal;
-  const metrica = METRICA_POR_ID.get(out.metrica ?? atual?.metrica ?? '');
+  const idMetrica = out.metrica !== undefined ? out.metrica : (atual?.metrica ?? null);
+  const meta = out.meta !== undefined ? out.meta : (atual?.meta ?? null);
+  if (idMetrica && meta == null) throw inv('informe a meta da métrica chave');
+  if (!idMetrica && meta != null) throw inv('escolha a métrica chave da meta');
+  const metrica = idMetrica ? METRICA_POR_ID.get(idMetrica) : undefined;
   if (metrica?.precisaVerba && !EXP_CANAIS.find((c) => c.id === canal)!.pago) throw inv(`${metrica.rotulo} depende de investimento: Social e Orgânico não têm verba. Escolha outro canal ou outra métrica`);
   return out;
 }
@@ -157,7 +200,15 @@ export function valorMetrica(d: Pick<DadosMonitor, 'diario'>, canal: ExpCanal, m
 
 const janela = (de: string, ate: string): Janela => ({ de, ate, dias: diasEntre(de, ate) });
 
-export function calcularProgresso(e: Pick<Experimento, 'canal' | 'metrica' | 'meta' | 'linhaBase' | 'orcamento' | 'inicio' | 'fim' | 'status'>, d: Pick<DadosMonitor, 'diario'>, hoje: string): Progresso {
+export type EntradaProgresso = Pick<Experimento, 'canal' | 'metrica' | 'meta' | 'linhaBase' | 'investimento' | 'inicio' | 'fim' | 'status'>;
+/** Tem tudo o que o acompanhamento automático precisa: métrica chave do catálogo, meta e período. */
+export const acompanhavel = (e: Pick<Experimento, 'metrica' | 'meta' | 'inicio' | 'fim'>): boolean => !!e.metrica && METRICA_POR_ID.has(e.metrica) && e.meta != null && !!e.inicio && !!e.fim;
+
+export function calcularProgresso(exp: EntradaProgresso, d: Pick<DadosMonitor, 'diario'>, hoje: string): Progresso {
+  if (!acompanhavel(exp)) {
+    return { estado: exp.status === 'cancelado' ? 'cancelado' : 'sem_metrica', dadosAte: somaDias(hoje, -1), diasCompletos: 0, totalDias: 0, decorrido: 0, atual: null, esperado: null, linhaBase: exp.linhaBase, linhaBaseAuto: exp.linhaBase == null, atingimento: null, projecao: null, gasto: 0, usoOrcamento: null, orcamentoAdiantado: false, serie: [], trajetoria: null };
+  }
+  const e = exp as EntradaProgresso & { metrica: string; meta: number; inicio: string; fim: string };
   const met = METRICA_POR_ID.get(e.metrica);
   const totalDias = diasEntre(e.inicio, e.fim);
   const ontem = somaDias(hoje, -1);
@@ -181,7 +232,7 @@ export function calcularProgresso(e: Pick<Experimento, 'canal' | 'metrica' | 'me
   const atualJ = janela(e.inicio, dadosAte);
   const atual = valorMetrica(d, e.canal, e.metrica, atualJ);
   const gasto = metricasDe(d, e.canal as CanalId | 'total' | 'pagos', atualJ).invest;
-  const usoOrcamento = e.orcamento != null && e.orcamento > 0 ? gasto / e.orcamento : null;
+  const usoOrcamento = e.investimento != null && e.investimento > 0 ? gasto / e.investimento : null;
 
   const esperadoEm = (frac: number): number => (ehSoma ? e.meta * frac : trajetoria.v0 + (e.meta - trajetoria.v0) * frac);
   const esperado = esperadoEm(decorrido);
@@ -217,7 +268,7 @@ export interface Calibracao { metrica: string; total: number; atingiu: number; p
 export function calibracaoPor(exps: ReadonlyArray<Pick<Experimento, 'id' | 'metrica' | 'status' | 'desfecho' | 'iceConfianca'>>): Calibracao[] {
   const por = new Map<string, Calibracao & { soma: number; n: number }>();
   for (const e of exps) {
-    if (e.status !== 'concluido' || !e.desfecho) continue;
+    if (e.status !== 'concluido' || !e.desfecho || !e.metrica) continue;
     const c = por.get(e.metrica) ?? { metrica: e.metrica, total: 0, atingiu: 0, parcial: 0, confiancaMedia: null, soma: 0, n: 0 };
     c.total++;
     if (e.desfecho === 'atingiu') c.atingiu++;
@@ -228,40 +279,107 @@ export function calibracaoPor(exps: ReadonlyArray<Pick<Experimento, 'id' | 'metr
   return [...por.values()].map(({ soma, n, ...c }) => ({ ...c, confiancaMedia: n ? soma / n : null }));
 }
 
+/* ---------- relatório diário, semanal e geral (puro) ---------- */
+export interface LinhaRel {
+  rotulo: string; de: string; ate: string; dias: number;
+  leads: number; mql: number; reunioes: number; ganhos: number; mrr: number; invest: number; impressoes: number; cliques: number;
+  cpl: number | null;
+  /** Valor da métrica chave na janela (acumulado da janela, não do experimento). */
+  valor: number | null;
+}
+export interface Relatorio {
+  dadosAte: string;
+  /** Um dia por linha, do início até o último dia completo. */
+  diario: LinhaRel[];
+  /** Semanas de segunda a domingo, cortadas no início do experimento e no último dia completo. */
+  semanal: LinhaRel[];
+  /** O experimento inteiro até o último dia completo. */
+  geral: LinhaRel | null;
+  /** O mesmo número de dias imediatamente antes do início, para comparar. */
+  base: LinhaRel | null;
+}
+function linhaRel(d: Pick<DadosMonitor, 'diario'>, e: Pick<Experimento, 'canal' | 'metrica'>, j: Janela, rotulo: string): LinhaRel {
+  const m = metricasDe(d, e.canal as CanalId | 'total' | 'pagos', j);
+  return {
+    rotulo, de: j.de, ate: j.ate, dias: j.dias, leads: m.leads, mql: m.mql, reunioes: m.reunioes, ganhos: m.ganhos, mrr: m.mrr, invest: m.invest, impressoes: m.impressoes, cliques: m.cliques,
+    cpl: m.cpl, valor: e.metrica ? valorMetrica(d, e.canal, e.metrica, j) : null,
+  };
+}
+export function montarRelatorio(e: Pick<Experimento, 'canal' | 'metrica' | 'inicio' | 'fim'>, d: Pick<DadosMonitor, 'diario'>, hoje: string): Relatorio {
+  const ontem = somaDias(hoje, -1);
+  if (!e.inicio || !e.fim) return { dadosAte: ontem, diario: [], semanal: [], geral: null, base: null };
+  const dadosAte = e.fim < ontem ? e.fim : ontem;
+  if (dadosAte < e.inicio) return { dadosAte, diario: [], semanal: [], geral: null, base: null };
+  const diario: LinhaRel[] = [];
+  for (let dia = e.inicio; dia <= dadosAte; dia = somaDias(dia, 1)) diario.push(linhaRel(d, e, janela(dia, dia), dia));
+  const semanal: LinhaRel[] = [];
+  for (let ini = e.inicio, n = 1; ini <= dadosAte; n++) {
+    const domingo = somaDias(ini, 6 - ((new Date(`${ini}T00:00:00Z`).getUTCDay() + 6) % 7));
+    const fimSem = domingo < dadosAte ? domingo : dadosAte;
+    semanal.push(linhaRel(d, e, janela(ini, fimSem), `Semana ${n}`));
+    ini = somaDias(fimSem, 1);
+  }
+  const total = diasEntre(e.inicio, e.fim);
+  return {
+    dadosAte, diario, semanal,
+    geral: linhaRel(d, e, janela(e.inicio, dadosAte), 'Geral'),
+    base: linhaRel(d, e, janela(somaDias(e.inicio, -total), somaDias(e.inicio, -1)), 'Antes do teste'),
+  };
+}
+
 /* ---------- banco ---------- */
-const COLUNAS = `id, titulo, hipotese, produto, canal, metrica, meta::float8 as meta, linha_base::float8 as linha_base, orcamento::float8 as orcamento,
-  inicio::text as inicio, fim::text as fim, status, ice_impacto, ice_confianca, ice_facilidade, ice_score::float8 as ice_score,
+const COLUNAS = `id, titulo, tipo, responsavel, area_impacto, hipotese, resultado_esperado, produto, canal, metrica, meta::float8 as meta, linha_base::float8 as linha_base,
+  investimento::float8 as investimento, inicio::text as inicio, fim::text as fim, status, avaliacao, evidencias, documentacao is not null as tem_documentacao,
+  ice_impacto, ice_confianca, ice_facilidade, ice_score::float8 as ice_score,
   valor_final::float8 as valor_final, atingimento_final::float8 as atingimento_final, desfecho, aprendizado, criado_em, atualizado_em`;
 const nn = (v: unknown): number | null => (v == null ? null : Number(v));
+const ns = (v: unknown): string | null => (v == null ? null : String(v));
 const iso = (v: unknown): string => (v instanceof Date ? v.toISOString() : String(v));
 function deLinha(r: Record<string, unknown>): Experimento {
   return {
-    id: Number(r.id), titulo: String(r.titulo), hipotese: (r.hipotese as string | null) ?? null, produto: r.produto as ProdutoMonitor, canal: r.canal as ExpCanal, metrica: String(r.metrica),
-    meta: Number(r.meta), linhaBase: nn(r.linha_base), orcamento: nn(r.orcamento), inicio: String(r.inicio), fim: String(r.fim), status: r.status as ExpStatus,
+    id: Number(r.id), titulo: String(r.titulo), tipo: (r.tipo as ExpTipo) ?? 'experimento', responsavel: ns(r.responsavel), areaImpacto: ns(r.area_impacto),
+    hipotese: ns(r.hipotese), resultadoEsperado: ns(r.resultado_esperado), produto: r.produto as ProdutoMonitor, canal: r.canal as ExpCanal,
+    metrica: ns(r.metrica), meta: nn(r.meta), linhaBase: nn(r.linha_base), investimento: nn(r.investimento), inicio: ns(r.inicio), fim: ns(r.fim), status: r.status as ExpStatus,
+    avaliacao: (r.avaliacao as Avaliacao | null) ?? null, evidencias: ns(r.evidencias), temDocumentacao: r.tem_documentacao === true,
     iceImpacto: nn(r.ice_impacto), iceConfianca: nn(r.ice_confianca), iceFacilidade: nn(r.ice_facilidade), iceScore: nn(r.ice_score),
-    valorFinal: nn(r.valor_final), atingimentoFinal: nn(r.atingimento_final), desfecho: (r.desfecho as Desfecho | null) ?? null, aprendizado: (r.aprendizado as string | null) ?? null,
+    valorFinal: nn(r.valor_final), atingimentoFinal: nn(r.atingimento_final), desfecho: (r.desfecho as Desfecho | null) ?? null, aprendizado: ns(r.aprendizado),
     criadoEm: iso(r.criado_em), atualizadoEm: iso(r.atualizado_em),
   };
 }
 const CAMPO_SQL: Record<keyof ExperimentoEntrada, string> = {
-  titulo: 'titulo', hipotese: 'hipotese', produto: 'produto', canal: 'canal', metrica: 'metrica', meta: 'meta', linhaBase: 'linha_base', orcamento: 'orcamento',
-  inicio: 'inicio', fim: 'fim', status: 'status', iceImpacto: 'ice_impacto', iceConfianca: 'ice_confianca', iceFacilidade: 'ice_facilidade', aprendizado: 'aprendizado',
+  titulo: 'titulo', tipo: 'tipo', responsavel: 'responsavel', areaImpacto: 'area_impacto', hipotese: 'hipotese', resultadoEsperado: 'resultado_esperado',
+  produto: 'produto', canal: 'canal', metrica: 'metrica', meta: 'meta', linhaBase: 'linha_base', investimento: 'investimento', inicio: 'inicio', fim: 'fim',
+  status: 'status', avaliacao: 'avaliacao', evidencias: 'evidencias', iceImpacto: 'ice_impacto', iceConfianca: 'ice_confianca', iceFacilidade: 'ice_facilidade', aprendizado: 'aprendizado',
 };
 
 export interface ListaExperimentos {
   hoje: string;
   metricas: readonly MetricaExp[];
   canais: typeof EXP_CANAIS;
+  tipos: typeof EXP_TIPOS;
   experimentos: ExperimentoComProgresso[];
   calibracao: Calibracao[];
+}
+export interface RelatorioExperimento {
+  hoje: string;
+  metricas: readonly MetricaExp[];
+  canais: typeof EXP_CANAIS;
+  tipos: typeof EXP_TIPOS;
+  experimento: ExperimentoComProgresso;
+  relatorio: Relatorio;
+  /** HTML do editor, ou nulo se a documentação ainda não foi aberta. */
+  documentacao: string | null;
 }
 export interface ExperimentosRepo {
   listar(): Promise<ListaExperimentos>;
   criar(entrada: unknown): Promise<ExperimentoComProgresso>;
   atualizar(id: number, entrada: unknown): Promise<ExperimentoComProgresso>;
+  relatorio(id: number): Promise<RelatorioExperimento>;
+  salvarDocumentacao(id: number, corpo: unknown): Promise<{ id: number; atualizadoEm: string }>;
 }
 
 export type LeitorDados = (db: Db, hoje: string, hora: string, produto: ProdutoMonitor, desde: string) => Promise<DadosMonitor>;
+const SEM_DADOS = { diario: { google: new Map(), meta: new Map(), social: new Map(), organico: new Map() } } as Pick<DadosMonitor, 'diario'>;
 
 export class PgExperimentosRepo implements ExperimentosRepo {
   constructor(private readonly db: Db, private readonly agora: () => Date = () => new Date(), private readonly ler: LeitorDados = lerDadosMonitor) {}
@@ -269,18 +387,15 @@ export class PgExperimentosRepo implements ExperimentosRepo {
   private async dadosPor(exps: Experimento[], hoje: string, hora: string): Promise<Map<ProdutoMonitor, DadosMonitor>> {
     const out = new Map<ProdutoMonitor, DadosMonitor>();
     for (const produto of EXP_PRODUTOS) {
-      const meus = exps.filter((e) => e.produto === produto && e.status !== 'cancelado');
+      const meus = exps.filter((e) => e.produto === produto && e.status !== 'cancelado' && e.inicio && e.fim);
       if (!meus.length) continue;
-      const desde = meus.map((e) => somaDias(e.inicio, -diasEntre(e.inicio, e.fim))).sort()[0]!;
+      const desde = meus.map((e) => somaDias(e.inicio!, -diasEntre(e.inicio!, e.fim!))).sort()[0]!;
       out.set(produto, await this.ler(this.db, hoje, hora, produto, desde));
     }
     return out;
   }
   private comProgresso(exps: Experimento[], dados: Map<ProdutoMonitor, DadosMonitor>, hoje: string): ExperimentoComProgresso[] {
-    return exps.map((e) => {
-      const d = dados.get(e.produto);
-      return { ...e, progresso: d ? calcularProgresso(e, d, hoje) : calcularProgresso(e, { diario: { google: new Map(), meta: new Map(), social: new Map(), organico: new Map() } }, hoje) };
-    });
+    return exps.map((e) => ({ ...e, progresso: calcularProgresso(e, dados.get(e.produto) ?? SEM_DADOS, hoje) }));
   }
 
   async listar(): Promise<ListaExperimentos> {
@@ -288,7 +403,7 @@ export class PgExperimentosRepo implements ExperimentosRepo {
     const r = await this.db.query(`select ${COLUNAS} from mkt.experimentos order by (status = 'rodando') desc, ice_score desc nulls last, id desc`);
     const exps = r.rows.map(deLinha);
     const dados = await this.dadosPor(exps, hoje, hora);
-    return { hoje, metricas: METRICAS_EXP, canais: EXP_CANAIS, experimentos: this.comProgresso(exps, dados, hoje), calibracao: calibracaoPor(exps) };
+    return { hoje, metricas: METRICAS_EXP, canais: EXP_CANAIS, tipos: EXP_TIPOS, experimentos: this.comProgresso(exps, dados, hoje), calibracao: calibracaoPor(exps) };
   }
 
   private async um(id: number): Promise<Experimento> {
@@ -318,14 +433,47 @@ export class PgExperimentosRepo implements ExperimentosRepo {
     if (!campos.length) throw new PainelInvalido('nada para gravar');
     const params: unknown[] = campos.map((k) => v[k]);
     const sets = campos.map((k, i) => `${CAMPO_SQL[k]} = $${i + 1}`);
-    // ao concluir, o resultado é fotografado: deixa de variar com dados novos
+    // ao concluir, o resultado é fotografado: deixa de variar com dados novos (só se o experimento tem métrica chave, meta e período)
     if (v.status === 'concluido' && antes.status !== 'concluido') {
       const mesclado: Experimento = { ...antes, ...(v as Partial<Experimento>) };
-      const p = (await this.completo(mesclado)).progresso;
-      sets.push(`valor_final = $${params.push(p.atual)}`, `atingimento_final = $${params.push(p.atingimento)}`, `desfecho = $${params.push(desfechoDe(p.atingimento))}`);
+      if (acompanhavel(mesclado)) {
+        const p = (await this.completo(mesclado)).progresso;
+        sets.push(`valor_final = $${params.push(p.atual)}`, `atingimento_final = $${params.push(p.atingimento)}`, `desfecho = $${params.push(desfechoDe(p.atingimento))}`);
+      }
     }
     params.push(id);
     await this.db.query(`update mkt.experimentos set ${sets.join(', ')}, atualizado_em = now() where id = $${params.length}`, params);
     return this.completo(await this.um(id));
   }
+
+  async relatorio(id: number): Promise<RelatorioExperimento> {
+    const e = await this.um(id);
+    const { hoje, hora } = agoraLocal(this.agora());
+    const dados = e.inicio && e.fim ? await this.dadosPor([e], hoje, hora) : new Map<ProdutoMonitor, DadosMonitor>();
+    const d = dados.get(e.produto) ?? SEM_DADOS;
+    const doc = await this.db.query(`select documentacao from mkt.experimentos where id = $1`, [id]);
+    return {
+      hoje, metricas: METRICAS_EXP, canais: EXP_CANAIS, tipos: EXP_TIPOS,
+      experimento: { ...e, progresso: calcularProgresso(e, d, hoje) },
+      relatorio: montarRelatorio(e, d, hoje),
+      documentacao: ns(doc.rows[0]?.documentacao),
+    };
+  }
+
+  async salvarDocumentacao(id: number, corpo: unknown): Promise<{ id: number; atualizadoEm: string }> {
+    const html = documentacaoValida(corpo);
+    await this.um(id);
+    const r = await this.db.query(`update mkt.experimentos set documentacao = $1, atualizado_em = now() where id = $2 returning atualizado_em`, [html, id]);
+    return { id, atualizadoEm: iso(r.rows[0]?.atualizado_em) };
+  }
+}
+
+/** A documentação é o HTML do editor. Texto com limite; scripts, iframes e atributos de evento são recusados (o editor só gera formatação e SVG de gráficos). */
+export function documentacaoValida(b: unknown): string {
+  if (!b || typeof b !== 'object' || Array.isArray(b)) throw inv('corpo inválido');
+  const html = (b as Record<string, unknown>).html;
+  if (typeof html !== 'string') throw inv('html deve ser texto');
+  if (html.length > DOC_MAX) throw inv(`a documentação passou do limite de ${DOC_MAX} caracteres`);
+  if (/<\s*(script|iframe|object|embed|link|meta|base|form)\b/i.test(html) || /\son[a-z]+\s*=/i.test(html) || /javascript:/i.test(html)) throw inv('a documentação tem conteúdo não permitido (script, iframe ou atributo de evento)');
+  return html;
 }

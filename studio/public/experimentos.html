@@ -82,6 +82,116 @@
     details.defs { margin-top: 22px; font-size: 13px; color: var(--m-ink2); }
     details.defs summary { cursor: pointer; font-weight: 700; color: var(--m-ink); }
     details.defs li { margin: 4px 0; }
+
+    /* alternância Planilha / Kanban */
+    .vistas { display: inline-flex; border: 1px solid var(--m-line); border-radius: 8px; overflow: hidden; }
+    .vistas button { font: inherit; padding: 7px 14px; border: 0; background: var(--m-card); color: var(--m-ink); cursor: pointer; }
+    .vistas button + button { border-left: 1px solid var(--m-line); }
+    .vistas button[aria-pressed='true'] { background: var(--m-laranja); color: #212529; font-weight: 700; }
+    /* planilha */
+    .plan-wrap { overflow: auto; border: 1px solid var(--m-line); border-radius: 12px; background: var(--m-card); max-height: 74vh; }
+    table.plan { border-collapse: separate; border-spacing: 0; font-size: 13px; min-width: 2300px; width: 100%; }
+    table.plan th { position: sticky; top: 0; z-index: 2; background: var(--m-card); text-align: left; font-weight: 700; padding: 8px 6px; border-bottom: 2px solid var(--m-line); white-space: nowrap; }
+    table.plan td { padding: 3px 4px; border-bottom: 1px solid var(--m-line); vertical-align: middle; }
+    table.plan td.col-tit, table.plan th.col-tit { position: sticky; left: 0; z-index: 1; background: var(--m-card); min-width: 280px; box-shadow: 1px 0 0 var(--m-line); }
+    table.plan th.col-tit { z-index: 3; }
+    table.plan input, table.plan select { width: 100%; min-width: 0; padding: 4px 6px; border-radius: 6px; border: 1px solid transparent; background: transparent; font-size: 13px; }
+    table.plan input:hover, table.plan select:hover { border-color: var(--m-line); }
+    table.plan input:focus, table.plan select:focus { border-color: var(--m-azul); background: var(--m-card); }
+    table.plan td select { min-width: 128px; }
+    table.plan td input { min-width: 120px; }
+    table.plan td.num input { text-align: right; min-width: 96px; }
+    table.plan td.ice input { width: 52px; min-width: 52px; text-align: center; }
+    table.plan .pend { outline: 2px solid var(--m-laranja); outline-offset: -2px; border-radius: 6px; }
+    table.plan tr.rascunho td { background: var(--accent-soft); }
+    table.plan tr.cancelado td { opacity: .55; }
+    .linha-acoes { display: flex; gap: 6px; align-items: center; white-space: nowrap; }
+    .btn-mini { font: inherit; font-size: 12px; padding: 3px 9px; border: 1px solid var(--m-line); border-radius: 6px; background: var(--m-card); color: var(--m-ink); cursor: pointer; }
+    .btn-mini.doc-ok { border-color: var(--m-turquesa); }
+    .plan-rodape { padding: 8px 10px; }
+    /* kanban */
+    .kanban { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(270px, 1fr); gap: 12px; overflow-x: auto; padding-bottom: 8px; align-items: start; }
+    .col-k { background: var(--accent-soft); border-radius: 12px; padding: 10px; min-height: 160px; }
+    .col-k.alvo { outline: 2px dashed var(--m-laranja); }
+    .col-k h2 { font-size: 14px; margin: 0 0 8px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .col-k h2 .qtd { font-weight: 400; color: var(--m-ink2); font-size: 12.5px; }
+    .card-k { background: var(--m-card); border: 1px solid var(--m-line); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; cursor: grab; }
+    .card-k:hover { border-color: var(--m-azul); }
+    .card-k.arrastando { opacity: .45; }
+    .card-k h3 { font-size: 14px; margin: 0 0 6px; line-height: 1.3; }
+    .card-k .tags { margin: 4px 0; }
+    .card-k .mini { font-size: 12px; color: var(--m-ink2); margin: 4px 0 0; }
+    .card-k .barra .trilho { height: 5px; }
+    .novo-card { display: flex; gap: 6px; margin-top: 4px; }
+    .novo-card input { flex: 1; min-width: 0; }
+    .col-k .add { font: inherit; width: 100%; padding: 6px; border: 1px dashed var(--m-line); border-radius: 8px; background: transparent; color: var(--m-ink2); cursor: pointer; }
+    /* ficha (painel lateral) */
+    .gaveta { position: fixed; top: 0; right: 0; bottom: 0; width: min(780px, 100vw); background: var(--m-bg); border-left: 1px solid var(--m-line); box-shadow: -8px 0 24px rgba(0, 0, 0, .18); z-index: 40; overflow: auto; padding: 16px 18px 40px; }
+    .gaveta[hidden] { display: none; }
+    .gaveta .cartao { margin-bottom: 14px; }
+    .gaveta .form-ex .grade { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .gaveta .form-ex label.largo { grid-column: span 2; }
+    /* documentação: editor e relatório (papel branco em qualquer tema, para o PDF sair igual) */
+    #doc { position: fixed; inset: 0; z-index: 60; background: #eef0f2; display: flex; flex-direction: column; font-family: var(--font); color: #212529; }
+    #doc[hidden] { display: none; }
+    .doc-barra { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 16px; background: #ffffff; border-bottom: 1px solid #e6e7e8; color: #212529; }
+    .doc-barra .doc-tit { flex: 1 1 240px; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .doc-barra .dica { font-size: 12.5px; color: #55595e; }
+    .doc-acoes { display: flex; gap: 8px; flex-wrap: wrap; }
+    #doc .btn-s { background: #ffffff; color: #212529; border-color: #d4d6d8; }
+    .doc-ferr { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 16px; background: #ffffff; border-bottom: 1px solid #e6e7e8; align-items: center; }
+    .doc-ferr .ferr { font: inherit; font-size: 13px; padding: 4px 10px; border: 1px solid #d4d6d8; border-radius: 6px; background: #ffffff; color: #212529; cursor: pointer; min-width: 34px; }
+    .doc-ferr select { background: #ffffff; color: #212529; border-color: #d4d6d8; }
+    .doc-rolagem { flex: 1; overflow: auto; padding: 20px 12px 60px; }
+    .papel { background: #ffffff; color: #212529; max-width: 860px; margin: 0 auto; padding: 48px 56px; box-shadow: 0 2px 14px rgba(0, 0, 0, .14); border-radius: 4px; font-size: 14.5px; line-height: 1.55; outline: none; min-height: 90vh; }
+    .papel h1 { font-size: 28px; margin: 0 0 6px; letter-spacing: -.01em; }
+    .papel h2 { font-size: 20px; margin: 26px 0 8px; padding-bottom: 4px; border-bottom: 3px solid #EA8C0C; }
+    .papel h3 { font-size: 15.5px; margin: 16px 0 4px; }
+    .papel p { margin: 6px 0; }
+    .papel blockquote { margin: 10px 0; padding: 4px 14px; border-left: 4px solid #39B4B6; color: #55595e; }
+    .papel a { color: #006f99; }
+    .papel .meta-doc, .papel .nota { color: #55595e; font-size: 13px; }
+    .papel .rel-auto { margin: 10px 0 6px; padding: 2px 0; }
+    .papel .rel-auto h2 { margin-top: 18px; }
+    .papel .graf { margin: 6px 0 14px; }
+    .papel .leg { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: #55595e; margin: 2px 0 0; }
+    .papel .leg i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; }
+    .papel .kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 10px 0; }
+    .papel .kpi { border: 1px solid #e6e7e8; border-radius: 10px; padding: 10px 12px; break-inside: avoid; }
+    .papel .kpi span { display: block; font-size: 12px; color: #55595e; }
+    .papel .kpi b { display: block; font-size: 22px; margin: 2px 0; }
+    .papel .kpi small { font-size: 12px; color: #55595e; }
+    .papel .delta { font-weight: 700; margin-right: 4px; }
+    .papel .delta.bom { color: #2f7d1f; }
+    .papel .delta.ruim { color: #b3261e; }
+    .papel .estado { font-size: 12px; font-weight: 700; padding: 1px 9px; border-radius: 999px; background: #e6e7e8; color: #55595e; }
+    .papel .estado.atingida, .papel .estado.em_linha { background: rgba(66, 165, 43, .14); color: #2f7d1f; }
+    .papel .estado.atencao { background: rgba(234, 140, 12, .2); color: #212529; }
+    .papel .estado.fora { background: rgba(179, 38, 30, .12); color: #b3261e; }
+    .papel .comps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .papel .comp { border: 1px solid #e6e7e8; border-radius: 10px; padding: 10px 12px; break-inside: avoid; }
+    .papel .comp > span { font-weight: 700; font-size: 13px; }
+    .papel .comp .lin { display: grid; grid-template-columns: 54px 1fr auto; gap: 8px; align-items: center; margin: 5px 0; font-size: 12.5px; }
+    .papel .comp .lin em { font-style: normal; color: #55595e; }
+    .papel .comp .trilho { height: 9px; border-radius: 4px; background: #eef0f2; overflow: hidden; }
+    .papel .comp .trilho div { height: 100%; border-radius: 4px; }
+    .papel table.rel-tab { border-collapse: collapse; width: 100%; font-size: 12.5px; margin: 8px 0 14px; }
+    .papel table.rel-tab th, .papel table.rel-tab td { border-bottom: 1px solid #e6e7e8; padding: 4px 8px; text-align: left; }
+    .papel table.rel-tab th { background: #f6f7f8; }
+    .papel table.rel-tab td.n { text-align: right; font-variant-numeric: tabular-nums; }
+    @media print {
+      @page { size: A4; margin: 14mm 12mm; }
+      body.doc-aberto > *:not(#doc) { display: none !important; }
+      body.doc-aberto { background: #ffffff !important; }
+      #doc { position: static; display: block; background: #ffffff; }
+      .doc-barra, .doc-ferr { display: none !important; }
+      .doc-rolagem { overflow: visible; padding: 0; }
+      .papel { box-shadow: none; max-width: none; padding: 0; min-height: 0; font-size: 12pt; }
+      .papel * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .papel h1, .papel h2, .papel h3 { break-after: avoid; }
+      .papel .graf, .papel .kpi, .papel .comp, .papel tr { break-inside: avoid; }
+    }
+    @media (max-width: 980px) { .gaveta .form-ex .grade { grid-template-columns: repeat(2, minmax(0, 1fr)); } .papel { padding: 28px 20px; } .papel .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .papel .comps { grid-template-columns: 1fr; } }
     @media (max-width: 980px) { .lista-ex { grid-template-columns: 1fr; } .form-ex .grade { grid-template-columns: repeat(2, minmax(0, 1fr)); } .nums { grid-template-columns: repeat(2, minmax(0, 1fr)); } .etiquetas { margin-left: 0; } .cab h1 { font-size: 22px; } }
   </style>
 </head>
@@ -97,33 +207,42 @@
     <p class="veredito" id="veredito"><span class="esq">Carregando os experimentos…</span></p>
     <div class="barra-ctl">
       <button id="novo" class="btn-p" type="button">Novo experimento</button>
+      <span class="vistas" role="group" aria-label="Modo de visualização"><button type="button" id="v-planilha" aria-pressed="true">Planilha</button><button type="button" id="v-kanban" aria-pressed="false">Kanban</button></span>
       <label>Mostrar <select id="filtro">
-        <option value="ativos">Planejados e rodando</option>
+        <option value="ativos">Todos, menos cancelados</option>
         <option value="rodando">Só rodando</option>
+        <option value="backlog">Backlog e planejados</option>
         <option value="concluido">Concluídos</option>
         <option value="cancelado">Cancelados</option>
         <option value="todos">Todos</option>
       </select></label>
+      <label>Tipo <select id="f-tipo-lista"><option value="">Todos</option></select></label>
+      <label>Produto <select id="f-prod-lista"><option value="">Todos</option><option value="rh">QuarkRH</option><option value="clinic">QuarkClinic</option></select></label>
+      <input id="busca" type="search" placeholder="Buscar por título, responsável ou área" aria-label="Buscar experimentos" style="min-width:240px">
       <button id="atualizar" class="btn-s" type="button">Atualizar agora</button>
     </div>
     <div id="aviso"></div>
-    <section id="formulario" class="cartao form-ex" hidden></section>
-    <section id="lista" class="lista-ex" aria-live="polite"></section>
+    <section id="lista" aria-live="polite"></section>
     <details class="defs">
       <summary>Como o acompanhamento funciona</summary>
       <ul>
-        <li><b>Você cadastra uma vez:</b> hipótese, produto, canal, a métrica foco, a meta, o período, o orçamento e o ICE. Depois disso nada é digitado: o resultado, o gasto e a linha de base vêm sozinhos das mesmas visões do Monitor.</li>
+        <li><b>Um lugar só:</b> esta página substitui as planilhas "Growth e Experimentos" (formulário e lista de 2025). Ideias, experimentos, melhorias implementadas e documentações de processo ficam na mesma lista, em <b>Planilha</b> (edite direto nas células e use "Nova linha") ou <b>Kanban</b> (arraste o card entre as colunas ou use "+ Novo card").</li>
+        <li><b>Você cadastra uma vez:</b> título, hipótese, responsável, produto, canal, <b>resultado esperado</b>, <b>métrica chave</b> com a meta, período, <b>investimento</b> previsto e ICE. Só o título é obrigatório; ideias soltas ficam sem métrica e sem acompanhamento automático. Com métrica, meta e período, o resultado, o gasto e a linha de base vêm sozinhos das mesmas visões do Monitor.</li>
+        <li><b>Documentação:</b> o botão "Documentação" abre um editor de texto com o relatório do experimento (resumo, visão geral antes e durante, visão diária e visão semanal, com gráficos). O texto é seu e fica salvo; "Atualizar dados do relatório" refaz só os gráficos e tabelas. "Exportar PDF" abre a impressão do navegador: escolha "Salvar como PDF".</li>
         <li><b>Só dias completos:</b> o dia vira à meia-noite em America/Fortaleza e o dia de hoje fica de fora até fechar. O Google Ads chega com cerca de 1 dia de atraso.</li>
         <li><b>Métricas de contagem</b> (leads, MQL, reuniões, ganhos, MRR): a meta é o <b>total do período</b> e o ritmo previsto é linear. <b>Métricas de custo e taxa</b> (CPL, CAC, CTR, % MQL...): a meta é o <b>valor a atingir</b> e a trajetória prevista vai da linha de base até a meta.</li>
         <li><b>Linha de base:</b> o mesmo número de dias imediatamente antes do início, calculado sozinho. Você pode combinar outro valor na edição.</li>
         <li><b>Ritmo:</b> "Em linha" se estiver até 5 pontos percentuais atrás do prazo, "Atenção" até 20 e "Abaixo do previsto" além disso. Com menos de 3 dias de dados aparece "Poucos dias de dados": cedo para concluir qualquer coisa.</li>
-        <li><b>Orçamento:</b> o gasto é o investimento do canal escolhido no período (Meta Ads e Google Ads). Aparece "gasto adiantado" se o orçamento anda mais de 15 pontos percentuais à frente do prazo.</li>
+        <li><b>Investimento:</b> o previsto é o que você cadastra; o gasto real é o investimento do canal escolhido no período (Meta Ads e Google Ads). Aparece "gasto adiantado" se o gasto anda mais de 15 pontos percentuais à frente do prazo.</li>
         <li><b>Concluir:</b> ao mudar o status para Concluído, o resultado é gravado e não muda mais; o desfecho é "Atingiu" (meta batida), "Parcial" (70% ou mais do caminho) ou "Não atingiu". O histórico dos concluídos com a mesma métrica aparece ao lado da confiança do ICE.</li>
         <li><b>Leitura com cautela:</b> o resultado mostra coincidência no tempo, não causa. Os leads mais recentes ainda amadurecem (a mediana do lead ao ganho no QuarkRH é de 17 dias), então ganhos e MRR do começo do teste ainda vão crescer. Mudanças de orçamento, público e fila de SDRs acontecem ao mesmo tempo que o teste.</li>
         <li><b>Sem DELETE:</b> remover é cancelar. O experimento cancelado some da lista padrão e pode ser consultado em "Cancelados".</li>
+        <li><b>Avaliação:</b> é o veredito de quem conduziu (Sucesso, Falha ou Inconclusivo), como na planilha antiga. O "desfecho" é o calculado pela meta e só existe para quem tem métrica chave.</li>
       </ul>
     </details>
   </main>
+  <aside id="ficha" class="gaveta" hidden aria-label="Ficha do experimento"></aside>
+  <div id="doc" hidden role="dialog" aria-modal="true" aria-label="Documentação do experimento"></div>
   <script src="/s/nav.js"></script>
   <script type="module" src="/s/experimentos.js"></script>
 </body>

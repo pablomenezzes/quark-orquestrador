@@ -153,6 +153,12 @@ export function createStudioServer(opts: StudioOptions): Server {
         if (method === 'POST') return send(res, 201, await repo.criar(await readJson(req)));
         return send(res, 405, { error: 'method_not_allowed' });
       }
+      // Documentação: relatório (diário, semanal e geral) + o HTML do editor, gravado à parte para a lista não carregar texto grande.
+      const sub = /^\/api\/experimentos\/(\d{1,15})\/(relatorio|documentacao)$/.exec(path);
+      if (sub) {
+        if (sub[2] === 'relatorio') return method === 'GET' ? send(res, 200, await repo.relatorio(Number(sub[1]))) : send(res, 405, { error: 'method_not_allowed' });
+        return method === 'PUT' ? send(res, 200, await repo.salvarDocumentacao(Number(sub[1]), await readJson(req))) : send(res, 405, { error: 'method_not_allowed' });
+      }
       const eid = /^\/api\/experimentos\/(\d{1,15})$/.exec(path);
       if (!eid) return send(res, 404, { error: 'not_found' });
       if (method !== 'PUT') return send(res, 405, { error: 'method_not_allowed' });
