@@ -11,7 +11,7 @@
  */
 import type pg from 'pg';
 import { PainelInvalido, PainelNotFound } from './painel-repo.js';
-import { campanhaTexto, lerDadosEscopo, listarOpcoes, normalizarCampanhas, normalizarPagina, temCampanha, temEscopo, type CampanhaEscopo, type Escopo, type LeitorEscopo, type OpcoesEscopo } from './experimentos-escopo.js';
+import { ESCOPO_MODOS, campanhaTexto, lerDadosEscopo, lerDetalheEscopo, listarOpcoes, normalizarCampanhas, normalizarPagina, temCampanha, temEscopo, type CampanhaEscopo, type Detalhe, type EscopoModo, type Escopo, type LeitorDetalhe, type LeitorEscopo, type OpcoesEscopo } from './experimentos-escopo.js';
 import { agoraLocal, lerDadosMonitor, metricasDe, somaDias, type CanalId, type DadosMonitor, type Janela, type ProdutoMonitor } from './monitor.js';
 
 type Db = Pick<pg.Pool, 'query'>;
@@ -78,7 +78,7 @@ export interface Experimento {
   investimento: number | null; inicio: string | null; fim: string | null; status: ExpStatus;
   avaliacao: Avaliacao | null; evidencias: string | null; temDocumentacao: boolean;
   /** Escopo opcional: página de destino (GA4), campanha da Meta e identificador de conversão do Pipedrive. */
-  paginaHost: string | null; paginaCaminho: string | null; campanhas: CampanhaEscopo[]; identificadorConversao: string | null;
+  paginaHost: string | null; paginaCaminho: string | null; campanhas: CampanhaEscopo[]; identificadorConversao: string | null; escopoModo: EscopoModo;
   iceImpacto: number | null; iceConfianca: number | null; iceFacilidade: number | null; iceScore: number | null;
   valorFinal: number | null; atingimentoFinal: number | null; desfecho: Desfecho | null; aprendizado: string | null;
   criadoEm: string; atualizadoEm: string;
@@ -120,7 +120,7 @@ export interface ExperimentoEntrada {
   produto?: string; canal?: string; metrica?: string | null; meta?: number | null; linhaBase?: number | null; investimento?: number | null;
   inicio?: string | null; fim?: string | null; status?: string; avaliacao?: string | null; evidencias?: string | null;
   iceImpacto?: number | null; iceConfianca?: number | null; iceFacilidade?: number | null; aprendizado?: string | null;
-  paginaHost?: string | null; paginaCaminho?: string | null; campanhas?: CampanhaEscopo[]; identificadorConversao?: string | null;
+  paginaHost?: string | null; paginaCaminho?: string | null; campanhas?: CampanhaEscopo[]; identificadorConversao?: string | null; escopoModo?: EscopoModo;
 }
 const num = (v: unknown, nome: string): number => { if (typeof v !== 'number' || !isFinite(v)) throw inv(`${nome} deve ser um número`); return v; };
 const numOuNulo = (v: unknown, nome: string): number | null => (v == null ? null : num(v, nome));
@@ -184,6 +184,7 @@ export function validarEntrada(b: unknown, modo: 'criar' | 'editar', atual?: Atu
     if (e.campanhas != null && (!Array.isArray(e.campanhas) || e.campanhas.length > 60 || e.campanhas.some((t) => typeof t !== 'string' || t.length > 200))) throw inv('campanhas deve ser uma lista de até 40 textos');
     out.campanhas = normalizarCampanhas((e.campanhas as string[] | null) ?? []);
   }
+  if (tem('escopoModo')) { if (!(ESCOPO_MODOS as readonly unknown[]).includes(e.escopoModo)) throw inv(`escopoModo inválido (${ESCOPO_MODOS.join(', ')})`); out.escopoModo = e.escopoModo as EscopoModo; }
   if (tem('identificadorConversao')) out.identificadorConversao = texto(e.identificadorConversao, 'identificador de conversão', 200);
 
   const inicio = out.inicio !== undefined ? out.inicio : atual?.inicio, fim = out.fim !== undefined ? out.fim : atual?.fim;
@@ -355,7 +356,7 @@ export function montarRelatorio(e: Pick<Experimento, 'canal' | 'metrica' | 'inic
 /* ---------- banco ---------- */
 const COLUNAS = `id, titulo, tipo, responsavel, area_impacto, hipotese, resultado_esperado, produto, canal, metrica, meta::float8 as meta, linha_base::float8 as linha_base,
   investimento::float8 as investimento, inicio::text as inicio, fim::text as fim, status, avaliacao, evidencias, documentacao is not null as tem_documentacao,
-  pagina_host, pagina_caminho, campanhas, campanha_id::text as campanha_id, campanha_nome, identificador_conversao,
+  pagina_host, pagina_caminho, campanhas, campanha_id::text as campanha_id, campanha_nome, identificador_conversao, escopo_modo,
   ice_impacto, ice_confianca, ice_facilidade, ice_score::float8 as ice_score,
   valor_final::float8 as valor_final, atingimento_final::float8 as atingimento_final, desfecho, aprendizado, criado_em, atualizado_em`;
 const nn = (v: unknown): number | null => (v == null ? null : Number(v));
@@ -372,7 +373,7 @@ function deLinha(r: Record<string, unknown>): Experimento {
     hipotese: ns(r.hipotese), resultadoEsperado: ns(r.resultado_esperado), produto: r.produto as ProdutoMonitor, canal: r.canal as ExpCanal,
     metrica: ns(r.metrica), meta: nn(r.meta), linhaBase: nn(r.linha_base), investimento: nn(r.investimento), inicio: ns(r.inicio), fim: ns(r.fim), status: r.status as ExpStatus,
     avaliacao: (r.avaliacao as Avaliacao | null) ?? null, evidencias: ns(r.evidencias), temDocumentacao: r.tem_documentacao === true,
-    paginaHost: ns(r.pagina_host), paginaCaminho: ns(r.pagina_caminho), campanhas: campanhasDe(r), identificadorConversao: ns(r.identificador_conversao),
+    paginaHost: ns(r.pagina_host), paginaCaminho: ns(r.pagina_caminho), campanhas: campanhasDe(r), identificadorConversao: ns(r.identificador_conversao), escopoModo: ((ESCOPO_MODOS as readonly unknown[]).includes(r.escopo_modo) ? r.escopo_modo : 'todos') as EscopoModo,
     iceImpacto: nn(r.ice_impacto), iceConfianca: nn(r.ice_confianca), iceFacilidade: nn(r.ice_facilidade), iceScore: nn(r.ice_score),
     valorFinal: nn(r.valor_final), atingimentoFinal: nn(r.atingimento_final), desfecho: (r.desfecho as Desfecho | null) ?? null, aprendizado: ns(r.aprendizado),
     criadoEm: iso(r.criado_em), atualizadoEm: iso(r.atualizado_em),
@@ -382,7 +383,7 @@ const CAMPO_SQL: Record<keyof ExperimentoEntrada, string> = {
   titulo: 'titulo', tipo: 'tipo', responsavel: 'responsavel', areaImpacto: 'area_impacto', hipotese: 'hipotese', resultadoEsperado: 'resultado_esperado',
   produto: 'produto', canal: 'canal', metrica: 'metrica', meta: 'meta', linhaBase: 'linha_base', investimento: 'investimento', inicio: 'inicio', fim: 'fim',
   status: 'status', avaliacao: 'avaliacao', evidencias: 'evidencias', iceImpacto: 'ice_impacto', iceConfianca: 'ice_confianca', iceFacilidade: 'ice_facilidade', aprendizado: 'aprendizado',
-  paginaHost: 'pagina_host', paginaCaminho: 'pagina_caminho', campanhas: 'campanhas', identificadorConversao: 'identificador_conversao',
+  paginaHost: 'pagina_host', paginaCaminho: 'pagina_caminho', campanhas: 'campanhas', identificadorConversao: 'identificador_conversao', escopoModo: 'escopo_modo',
 };
 
 /** A lista de campanhas vai como JSON (o pg mandaria um array do Postgres, não jsonb). */
@@ -403,6 +404,8 @@ export interface RelatorioExperimento {
   tipos: typeof EXP_TIPOS;
   experimento: ExperimentoComProgresso;
   relatorio: Relatorio;
+  /** Funil, perfil, perdas, safra, criativos e conferência dos negócios do escopo; nulo sem escopo ou sem período. */
+  detalhe: Detalhe | null;
   /** HTML do editor, ou nulo se a documentação ainda não foi aberta. */
   documentacao: string | null;
 }
@@ -419,12 +422,12 @@ export interface ExperimentosRepo {
 export type LeitorDados = (db: Db, hoje: string, hora: string, produto: ProdutoMonitor, desde: string) => Promise<DadosMonitor>;
 /** Com escopo (página, campanha ou identificador), os dados da fatia ficam na chave `meta` (ver experimentos-escopo.ts). */
 const efetivo = <T extends Pick<Experimento, 'canal'> & Partial<Escopo>>(e: T): T => (temEscopo(e) ? { ...e, canal: 'meta' } : e);
-export const rotuloEscopo = (e: Pick<Experimento, 'paginaHost' | 'paginaCaminho' | 'campanhas' | 'identificadorConversao'>): string[] =>
+export const rotuloEscopo = (e: Pick<Experimento, 'paginaHost' | 'paginaCaminho' | 'campanhas' | 'identificadorConversao'> & Partial<Pick<Experimento, 'escopoModo'>>): string[] =>
   [e.paginaCaminho ? `Página ${e.paginaHost ?? ''}${e.paginaCaminho}` : '', e.campanhas.length ? `${e.campanhas.length === 1 ? 'Campanha' : 'Campanhas (somadas)'} ${e.campanhas.map(campanhaTexto).join(', ')}` : '', e.identificadorConversao ? `Identificador ${e.identificadorConversao}` : ''].filter(Boolean);
 const SEM_DADOS = { diario: { google: new Map(), meta: new Map(), social: new Map(), organico: new Map() } } as Pick<DadosMonitor, 'diario'>;
 
 export class PgExperimentosRepo implements ExperimentosRepo {
-  constructor(private readonly db: Db, private readonly agora: () => Date = () => new Date(), private readonly ler: LeitorDados = lerDadosMonitor, private readonly lerEscopo: LeitorEscopo = lerDadosEscopo) {}
+  constructor(private readonly db: Db, private readonly agora: () => Date = () => new Date(), private readonly ler: LeitorDados = lerDadosMonitor, private readonly lerEscopo: LeitorEscopo = lerDadosEscopo, private readonly lerDetalhe: LeitorDetalhe = lerDetalheEscopo) {}
 
   /** Dados por experimento: os sem escopo leem o Monitor uma vez por produto; os com escopo leem só a fatia deles. */
   private async dadosPor(exps: Experimento[], hoje: string, hora: string): Promise<Map<number, Pick<DadosMonitor, 'diario'>>> {
@@ -501,6 +504,7 @@ export class PgExperimentosRepo implements ExperimentosRepo {
       hoje, metricas: METRICAS_EXP, canais: EXP_CANAIS, tipos: EXP_TIPOS,
       experimento: { ...e, progresso: calcularProgresso(efetivo(e), d, hoje) },
       relatorio: montarRelatorio(efetivo(e), d, hoje),
+      detalhe: temEscopo(e) && e.inicio && e.fim && e.inicio <= somaDias(hoje, -1) ? await this.lerDetalhe(this.db, e, e.inicio, e.fim < somaDias(hoje, -1) ? e.fim : somaDias(hoje, -1)) : null,
       documentacao: ns(doc.rows[0]?.documentacao),
     };
   }

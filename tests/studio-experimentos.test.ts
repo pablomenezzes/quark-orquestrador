@@ -7,7 +7,7 @@ import type { Server } from 'node:http';
 import { createStudioServer } from '../studio/server';
 import { PainelInvalido, PainelNotFound } from '../studio/lib/painel-repo';
 import { somaDias, ZERO, type CanalId, type DadosMonitor, type Soma } from '../studio/lib/monitor';
-import { lerDadosEscopo, normalizarCampanha, normalizarCampanhas, normalizarPagina } from '../studio/lib/experimentos-escopo';
+import { lerDadosEscopo, lerDetalheEscopo, normalizarCampanha, normalizarCampanhas, normalizarPagina } from '../studio/lib/experimentos-escopo';
 import { acompanhavel, calcularProgresso, calibracaoPor, desfechoDe, documentacaoValida, METRICAS_EXP, montarRelatorio, PgExperimentosRepo, rotuloEscopo, validarEntrada, valorMetrica, type Experimento, type ExperimentosRepo } from '../studio/lib/experimentos';
 
 const soma = (o: Partial<Soma>): Soma => ({ ...ZERO, ...o });
@@ -270,6 +270,73 @@ describe('Experimentos: escopo (página de destino, campanha e identificador de 
     expect(gasto.sql).toContain('(campanha_id = any($2::bigint[]) or lower(campanha) = any($3::text[]))');
     expect(d.diario.meta.get('2026-10-02')).toMatchObject({ invest: 250, impressoes: 9000, cliques: 150 }); // o gasto das campanhas vem somado
   });
+  it('modos de combinação: todos (E), qualquer (OU) e campanha só para o investimento', async () => {
+    const rodar = async (modo: 'todos' | 'qualquer' | 'campanha_so_investimento') => {
+      const sqls: Array<{ sql: string; params: unknown[] }> = [];
+      const db = { query: async (sql: string, params: unknown[] = []) => { sqls.push({ sql: sql.replace(/\s+/g, ' '), params }); return { rows: [] }; } } as never;
+      await lerDadosEscopo(db, { ...esc, escopoModo: modo, campanhas: [{ id: '120219876543210987', nome: null }], identificadorConversao: 'diag', paginaCaminho: '/diagnostico' }, '10:00', '2026-09-01');
+      return { negocios: sqls[0]!, gasto: sqls.find((x) => x.sql.includes('meta_desempenho_dia'))! };
+    };
+    const e = await rodar('todos');
+    expect(e.negocios.sql).toContain(') and d.deal_id in (select deal_id from analytics.conversoes_pipe_negocios');
+    expect(e.negocios.sql).toContain(') and d.deal_id in (select deal_id from analytics.negocios_url');
+    expect(e.negocios.sql).not.toContain(' or d.deal_id in');
+    const ou = await rodar('qualquer');
+    expect(ou.negocios.sql).toContain(') or d.deal_id in (select deal_id from analytics.conversoes_pipe_negocios');
+    expect(ou.negocios.sql).not.toContain(') and d.deal_id in');
+    const so = await rodar('campanha_so_investimento');
+    expect(so.negocios.sql).not.toContain('negocios_meta'); // a campanha não filtra negócios
+    expect(so.negocios.params).toEqual(['2026-09-01', 'rh', 'diag', '/diagnostico']);
+    expect(so.gasto.sql).toContain('meta_desempenho_dia'); // mas o investimento continua sendo o dela
+    expect(so.gasto.params).toEqual(['2026-09-01', ['120219876543210987']]);
+    // sem página nem identificador, a campanha volta a filtrar os negócios
+    const sqls: string[] = [];
+    await lerDadosEscopo({ query: async (sql: string) => { sqls.push(sql); return { rows: [] }; } } as never, { ...esc, escopoModo: 'campanha_so_investimento', campanhas: [{ id: '120219876543210987', nome: null }] }, '10:00', '2026-09-01');
+    expect(sqls[0]).toContain('negocios_meta');
+  });
+  it('o cadastro valida o modo do escopo', () => {
+    expect(validarEntrada({ titulo: 'x', escopoModo: 'campanha_so_investimento' }, 'criar').escopoModo).toBe('campanha_so_investimento');
+    expect(() => validarEntrada({ titulo: 'x', escopoModo: 'outro' }, 'criar')).toThrow(/escopoModo inválido/);
+  });
+  it('detalhe dos negócios: lê funil, perfil, perdas, safra, criativos e conferência só das visões de analytics, com SQL parametrizado', async () => {
+    const sqls: Array<{ sql: string; params: unknown[] }> = [];
+    const db = { query: async (sql: string, params: unknown[] = []) => {
+      sqls.push({ sql: sql.replace(/\s+/g, ' '), params });
+      if (/count\(\*\)::int as n \$|^select count\(\*\)::int as n from/i.test(sql.trim())) return { rows: [{ n: 42 }] };
+      if (/to_char\(date_trunc\('week'/.test(sql)) return { rows: [{ k: '2026-10-05', n: 10, abertos: 2, ganhos: 3, perdidos: 5 }] };
+      if (/d\.faixa_colab as k/.test(sql)) return { rows: [{ k: '25 - 100', n: 7, abertos: 1, ganhos: 1, perdidos: 5 }] };
+      if (/d\.faixa_saude as k/.test(sql)) return { rows: [{ k: null, n: 3, abertos: 0, ganhos: 0, perdidos: 3 }] };
+      if (/Cargo \(Negócio\)/.test(sql)) return { rows: [{ k: 'Analista de RH', n: 5, abertos: 0, ganhos: 1, perdidos: 4 }] };
+      if (/as funil/.test(sql)) return { rows: [{ funil: 'QuarkRH', k: 'Conexão [Prospect]', n: 6, abertos: 1, ganhos: 0, perdidos: 5 }] };
+      if (/motivo_perda as k/.test(sql)) return { rows: [{ k: 'Sem Contato Estabelecido', n: 4 }] };
+      if (/meta_desempenho_dia/.test(sql)) return { rows: [{ anuncio: 'Criativo A', gasto: 100, impressoes: 1000, cliques: 20, leads_meta: 5 }] };
+      if (/negocios_meta m join analytics\.negocios_bi/.test(sql)) return { rows: [{ anuncio: 'Criativo A', n: 2, ganhos: 1 }] };
+      if (/count\(\*\) filter \(where d\.conta_como_lead\)/.test(sql)) return { rows: [{ n: 12, abertos: 3, ganhos: 2, perdidos: 7, leads: 11 }] };
+      if (/m\.metodo/.test(sql)) return { rows: [{ k: 'sem_ligacao', n: 9 }] };
+      if (/d\.deal_id::text as id/.test(sql)) return { rows: [{ id: '777', titulo: 'Lead A', etapa: 'Agendado', status: 'open', criado: '2026-10-07' }] };
+      return { rows: [] };
+    } } as never;
+    const d = await lerDetalheEscopo(db, { ...esc, campanhas: [{ id: '120219876543210987', nome: null }], identificadorConversao: "x'); drop table crm.deals; --" }, '2026-10-01', '2026-10-25');
+    expect(d).toMatchObject({ de: '2026-10-01', ate: '2026-10-25', negocios: 12, leads: 11, status: { abertos: 3, ganhos: 2, perdidos: 7 }, modo: 'todos' });
+    expect(d.etapas[0]).toMatchObject({ funil: 'QuarkRH', rotulo: 'Conexão [Prospect]', n: 6 });
+    expect(d.faixaColab[0]).toMatchObject({ rotulo: '25 - 100', ganhos: 1 });
+    expect(d.faixaSaude).toEqual([]); // só "(em branco)": a quebra some
+    expect(d.cargos[0]!.rotulo).toBe('Analista de RH');
+    expect(d.motivosPerda).toEqual([{ rotulo: 'Sem Contato Estabelecido', n: 4 }]);
+    expect(d.safra[0]).toMatchObject({ semana: '2026-10-05', ganhos: 3 });
+    expect(d.criativos[0]).toMatchObject({ anuncio: 'Criativo A', gasto: 100, leadsMeta: 5, negocios: 2, ganhos: 1 });
+    expect(d.conferencia).toMatchObject({ porIdentificador: 42, porPagina: null, porCampanhas: 42, ligacaoMeta: [{ metodo: 'sem_ligacao', n: 9 }] });
+    expect(d.amostra[0]).toEqual({ id: 777, titulo: 'Lead A', etapa: 'Agendado', status: 'open', criado: '2026-10-07' });
+    const todos = sqls.map((x) => x.sql).join(' ');
+    expect(todos).not.toContain('drop table');
+    expect(sqls.some((x) => x.params.includes("x'); drop table crm.deals; --"))).toBe(true);
+    // o papel do painel só lê o schema analytics: nenhuma consulta pode tocar crm, mkt, raw ou orq
+    expect(todos).not.toMatch(/\b(crm|mkt|raw|orq)\./);
+  });
+  it('o arquivo do escopo só consulta as visões de analytics (o papel do painel não lê crm nem mkt)', () => {
+    const fonte = readFileSync(new URL('../studio/lib/experimentos-escopo.ts', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+    expect(fonte).not.toMatch(/\b(from|join)\s+(crm|mkt|raw|orq)\./);
+  });
   it('só página: o topo são as visualizações dela no GA4 e não há investimento', async () => {
     const sqls: string[] = [];
     const db = { query: async (sql: string) => { sqls.push(sql); return { rows: /site_paginas_dia/.test(sql) ? [{ dia: '2026-10-02', v: 300 }] : [] }; } } as never;
@@ -358,6 +425,23 @@ describe('Experimentos: repositório (banco simulado)', () => {
     expect(lidos).toEqual([]);
     await repo.atualizar(5, { status: 'concluido' });
     expect(sqls.find((x) => /^update/i.test(x.sql))!.sql).not.toContain('valor_final');
+  });
+  it('o relatório traz o detalhe dos negócios só quando há escopo e período', async () => {
+    const detalhe = { negocios: 7 } as never;
+    const montarComDetalhe = (rows: Array<Record<string, unknown>>) => {
+      const db = { query: async (sql: string, params: unknown[] = []) => ({ rows: sql.includes('where id = $1') ? rows.filter((r) => r.id === params[0]) : rows }) } as never;
+      const chamadas: string[] = [];
+      const repo = new PgExperimentosRepo(db, () => new Date('2026-10-11T15:00:00Z'), async () => dados(), async () => dados(), async (_d, _e, de, ate) => { chamadas.push(`${de}..${ate}`); return detalhe; });
+      return { repo, chamadas };
+    };
+    const a = montarComDetalhe([linha({ identificador_conversao: 'diag' })]);
+    expect((await a.repo.relatorio(5)).detalhe).toBe(detalhe);
+    expect(a.chamadas).toEqual(['2026-10-01..2026-10-10']); // até o último dia completo
+    const b = montarComDetalhe([linha()]);
+    expect((await b.repo.relatorio(5)).detalhe).toBeNull();
+    expect(b.chamadas).toEqual([]);
+    const c = montarComDetalhe([linha({ identificador_conversao: 'diag', inicio: null, fim: null, metrica: null, meta: null })]);
+    expect((await c.repo.relatorio(5)).detalhe).toBeNull();
   });
   it('relatório devolve a documentação salva; salvar grava só a documentação, parametrizada', async () => {
     const { repo, sqls } = montar([linha({ documentacao: '<h1>x</h1>' })]);

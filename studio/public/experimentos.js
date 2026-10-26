@@ -11,6 +11,7 @@ const S = {
 };
 const COLUNAS_KANBAN = ['backlog', 'planejado', 'rodando', 'bloqueado', 'concluido', 'cancelado'];
 const paginaTexto = (host, caminho) => (caminho ? `${host ?? ''}${caminho}` : '');
+const MODOS = { todos: 'Todos os critérios ao mesmo tempo (E)', qualquer: 'Qualquer um dos critérios (OU)', campanha_so_investimento: 'Campanha só para o investimento; negócios pela página e pelo identificador' };
 const campanhaItem = (c) => (typeof c === 'string' ? c : c.id ? `${c.nome ?? 'Campanha'} (${c.id})` : (c.nome ?? ''));
 /** Várias campanhas: os resultados somam. Na célula da planilha ficam separadas por ";". */
 const campanhasTexto = (e) => (e.campanhas ?? []).map(campanhaItem).join('; ');
@@ -321,7 +322,7 @@ function fichaDesenhar() {
     titulo: e?.titulo ?? '', tipo: e?.tipo ?? 'experimento', status: e?.status ?? 'backlog', responsavel: e?.responsavel ?? '', areaImpacto: e?.areaImpacto ?? '',
     hipotese: e?.hipotese ?? '', resultadoEsperado: e?.resultadoEsperado ?? '', produto: e?.produto ?? 'rh', canal: e?.canal ?? 'total', metrica: e?.metrica ?? '',
     meta: e?.meta, linhaBase: e?.linhaBase, investimento: e?.investimento, inicio: e?.inicio ?? '', fim: e?.fim ?? '', avaliacao: e?.avaliacao ?? '',
-    paginaDestino: e ? paginaTexto(e.paginaHost, e.paginaCaminho) : '', identificadorConversao: e?.identificadorConversao ?? '',
+    paginaDestino: e ? paginaTexto(e.paginaHost, e.paginaCaminho) : '', identificadorConversao: e?.identificadorConversao ?? '', escopoModo: e?.escopoModo ?? 'todos',
     ice: [e?.iceImpacto, e?.iceConfianca, e?.iceFacilidade], evidencias: e?.evidencias ?? '', aprendizado: e?.aprendizado ?? '',
   };
   const chave = String(S.ficha);
@@ -351,6 +352,7 @@ function fichaDesenhar() {
         <label>Produto${sel('f-produto', OPT_PROD, v.produto)}</label>
         <label>Canal${comEscopo ? `<select id="f-canal" disabled title="Com escopo, o canal não é usado">${optsHtml(canais.map((c) => [c.id, c.nome]), v.canal)}</select>` : sel('f-canal', canais.map((c) => [c.id, c.nome]), v.canal)}</label>
         <div class="todo escopo-bloco" style="grid-column:1/-1"><p class="sub" style="margin:4px 0 0"><b>Escopo (opcional).</b> Amarre o teste a uma fatia: escolha da lista (vem das contas reais) ou digite. Com mais de um, vale o conjunto: o negócio precisa bater com todos. O resultado real da métrica chave passa a ser só o dessa fatia. Custo (CPL, CAC...) exige campanha.</p></div>
+        <label class="largo">Como combinar os critérios para contar os negócios<select id="f-modo">${optsHtml(Object.entries(MODOS), v.escopoModo)}</select><span class="dica">Se a campanha traz menos negócios que o identificador ou a página (a ligação com a Meta exige UTM), use "Campanha só para o investimento".</span></label>
         <label class="largo">Página de destino (Analytics)<input id="f-pagina" list="dl-paginas" maxlength="300" value="${esc(v.paginaDestino)}" placeholder="quarkrh.com.br/diagnostico ou /diagnostico"></label>
         <label>Identificador de conversão (Pipedrive)<input id="f-ident" list="dl-ident" maxlength="200" value="${esc(v.identificadorConversao)}" placeholder="ex.: o identificador do RD"></label>
         <div class="todo" style="grid-column:1/-1"><label>Campanhas (Meta Ads): escolha uma ou mais; os resultados somam<input id="f-camp-add" list="dl-campanhas" maxlength="200" placeholder="escolha pelo nome da lista (ou digite o nome ou o ID) e tecle Enter"></label>
@@ -390,7 +392,7 @@ function lerFicha(cru) {
   const g = (id) => $(`#${id}`)?.value ?? '';
   const out = {
     titulo: g('f-titulo'), tipo: g('f-tipo'), status: g('f-status'), responsavel: g('f-responsavel'), areaImpacto: g('f-area'), hipotese: g('f-hipotese'), resultadoEsperado: g('f-esperado'),
-    produto: g('f-produto'), canal: g('f-canal'), metrica: g('f-metrica'), inicio: g('f-inicio'), fim: g('f-fim'), avaliacao: g('f-avaliacao'), paginaDestino: g('f-pagina'), identificadorConversao: g('f-ident'), evidencias: g('f-evid'), aprendizado: g('f-aprend'),
+    produto: g('f-produto'), canal: g('f-canal'), metrica: g('f-metrica'), inicio: g('f-inicio'), fim: g('f-fim'), avaliacao: g('f-avaliacao'), escopoModo: g('f-modo') || 'todos', paginaDestino: g('f-pagina'), identificadorConversao: g('f-ident'), evidencias: g('f-evid'), aprendizado: g('f-aprend'),
     ice: [g('f-ice0'), g('f-ice1'), g('f-ice2')].map((x) => (x === '' ? null : x)),
   };
   if (cru) return { ...out, meta: g('f-meta'), investimento: g('f-invest'), linhaBase: g('f-base') };
@@ -409,7 +411,7 @@ async function salvarFicha() {
   const corpo = {
     titulo: v.titulo, tipo: v.tipo, status: v.status, responsavel: nulo(v.responsavel), areaImpacto: nulo(v.areaImpacto), hipotese: nulo(v.hipotese), resultadoEsperado: nulo(v.resultadoEsperado),
     produto: v.produto, canal: v.canal, metrica: nulo(v.metrica), meta: v.metrica ? v.meta : null, linhaBase: v.metrica ? v.linhaBase : null, investimento: v.investimento,
-    inicio: nulo(v.inicio), fim: nulo(v.fim), paginaDestino: nulo(v.paginaDestino?.trim()), campanhas: [...S.campFicha, ...($('#f-camp-add')?.value.trim() ? [$('#f-camp-add').value.trim()] : [])], identificadorConversao: nulo(v.identificadorConversao?.trim()), avaliacao: nulo(v.avaliacao), evidencias: nulo(v.evidencias), aprendizado: nulo(v.aprendizado),
+    inicio: nulo(v.inicio), fim: nulo(v.fim), escopoModo: v.escopoModo || 'todos', paginaDestino: nulo(v.paginaDestino?.trim()), campanhas: [...S.campFicha, ...($('#f-camp-add')?.value.trim() ? [$('#f-camp-add').value.trim()] : [])], identificadorConversao: nulo(v.identificadorConversao?.trim()), avaliacao: nulo(v.avaliacao), evidencias: nulo(v.evidencias), aprendizado: nulo(v.aprendizado),
     iceImpacto: v.ice[0] == null ? null : Number(v.ice[0]), iceConfianca: v.ice[1] == null ? null : Number(v.ice[1]), iceFacilidade: v.ice[2] == null ? null : Number(v.ice[2]),
   };
   S.enviando = true; $('#f-salvar').disabled = true; msg.textContent = 'Salvando…';

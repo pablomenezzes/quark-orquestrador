@@ -168,15 +168,103 @@ function blocoSemanal(R) {
     <h3>Semana a semana</h3>${tabela(['Semana', 'Período', ...colunasDados(m)], rel.semanal.map((l, k) => { const [, ...resto] = linhaTab(l, m, ''); return [`S${k + 1}`, `${esc(periodo(l))} (${l.dias}d)`, ...resto]; }))}`;
 }
 
-const BLOCOS = { kpis: blocoKpis, geral: blocoGeral, diario: blocoDiario, semanal: blocoSemanal };
+/* ---------- detalhe dos negócios da fatia: funil, perfil, perdas, safra, criativos e conferência ---------- */
+const MODO_ROTULO = {
+  todos: 'Todos os critérios ao mesmo tempo (E)',
+  qualquer: 'Qualquer um dos critérios (OU)',
+  campanha_so_investimento: 'Campanha só para o investimento; negócios pela página e pelo identificador',
+};
+const LIGACAO_ROTULO = {
+  ad_id: 'Pelo ID do anúncio (certeza alta)', conjunto_id: 'Pelo ID do conjunto', 'campanha_id+nome': 'Pelo ID da campanha e nome do anúncio', nome: 'Pelo nome (UTM igual ao nome da campanha)',
+  campanha_id: 'Só pelo ID da campanha', campanha_nome: 'Só pelo nome da campanha', ambiguo: 'Ambígua (o nome bate com mais de um anúncio)', sem_ligacao: 'Sem ligação com a Meta (UTM ausente ou com outro nome)',
+};
+const COR_STATUS = { abertos: '#00ABE4', ganhos: '#98BF12', perdidos: '#b8babd' };
+const pct = (a, b) => (b > 0 ? `${nf0.format((a / b) * 100)}%` : '—');
+const semDetalhe = (titulo, e) => `<h2>${esc(titulo)}</h2><p class="nota">${e ? 'Sem negócios para detalhar ainda: o primeiro dia completo do teste não fechou.' : 'Defina um escopo (página de destino, campanhas ou identificador de conversão) e o período do experimento para ver o detalhe dos negócios.'}</p>`;
+const pilha = (q, max) => `<div class="pilha" style="width:${max > 0 ? Math.max(4, (q.n / max) * 100) : 0}%" title="${esc(`${q.rotulo}: ${q.n} (abertos ${q.abertos}, ganhos ${q.ganhos}, perdidos ${q.perdidos})`)}">${['abertos', 'ganhos', 'perdidos'].map((k) => (q[k] ? `<span style="flex:${q[k]};background:${COR_STATUS[k]}"></span>` : '')).join('')}</div>`;
+const legendaStatus = '<p class="leg"><span><i style="background:#00ABE4"></i>Aberto</span><span><i style="background:#98BF12"></i>Ganho</span><span><i style="background:#b8babd"></i>Perdido</span></p>';
+const tabelaQuebra = (primeira, lista, total) => {
+  const max = Math.max(1, ...lista.map((q) => q.n));
+  return `<table class="rel-tab"><thead><tr><th>${esc(primeira)}</th><th></th><th>Negócios</th><th>% do total</th><th>Abertos</th><th>Ganhos</th><th>Perdidos</th></tr></thead><tbody>${lista.map((q) => `<tr><td>${esc(q.rotulo)}</td><td style="width:26%">${pilha(q, max)}</td><td class="n">${num(q.n)}</td><td class="n">${pct(q.n, total)}</td><td class="n">${num(q.abertos)}</td><td class="n">${num(q.ganhos)}</td><td class="n">${num(q.perdidos)}</td></tr>`).join('')}</tbody></table>`;
+};
+const periodoDetalhe = (d) => `Negócios criados de ${dm(d.de)} a ${dm(d.ate)} (dias completos).`;
+
+function blocoFunil(R) {
+  const { e, atualizado } = ctx(R);
+  const d = R.detalhe;
+  if (!d) return semDetalhe('Funil e etapas', e.inicio);
+  const k = (rot, val, sub) => `<div class="kpi"><span>${esc(rot)}</span><b>${val}</b><small>${sub || ''}</small></div>`;
+  const grupos = new Map();
+  for (const x of d.etapas) grupos.set(x.funil, [...(grupos.get(x.funil) ?? []), x]);
+  return `<h2>Funil e etapas</h2><p class="nota">${esc(atualizado)}. ${esc(periodoDetalhe(d))} Combinação: ${esc(MODO_ROTULO[d.modo])}.</p>
+    <div class="kpis">${k('Negócios no Pipedrive', num(d.negocios), `${num(d.leads)} contam como lead`)}${k('Abertos', num(d.status.abertos), pct(d.status.abertos, d.negocios))}${k('Ganhos', num(d.status.ganhos), pct(d.status.ganhos, d.negocios))}${k('Perdidos', num(d.status.perdidos), pct(d.status.perdidos, d.negocios))}</div>
+    ${legendaStatus}
+    ${[...grupos].map(([funil, lista]) => `<h3>Funil ${esc(funil || '—')}: etapa em que cada negócio está hoje</h3>${tabelaQuebra('Etapa', lista, d.negocios)}`).join('')}`;
+}
+function blocoPerfil(R) {
+  const d = R.detalhe;
+  if (!d) return semDetalhe('Perfil das empresas e dos contatos', R.experimento.inicio);
+  return `<h2>Perfil das empresas e dos contatos</h2><p class="nota">${esc(periodoDetalhe(d))} Barras: aberto, ganho e perdido.</p>
+    <h3>Faixa de colaboradores</h3>${d.faixaColab.length ? tabelaQuebra('Faixa', d.faixaColab, d.negocios) : '<p class="nota">Sem dados.</p>'}
+    ${d.faixaSaude.length ? `<h3>Faixa de profissionais da saúde</h3>${tabelaQuebra('Faixa', d.faixaSaude, d.negocios)}` : ''}
+    <h3>Cargo</h3>${d.cargos.length ? tabelaQuebra('Cargo', d.cargos, d.negocios) : '<p class="nota">Sem dados.</p>'}`;
+}
+function blocoPerdas(R) {
+  const d = R.detalhe;
+  if (!d) return semDetalhe('Motivos de perda', R.experimento.inicio);
+  const max = Math.max(1, ...d.motivosPerda.map((m) => m.n));
+  return `<h2>Motivos de perda</h2><p class="nota">${esc(periodoDetalhe(d))} ${num(d.status.perdidos)} negócios perdidos.</p>
+    ${d.motivosPerda.length ? `<table class="rel-tab"><thead><tr><th>Motivo</th><th></th><th>Negócios</th><th>% dos perdidos</th></tr></thead><tbody>${d.motivosPerda.map((m) => `<tr><td>${esc(m.rotulo)}</td><td style="width:30%"><div class="pilha" style="width:${Math.max(4, (m.n / max) * 100)}%"><span style="flex:1;background:#b8babd"></span></div></td><td class="n">${num(m.n)}</td><td class="n">${pct(m.n, d.status.perdidos)}</td></tr>`).join('')}</tbody></table>` : '<p class="nota">Nenhum negócio perdido no período.</p>'}`;
+}
+function blocoSafra(R) {
+  const d = R.detalhe;
+  if (!d) return semDetalhe('Safra por semana de criação', R.experimento.inicio);
+  const max = Math.max(1, ...d.safra.map((s) => s.n));
+  return `<h2>Safra por semana de criação</h2><p class="nota">${esc(periodoDetalhe(d))} Cada linha é uma semana (segunda-feira) em que os negócios nasceram, com a situação deles hoje.</p>${legendaStatus}
+    <table class="rel-tab"><thead><tr><th>Semana de</th><th></th><th>Negócios</th><th>Abertos</th><th>Ganhos</th><th>Perdidos</th><th>% ganho</th></tr></thead><tbody>${d.safra.map((s) => `<tr><td>${esc(dm(s.semana))}</td><td style="width:30%">${pilha({ rotulo: s.semana, ...s }, max)}</td><td class="n">${num(s.n)}</td><td class="n">${num(s.abertos)}</td><td class="n">${num(s.ganhos)}</td><td class="n">${num(s.perdidos)}</td><td class="n">${pct(s.ganhos, s.n)}</td></tr>`).join('')}</tbody></table>
+    <p class="nota">Negócios recentes ainda estão abertos e amadurecem: a mediana do lead ao ganho no QuarkRH é de 17 dias.</p>`;
+}
+function blocoCriativos(R) {
+  const d = R.detalhe;
+  if (!d || !d.criativos.length) return `<h2>Criativos (anúncios)</h2><p class="nota">${d ? 'Escolha uma ou mais campanhas da Meta no escopo para ver os anúncios.' : 'Defina o escopo e o período para ver os anúncios.'}</p>`;
+  return `<h2>Criativos (anúncios)</h2><p class="nota">${esc(periodoDetalhe(d))} Mídia vem do Meta Ads; "negócios ligados" são os do Pipedrive que a ligação Meta reconhece como deste anúncio (nem todo negócio tem UTM de anúncio).</p>
+    <table class="rel-tab"><thead><tr><th>Anúncio</th><th>Gasto</th><th>Impressões</th><th>Cliques</th><th>Leads (Meta)</th><th>CPL (Meta)</th><th>Negócios ligados</th><th>Ganhos</th></tr></thead><tbody>${d.criativos.map((c) => `<tr><td>${esc(c.anuncio)}</td><td class="n">${brl0.format(c.gasto)}</td><td class="n">${num(c.impressoes)}</td><td class="n">${num(c.cliques)}</td><td class="n">${num(c.leadsMeta)}</td><td class="n">${c.leadsMeta > 0 ? brl2.format(c.gasto / c.leadsMeta) : '—'}</td><td class="n">${num(c.negocios)}</td><td class="n">${num(c.ganhos)}</td></tr>`).join('')}</tbody></table>`;
+}
+function blocoConferencia(R) {
+  const d = R.detalhe;
+  if (!d) return semDetalhe('Conferência dos dados', R.experimento.inicio);
+  const c = d.conferencia;
+  const linhas = [];
+  if (c.porIdentificador != null) linhas.push(['Identificador de conversão, sozinho', c.porIdentificador]);
+  if (c.porPagina != null) linhas.push(['Página de destino, sozinha (URL de conversão do negócio)', c.porPagina]);
+  if (c.porCampanhas != null) linhas.push(['Campanhas escolhidas, sozinhas (negócios que a ligação Meta atribui a elas)', c.porCampanhas]);
+  const maior = Math.max(c.porIdentificador ?? 0, c.porPagina ?? 0);
+  const aviso = c.porCampanhas != null && maior > c.porCampanhas * 1.5 && d.modo === 'todos'
+    ? `<p class="aviso">A ligação com a Meta atribui às campanhas só ${num(c.porCampanhas)} dos ${num(maior)} negócios da página ou do identificador: os outros chegam sem UTM de campanha ou com um nome diferente do da campanha. Com "todos os critérios" o resultado fica restrito aos ${num(c.porCampanhas)}. Para contar os ${num(maior)} e manter o investimento das campanhas, escolha <b>Campanha só para o investimento</b> no cadastro.</p>` : '';
+  return `<h2>Conferência dos dados</h2><p class="nota">${esc(periodoDetalhe(d))} Compare estes números com o Pipedrive (filtro por data de criação do negócio) para validar o relatório.</p>
+    <table class="rel-tab"><thead><tr><th>Critério</th><th>Negócios</th></tr></thead><tbody>${linhas.map(([r, v]) => `<tr><td>${esc(r)}</td><td class="n">${num(v)}</td></tr>`).join('')}
+      <tr><td><b>Combinação usada: ${esc(MODO_ROTULO[d.modo])}</b></td><td class="n"><b>${num(d.negocios)}</b></td></tr><tr><td>Desses, contam como lead (regra D-36)</td><td class="n">${num(d.leads)}</td></tr></tbody></table>
+    ${aviso}
+    <h3>Ligação Meta → Pipedrive dos negócios deste relatório</h3>
+    <table class="rel-tab"><thead><tr><th>Como o negócio foi ligado à Meta</th><th>Negócios</th></tr></thead><tbody>${d.conferencia.ligacaoMeta.map((l) => `<tr><td>${esc(LIGACAO_ROTULO[l.metodo] ?? l.metodo)}</td><td class="n">${num(l.n)}</td></tr>`).join('') || '<tr><td colspan="2">—</td></tr>'}</tbody></table>
+    <p class="nota">${num(c.semUtmCampanha)} negócios deste relatório estão sem UTM Campaign preenchida (vazia ou com a variável não resolvida): não há como atribuí-los a uma campanha.</p>
+    <h3>Amostra para conferir no Pipedrive</h3>
+    <table class="rel-tab"><thead><tr><th>Negócio</th><th>Título</th><th>Etapa</th><th>Situação</th><th>Criado em</th></tr></thead><tbody>${d.amostra.map((a) => `<tr><td><a href="https://quarktec.pipedrive.com/deal/${a.id}" target="_blank" rel="noopener">#${a.id}</a></td><td>${esc(a.titulo)}</td><td>${esc(a.etapa)}</td><td>${esc({ open: 'Aberto', won: 'Ganho', lost: 'Perdido' }[a.status] ?? a.status)}</td><td>${esc(dm(a.criado))}</td></tr>`).join('')}</tbody></table>`;
+}
+
+const BLOCOS = { kpis: blocoKpis, geral: blocoGeral, diario: blocoDiario, semanal: blocoSemanal, funil: blocoFunil, safra: blocoSafra, perfil: blocoPerfil, perdas: blocoPerdas, criativos: blocoCriativos, conferencia: blocoConferencia };
 const bloco = (id, R) => `<section class="rel-auto" data-auto="${id}" contenteditable="false">${BLOCOS[id](R)}</section>`;
-const ordemBlocos = ['kpis', 'geral', 'diario', 'semanal'];
+const ordemBlocos = ['kpis', 'geral', 'diario', 'semanal', 'funil', 'safra', 'perfil', 'perdas', 'criativos', 'conferencia'];
 
 /** Refaz os blocos de dados que já estão no texto; se não houver nenhum (apagados), recoloca todos no fim. */
 export function atualizarBlocos(papel, R) {
   const achados = papel.querySelectorAll('[data-auto]');
   if (!achados.length) { papel.insertAdjacentHTML('beforeend', ordemBlocos.map((id) => bloco(id, R)).join('')); return; }
   achados.forEach((el) => { const f = BLOCOS[el.dataset.auto]; if (f) el.innerHTML = f(R); });
+  // documentações antigas não têm os blocos novos: entram logo depois do último bloco de dados
+  const presentes = new Set([...achados].map((el) => el.dataset.auto));
+  const faltam = ordemBlocos.filter((id) => !presentes.has(id));
+  if (faltam.length) achados[achados.length - 1].insertAdjacentHTML('afterend', faltam.map((id) => bloco(id, R)).join(''));
 }
 
 /* ---------- modelo inicial ---------- */
