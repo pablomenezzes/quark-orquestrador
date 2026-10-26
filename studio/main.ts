@@ -17,6 +17,7 @@ import { FormsStore } from './lib/forms-store.js';
 import { PgPainelRepo } from './lib/painel-repo.js';
 import { PgBiRepo } from './lib/bi.js';
 import { PgMonitorRepo } from './lib/monitor.js';
+import { PgExperimentosRepo } from './lib/experimentos.js';
 import { checkPortFree, formatReport, parseEnv, runPreflight } from './lib/preflight.js';
 import { createStudioServer, type SubmitFn } from './server.js';
 
@@ -74,6 +75,7 @@ let painelPool: pg.Pool | null = null;
 let painelRepo: PgPainelRepo | null = null;
 let biRepo: PgBiRepo | null = null;
 let monitorRepo: PgMonitorRepo | null = null;
+let experimentosRepo: PgExperimentosRepo | null = null;
 const painelUrl = process.env.PANEL_DB_URL ?? '';
 if (painelUrl) {
   assertSafeDbTarget({ target: painelUrl, expectedRef: process.env.SUPABASE_PROJECT_REF! });
@@ -83,6 +85,7 @@ if (painelUrl) {
   painelRepo = new PgPainelRepo(painelPool);
   biRepo = new PgBiRepo(painelPool); // o BI usa o mesmo papel orq_panel e só lê as visões de analytics
   monitorRepo = new PgMonitorRepo(painelPool); // idem o Monitor diário
+  experimentosRepo = new PgExperimentosRepo(painelPool); // Experimentos: lê as mesmas visões e grava só mkt.experimentos
 }
 
 const forms = new FormsStore(join(root, 'studio', 'forms'));
@@ -115,6 +118,7 @@ const server = createStudioServer({
   painel: painelRepo,
   bi: biRepo,
   monitor: monitorRepo,
+  experimentos: experimentosRepo,
 });
 
 server.on('error', (e: NodeJS.ErrnoException) => {

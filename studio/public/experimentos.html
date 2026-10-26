@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Experimentos · QuarkRH</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/s/studio.css">
+  <style>
+    /* Brand Core do QuarkRH: laranja #EA8C0C só no que mais importa (preenchimento, nunca texto sobre claro); texto #212529; apoio turquesa, verde e azul. Red Hat Display 400 e 700. */
+    :root {
+      --accent: #EA8C0C; --accent-ink: #212529; --accent-soft: rgba(234, 140, 12, .16);
+      --font: 'Red Hat Display', system-ui, -apple-system, 'Segoe UI', sans-serif;
+      --m-bg: #ffffff; --m-ink: #212529; --m-ink2: #55595e; --m-muted: #8a8d91; --m-line: #e6e7e8; --m-card: #ffffff; --m-neutro: #b8babd;
+      --m-laranja: #EA8C0C; --m-turquesa: #39B4B6; --m-verde: #98BF12; --m-azul: #00ABE4;
+      --m-bom: #2f7d1f; --m-ruim: #b3261e; --m-bom-bg: rgba(66, 165, 43, .12); --m-ruim-bg: rgba(179, 38, 30, .10);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme='light']) {
+        --m-bg: #212529; --m-ink: #ffffff; --m-ink2: #c9cbcd; --m-muted: #8f9296; --m-line: #3a3f44; --m-card: #2a2e33; --m-neutro: #6b6f73;
+        --m-bom: #8fd47a; --m-ruim: #ff8a80; --m-bom-bg: rgba(143, 212, 122, .14); --m-ruim-bg: rgba(255, 138, 128, .14);
+      }
+    }
+    body { font-family: var(--font); background: var(--m-bg); color: var(--m-ink); font-weight: 400; }
+    b, strong, h1, h2, h3 { font-weight: 700; }
+    .ex { max-width: 1280px; margin: 0 auto; padding: 18px 20px 40px; font-variant-numeric: tabular-nums; }
+    .faixa { height: 4px; border-radius: 2px; background: linear-gradient(90deg, var(--m-laranja) 0 25%, var(--m-turquesa) 25% 50%, var(--m-verde) 50% 75%, var(--m-azul) 75% 100%); margin: 0 0 14px; }
+    .cab { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; margin-bottom: 4px; }
+    .cab .marca { font-weight: 700; font-size: 15px; }
+    .cab h1 { font-size: 26px; margin: 0; letter-spacing: -.01em; }
+    .etiquetas { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-left: auto; font-size: 12.5px; color: var(--m-ink2); }
+    .etq { border: 1px solid var(--m-line); border-radius: 999px; padding: 2px 10px; background: var(--m-card); }
+    .veredito { font-size: 17px; margin: 8px 0 14px; max-width: 980px; }
+    .barra-ctl { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin-bottom: 16px; }
+    .ex select, .ex input, .ex textarea { font: inherit; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--m-line); background: var(--m-card); color: var(--m-ink); max-width: 100%; }
+    .ex textarea { width: 100%; resize: vertical; }
+    .ex select:focus-visible, .ex input:focus-visible, .ex textarea:focus-visible, .ex button:focus-visible { outline: 2px solid var(--m-azul); outline-offset: 2px; }
+    .btn-p { font: inherit; font-weight: 700; padding: 8px 16px; border: 0; border-radius: 8px; background: var(--m-laranja); color: #212529; cursor: pointer; }
+    .btn-s { font: inherit; padding: 7px 14px; border: 1px solid var(--m-line); border-radius: 8px; background: var(--m-card); color: var(--m-ink); cursor: pointer; }
+    .btn-s:disabled, .btn-p:disabled { opacity: .5; cursor: default; }
+    .cartao { background: var(--m-card); border: 1px solid var(--m-line); border-radius: 12px; padding: 14px 16px 12px; min-width: 0; }
+    .cartao h2 { font-size: 16px; margin: 0; }
+    .cartao .sub { font-size: 12.5px; color: var(--m-ink2); margin: 2px 0 10px; }
+    .form-ex { margin-bottom: 16px; }
+    .form-ex .grade { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px 14px; margin: 10px 0; }
+    .form-ex label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--m-ink2); }
+    .form-ex label.largo { grid-column: span 2; }
+    .form-ex label.todo { grid-column: 1 / -1; }
+    .form-ex .dica { font-size: 12px; color: var(--m-muted); }
+    .form-ex .acoes { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .lista-ex { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .ex-cab { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px 10px; }
+    .ex-cab h2 { flex: 1 1 260px; }
+    .tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 8px; font-size: 12px; }
+    .tag { border: 1px solid var(--m-line); border-radius: 999px; padding: 1px 9px; color: var(--m-ink2); }
+    .tag.ice { border-color: var(--m-laranja); }
+    .estado { display: inline-block; font-size: 12.5px; font-weight: 700; padding: 2px 10px; border-radius: 999px; background: var(--m-line); color: var(--m-ink2); }
+    .estado.bom { background: var(--m-bom-bg); color: var(--m-bom); }
+    .estado.ruim { background: var(--m-ruim-bg); color: var(--m-ruim); }
+    .estado.atencao { background: var(--accent-soft); color: var(--m-ink); }
+    .nums { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 8px 0; }
+    .nums div { font-size: 12px; color: var(--m-muted); }
+    .nums b { display: block; font-size: 18px; color: var(--m-ink); }
+    .barras { display: grid; gap: 7px; margin: 8px 0; }
+    .barra .rot { display: flex; justify-content: space-between; font-size: 12px; color: var(--m-ink2); margin-bottom: 2px; }
+    .barra .trilho { position: relative; height: 8px; border-radius: 4px; background: var(--m-line); }
+    .barra .cheio { height: 100%; border-radius: 4px; background: var(--m-turquesa); }
+    .barra .cheio.destaque { background: var(--m-laranja); }
+    .barra .marca-p { position: absolute; top: -3px; width: 2px; height: 14px; background: var(--m-ink2); opacity: .7; }
+    svg.gr { width: 100%; height: auto; display: block; overflow: visible; }
+    svg.gr text { fill: var(--m-muted); font-size: 11px; font-family: var(--font); }
+    svg.gr .grid { stroke: var(--m-line); stroke-width: 1; }
+    .nota { font-size: 12px; color: var(--m-muted); margin: 8px 0 0; }
+    .aviso-m { background: var(--accent-soft); border-radius: 10px; padding: 8px 12px; margin: 8px 0; font-size: 13px; }
+    .erro-m { background: var(--m-ruim-bg); color: var(--m-ruim); border-radius: 10px; padding: 10px 14px; margin: 10px 0; }
+    .vazio { color: var(--m-ink2); padding: 28px 8px; text-align: center; }
+    .acoes-ex { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; align-items: center; }
+    .esq { animation: pisca 1.2s ease-in-out infinite; color: var(--m-muted); }
+    @keyframes pisca { 50% { opacity: .45; } }
+    details.defs { margin-top: 22px; font-size: 13px; color: var(--m-ink2); }
+    details.defs summary { cursor: pointer; font-weight: 700; color: var(--m-ink); }
+    details.defs li { margin: 4px 0; }
+    @media (max-width: 980px) { .lista-ex { grid-template-columns: 1fr; } .form-ex .grade { grid-template-columns: repeat(2, minmax(0, 1fr)); } .nums { grid-template-columns: repeat(2, minmax(0, 1fr)); } .etiquetas { margin-left: 0; } .cab h1 { font-size: 22px; } }
+  </style>
+</head>
+<body>
+  <header class="top" data-pagina="experimentos"></header>
+  <main class="ex">
+    <div class="faixa" aria-hidden="true"></div>
+    <div class="cab">
+      <span class="marca">QuarkRH</span><!-- espaço reservado para a logo oficial (Logo_quarkrh_v2.svg): a logo é arquivo da marca, nunca desenhada aqui -->
+      <h1>Experimentos</h1>
+      <div class="etiquetas"><span class="etq">Fonte de verdade: Pipedrive, Meta Ads e GA4 (as mesmas do Monitor)</span><span class="etq" id="et-dados">Carregando…</span></div>
+    </div>
+    <p class="veredito" id="veredito"><span class="esq">Carregando os experimentos…</span></p>
+    <div class="barra-ctl">
+      <button id="novo" class="btn-p" type="button">Novo experimento</button>
+      <label>Mostrar <select id="filtro">
+        <option value="ativos">Planejados e rodando</option>
+        <option value="rodando">Só rodando</option>
+        <option value="concluido">Concluídos</option>
+        <option value="cancelado">Cancelados</option>
+        <option value="todos">Todos</option>
+      </select></label>
+      <button id="atualizar" class="btn-s" type="button">Atualizar agora</button>
+    </div>
+    <div id="aviso"></div>
+    <section id="formulario" class="cartao form-ex" hidden></section>
+    <section id="lista" class="lista-ex" aria-live="polite"></section>
+    <details class="defs">
+      <summary>Como o acompanhamento funciona</summary>
+      <ul>
+        <li><b>Você cadastra uma vez:</b> hipótese, produto, canal, a métrica foco, a meta, o período, o orçamento e o ICE. Depois disso nada é digitado: o resultado, o gasto e a linha de base vêm sozinhos das mesmas visões do Monitor.</li>
+        <li><b>Só dias completos:</b> o dia vira à meia-noite em America/Fortaleza e o dia de hoje fica de fora até fechar. O Google Ads chega com cerca de 1 dia de atraso.</li>
+        <li><b>Métricas de contagem</b> (leads, MQL, reuniões, ganhos, MRR): a meta é o <b>total do período</b> e o ritmo previsto é linear. <b>Métricas de custo e taxa</b> (CPL, CAC, CTR, % MQL...): a meta é o <b>valor a atingir</b> e a trajetória prevista vai da linha de base até a meta.</li>
+        <li><b>Linha de base:</b> o mesmo número de dias imediatamente antes do início, calculado sozinho. Você pode combinar outro valor na edição.</li>
+        <li><b>Ritmo:</b> "Em linha" se estiver até 5 pontos percentuais atrás do prazo, "Atenção" até 20 e "Abaixo do previsto" além disso. Com menos de 3 dias de dados aparece "Poucos dias de dados": cedo para concluir qualquer coisa.</li>
+        <li><b>Orçamento:</b> o gasto é o investimento do canal escolhido no período (Meta Ads e Google Ads). Aparece "gasto adiantado" se o orçamento anda mais de 15 pontos percentuais à frente do prazo.</li>
+        <li><b>Concluir:</b> ao mudar o status para Concluído, o resultado é gravado e não muda mais; o desfecho é "Atingiu" (meta batida), "Parcial" (70% ou mais do caminho) ou "Não atingiu". O histórico dos concluídos com a mesma métrica aparece ao lado da confiança do ICE.</li>
+        <li><b>Leitura com cautela:</b> o resultado mostra coincidência no tempo, não causa. Os leads mais recentes ainda amadurecem (a mediana do lead ao ganho no QuarkRH é de 17 dias), então ganhos e MRR do começo do teste ainda vão crescer. Mudanças de orçamento, público e fila de SDRs acontecem ao mesmo tempo que o teste.</li>
+        <li><b>Sem DELETE:</b> remover é cancelar. O experimento cancelado some da lista padrão e pode ser consultado em "Cancelados".</li>
+      </ul>
+    </details>
+  </main>
+  <script src="/s/nav.js"></script>
+  <script type="module" src="/s/experimentos.js"></script>
+</body>
+</html>

@@ -4,6 +4,7 @@ import { extname, join, normalize, resolve, sep } from 'node:path';
 import { FormsStore, StoreError } from './lib/forms-store.js';
 import { FORM_ID_RE } from './lib/form-schema.js';
 import { PRODUTOS_MONITOR, type MonitorRepo, type ProdutoMonitor } from './lib/monitor.js';
+import type { ExperimentosRepo } from './lib/experimentos.js';
 import { BI_PRODUTOS, BiNotFound, type BiFiltros, type BiProduto, type BiRepo } from './lib/bi.js';
 import { CONVERSAO_ORIGENS, CONVERSAO_TIPOS, MARCOS, PRODUTOS, REGRA_TIPOS, REGRA_URL_MODOS, STATUS_NEGOCIO, PainelInvalido, PainelNotFound, type ConversaoOrigem, type CriativoItem, type CriativoMapaPatch, type Marco, type NegociosFiltro, type PainelRepo, type Produto, type StatusNegocio } from './lib/painel-repo.js';
 
@@ -23,6 +24,8 @@ export type StudioOptions = {
   bi?: BiRepo | null;
   /** Monitor diário (hoje x ontem, semana, mês; total e por canal). */
   monitor?: MonitorRepo | null;
+  /** Experimentos de growth: cadastro e acompanhamento automático pelas visões de analytics. */
+  experimentos?: ExperimentosRepo | null;
 };
 
 const MIME: Record<string, string> = {
@@ -138,6 +141,22 @@ export function createStudioServer(opts: StudioOptions): Server {
       const produto = url.searchParams.get('produto');
       if (produto && !(PRODUTOS_MONITOR as readonly string[]).includes(produto)) throw new HttpError(400, 'produto_invalido', { validos: [...PRODUTOS_MONITOR] });
       return send(res, 200, await opts.monitor.monitor((produto || undefined) as ProdutoMonitor | undefined));
+    }
+
+    // Experimentos de growth: o cadastro é a única escrita (mkt.experimentos); o resultado vem sozinho das visões de analytics. Sem DELETE: remover é cancelar.
+    if (method === 'GET' && path === '/experimentos') return sendFile(res, join(opts.publicDir, 'experimentos.html'));
+    if (path === '/api/experimentos' || path.startsWith('/api/experimentos/')) {
+      const repo = opts.experimentos;
+      if (!repo) return send(res, 503, { error: 'experimentos_nao_configurado', detail: 'Falta PANEL_DB_URL no .env.local. Peça para gerar com: node scripts/set-role-password.mjs --role orq_panel --apply' });
+      if (path === '/api/experimentos') {
+        if (method === 'GET') return send(res, 200, await repo.listar());
+        if (method === 'POST') return send(res, 201, await repo.criar(await readJson(req)));
+        return send(res, 405, { error: 'method_not_allowed' });
+      }
+      const eid = /^\/api\/experimentos\/(\d{1,15})$/.exec(path);
+      if (!eid) return send(res, 404, { error: 'not_found' });
+      if (method !== 'PUT') return send(res, 405, { error: 'method_not_allowed' });
+      return send(res, 200, await repo.atualizar(Number(eid[1]), await readJson(req)));
     }
 
     // BI: só leitura. O navegador escolhe a análise e os filtros; nunca manda SQL.
