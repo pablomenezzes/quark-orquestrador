@@ -11,7 +11,7 @@
  */
 import type pg from 'pg';
 import { PainelInvalido, PainelNotFound } from './painel-repo.js';
-import { campanhaTexto, lerDadosEscopo, listarOpcoes, normalizarCampanha, normalizarPagina, temCampanha, temEscopo, type Escopo, type LeitorEscopo, type OpcoesEscopo } from './experimentos-escopo.js';
+import { campanhaTexto, lerDadosEscopo, listarOpcoes, normalizarCampanhas, normalizarPagina, temCampanha, temEscopo, type CampanhaEscopo, type Escopo, type LeitorEscopo, type OpcoesEscopo } from './experimentos-escopo.js';
 import { agoraLocal, lerDadosMonitor, metricasDe, somaDias, type CanalId, type DadosMonitor, type Janela, type ProdutoMonitor } from './monitor.js';
 
 type Db = Pick<pg.Pool, 'query'>;
@@ -78,7 +78,7 @@ export interface Experimento {
   investimento: number | null; inicio: string | null; fim: string | null; status: ExpStatus;
   avaliacao: Avaliacao | null; evidencias: string | null; temDocumentacao: boolean;
   /** Escopo opcional: página de destino (GA4), campanha da Meta e identificador de conversão do Pipedrive. */
-  paginaHost: string | null; paginaCaminho: string | null; campanhaId: string | null; campanhaNome: string | null; identificadorConversao: string | null;
+  paginaHost: string | null; paginaCaminho: string | null; campanhas: CampanhaEscopo[]; identificadorConversao: string | null;
   iceImpacto: number | null; iceConfianca: number | null; iceFacilidade: number | null; iceScore: number | null;
   valorFinal: number | null; atingimentoFinal: number | null; desfecho: Desfecho | null; aprendizado: string | null;
   criadoEm: string; atualizadoEm: string;
@@ -120,7 +120,7 @@ export interface ExperimentoEntrada {
   produto?: string; canal?: string; metrica?: string | null; meta?: number | null; linhaBase?: number | null; investimento?: number | null;
   inicio?: string | null; fim?: string | null; status?: string; avaliacao?: string | null; evidencias?: string | null;
   iceImpacto?: number | null; iceConfianca?: number | null; iceFacilidade?: number | null; aprendizado?: string | null;
-  paginaHost?: string | null; paginaCaminho?: string | null; campanhaId?: string | null; campanhaNome?: string | null; identificadorConversao?: string | null;
+  paginaHost?: string | null; paginaCaminho?: string | null; campanhas?: CampanhaEscopo[]; identificadorConversao?: string | null;
 }
 const num = (v: unknown, nome: string): number => { if (typeof v !== 'number' || !isFinite(v)) throw inv(`${nome} deve ser um número`); return v; };
 const numOuNulo = (v: unknown, nome: string): number | null => (v == null ? null : num(v, nome));
@@ -179,10 +179,10 @@ export function validarEntrada(b: unknown, modo: 'criar' | 'editar', atual?: Atu
     if (t && !p) throw inv('página de destino inválida: escolha uma da lista ou digite o endereço (https://site.com.br/pagina) ou só o caminho (/pagina)');
     out.paginaHost = p?.host ?? null; out.paginaCaminho = p?.caminho ?? null;
   }
-  if (tem('campanha')) {
-    const t = texto(e.campanha, 'campanha', 200);
-    const c = t ? normalizarCampanha(t) : null;
-    out.campanhaId = c?.id ?? null; out.campanhaNome = c?.nome ?? null;
+  if (tem('campanhas')) {
+    // lista de textos ("nome (id)", só o ID ou só o nome); vazio limpa. Os resultados das campanhas somam.
+    if (e.campanhas != null && (!Array.isArray(e.campanhas) || e.campanhas.length > 60 || e.campanhas.some((t) => typeof t !== 'string' || t.length > 200))) throw inv('campanhas deve ser uma lista de até 40 textos');
+    out.campanhas = normalizarCampanhas((e.campanhas as string[] | null) ?? []);
   }
   if (tem('identificadorConversao')) out.identificadorConversao = texto(e.identificadorConversao, 'identificador de conversão', 200);
 
@@ -196,8 +196,7 @@ export function validarEntrada(b: unknown, modo: 'criar' | 'editar', atual?: Atu
   const metrica = idMetrica ? METRICA_POR_ID.get(idMetrica) : undefined;
   const esc: Partial<Escopo> = {
     paginaCaminho: out.paginaCaminho !== undefined ? out.paginaCaminho : atual?.paginaCaminho,
-    campanhaId: out.campanhaId !== undefined ? out.campanhaId : atual?.campanhaId,
-    campanhaNome: out.campanhaNome !== undefined ? out.campanhaNome : atual?.campanhaNome,
+    campanhas: out.campanhas !== undefined ? out.campanhas : atual?.campanhas,
     identificadorConversao: out.identificadorConversao !== undefined ? out.identificadorConversao : atual?.identificadorConversao,
   };
   if (metrica?.precisaVerba) {
@@ -356,19 +355,24 @@ export function montarRelatorio(e: Pick<Experimento, 'canal' | 'metrica' | 'inic
 /* ---------- banco ---------- */
 const COLUNAS = `id, titulo, tipo, responsavel, area_impacto, hipotese, resultado_esperado, produto, canal, metrica, meta::float8 as meta, linha_base::float8 as linha_base,
   investimento::float8 as investimento, inicio::text as inicio, fim::text as fim, status, avaliacao, evidencias, documentacao is not null as tem_documentacao,
-  pagina_host, pagina_caminho, campanha_id::text as campanha_id, campanha_nome, identificador_conversao,
+  pagina_host, pagina_caminho, campanhas, campanha_id::text as campanha_id, campanha_nome, identificador_conversao,
   ice_impacto, ice_confianca, ice_facilidade, ice_score::float8 as ice_score,
   valor_final::float8 as valor_final, atingimento_final::float8 as atingimento_final, desfecho, aprendizado, criado_em, atualizado_em`;
 const nn = (v: unknown): number | null => (v == null ? null : Number(v));
 const ns = (v: unknown): string | null => (v == null ? null : String(v));
 const iso = (v: unknown): string => (v instanceof Date ? v.toISOString() : String(v));
+/** A lista nova; ou, em linha antiga da 0024 sem lista, a campanha única que ela gravou. */
+function campanhasDe(r: Record<string, unknown>): CampanhaEscopo[] {
+  if (Array.isArray(r.campanhas) && r.campanhas.length) return r.campanhas as CampanhaEscopo[];
+  return r.campanha_id || r.campanha_nome ? [{ id: ns(r.campanha_id), nome: ns(r.campanha_nome) }] : [];
+}
 function deLinha(r: Record<string, unknown>): Experimento {
   return {
     id: Number(r.id), titulo: String(r.titulo), tipo: (r.tipo as ExpTipo) ?? 'experimento', responsavel: ns(r.responsavel), areaImpacto: ns(r.area_impacto),
     hipotese: ns(r.hipotese), resultadoEsperado: ns(r.resultado_esperado), produto: r.produto as ProdutoMonitor, canal: r.canal as ExpCanal,
     metrica: ns(r.metrica), meta: nn(r.meta), linhaBase: nn(r.linha_base), investimento: nn(r.investimento), inicio: ns(r.inicio), fim: ns(r.fim), status: r.status as ExpStatus,
     avaliacao: (r.avaliacao as Avaliacao | null) ?? null, evidencias: ns(r.evidencias), temDocumentacao: r.tem_documentacao === true,
-    paginaHost: ns(r.pagina_host), paginaCaminho: ns(r.pagina_caminho), campanhaId: ns(r.campanha_id), campanhaNome: ns(r.campanha_nome), identificadorConversao: ns(r.identificador_conversao),
+    paginaHost: ns(r.pagina_host), paginaCaminho: ns(r.pagina_caminho), campanhas: campanhasDe(r), identificadorConversao: ns(r.identificador_conversao),
     iceImpacto: nn(r.ice_impacto), iceConfianca: nn(r.ice_confianca), iceFacilidade: nn(r.ice_facilidade), iceScore: nn(r.ice_score),
     valorFinal: nn(r.valor_final), atingimentoFinal: nn(r.atingimento_final), desfecho: (r.desfecho as Desfecho | null) ?? null, aprendizado: ns(r.aprendizado),
     criadoEm: iso(r.criado_em), atualizadoEm: iso(r.atualizado_em),
@@ -378,8 +382,11 @@ const CAMPO_SQL: Record<keyof ExperimentoEntrada, string> = {
   titulo: 'titulo', tipo: 'tipo', responsavel: 'responsavel', areaImpacto: 'area_impacto', hipotese: 'hipotese', resultadoEsperado: 'resultado_esperado',
   produto: 'produto', canal: 'canal', metrica: 'metrica', meta: 'meta', linhaBase: 'linha_base', investimento: 'investimento', inicio: 'inicio', fim: 'fim',
   status: 'status', avaliacao: 'avaliacao', evidencias: 'evidencias', iceImpacto: 'ice_impacto', iceConfianca: 'ice_confianca', iceFacilidade: 'ice_facilidade', aprendizado: 'aprendizado',
-  paginaHost: 'pagina_host', paginaCaminho: 'pagina_caminho', campanhaId: 'campanha_id', campanhaNome: 'campanha_nome', identificadorConversao: 'identificador_conversao',
+  paginaHost: 'pagina_host', paginaCaminho: 'pagina_caminho', campanhas: 'campanhas', identificadorConversao: 'identificador_conversao',
 };
+
+/** A lista de campanhas vai como JSON (o pg mandaria um array do Postgres, não jsonb). */
+const valorSql = (k: keyof ExperimentoEntrada, v: unknown): unknown => (k === 'campanhas' ? JSON.stringify(v ?? []) : v);
 
 export interface ListaExperimentos {
   hoje: string;
@@ -412,8 +419,8 @@ export interface ExperimentosRepo {
 export type LeitorDados = (db: Db, hoje: string, hora: string, produto: ProdutoMonitor, desde: string) => Promise<DadosMonitor>;
 /** Com escopo (página, campanha ou identificador), os dados da fatia ficam na chave `meta` (ver experimentos-escopo.ts). */
 const efetivo = <T extends Pick<Experimento, 'canal'> & Partial<Escopo>>(e: T): T => (temEscopo(e) ? { ...e, canal: 'meta' } : e);
-export const rotuloEscopo = (e: Pick<Experimento, 'paginaHost' | 'paginaCaminho' | 'campanhaId' | 'campanhaNome' | 'identificadorConversao'>): string[] =>
-  [e.paginaCaminho ? `Página ${e.paginaHost ?? ''}${e.paginaCaminho}` : '', campanhaTexto(e) ? `Campanha ${campanhaTexto(e)}` : '', e.identificadorConversao ? `Identificador ${e.identificadorConversao}` : ''].filter(Boolean);
+export const rotuloEscopo = (e: Pick<Experimento, 'paginaHost' | 'paginaCaminho' | 'campanhas' | 'identificadorConversao'>): string[] =>
+  [e.paginaCaminho ? `Página ${e.paginaHost ?? ''}${e.paginaCaminho}` : '', e.campanhas.length ? `${e.campanhas.length === 1 ? 'Campanha' : 'Campanhas (somadas)'} ${e.campanhas.map(campanhaTexto).join(', ')}` : '', e.identificadorConversao ? `Identificador ${e.identificadorConversao}` : ''].filter(Boolean);
 const SEM_DADOS = { diario: { google: new Map(), meta: new Map(), social: new Map(), organico: new Map() } } as Pick<DadosMonitor, 'diario'>;
 
 export class PgExperimentosRepo implements ExperimentosRepo {
@@ -460,7 +467,7 @@ export class PgExperimentosRepo implements ExperimentosRepo {
     const campos = (Object.keys(v) as Array<keyof ExperimentoEntrada>).filter((k) => v[k] !== undefined);
     const r = await this.db.query(
       `insert into mkt.experimentos (${campos.map((k) => CAMPO_SQL[k]).join(', ')}) values (${campos.map((_, i) => `$${i + 1}`).join(', ')}) returning id`,
-      campos.map((k) => v[k]),
+      campos.map((k) => valorSql(k, v[k])),
     );
     return this.completo(await this.um(Number(r.rows[0].id)));
   }
@@ -470,7 +477,7 @@ export class PgExperimentosRepo implements ExperimentosRepo {
     const v = validarEntrada(entrada, 'editar', antes);
     const campos = (Object.keys(v) as Array<keyof ExperimentoEntrada>).filter((k) => v[k] !== undefined);
     if (!campos.length) throw new PainelInvalido('nada para gravar');
-    const params: unknown[] = campos.map((k) => v[k]);
+    const params: unknown[] = campos.map((k) => valorSql(k, v[k]));
     const sets = campos.map((k, i) => `${CAMPO_SQL[k]} = $${i + 1}`);
     // ao concluir, o resultado é fotografado: deixa de variar com dados novos (só se o experimento tem métrica chave, meta e período)
     if (v.status === 'concluido' && antes.status !== 'concluido') {

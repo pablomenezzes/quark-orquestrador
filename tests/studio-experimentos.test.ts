@@ -7,7 +7,7 @@ import type { Server } from 'node:http';
 import { createStudioServer } from '../studio/server';
 import { PainelInvalido, PainelNotFound } from '../studio/lib/painel-repo';
 import { somaDias, ZERO, type CanalId, type DadosMonitor, type Soma } from '../studio/lib/monitor';
-import { lerDadosEscopo, normalizarCampanha, normalizarPagina } from '../studio/lib/experimentos-escopo';
+import { lerDadosEscopo, normalizarCampanha, normalizarCampanhas, normalizarPagina } from '../studio/lib/experimentos-escopo';
 import { acompanhavel, calcularProgresso, calibracaoPor, desfechoDe, documentacaoValida, METRICAS_EXP, montarRelatorio, PgExperimentosRepo, rotuloEscopo, validarEntrada, valorMetrica, type Experimento, type ExperimentosRepo } from '../studio/lib/experimentos';
 
 const soma = (o: Partial<Soma>): Soma => ({ ...ZERO, ...o });
@@ -225,33 +225,50 @@ describe('Experimentos: escopo (página de destino, campanha e identificador de 
     expect(normalizarCampanha(' ')).toBeNull();
   });
   it('o cadastro aceita os três campos, limpa com vazio e recusa página inválida', () => {
-    const v = validarEntrada({ titulo: 'x', paginaDestino: 'https://quarkrh.com.br/diagnostico/', campanha: 'Diag (120219876543210987)', identificadorConversao: ' Diagnóstico RH ' }, 'criar');
-    expect(v).toMatchObject({ paginaHost: 'quarkrh.com.br', paginaCaminho: '/diagnostico', campanhaId: '120219876543210987', campanhaNome: 'Diag', identificadorConversao: 'Diagnóstico RH' });
-    expect(validarEntrada({ paginaDestino: '', campanha: null, identificadorConversao: '' }, 'editar')).toMatchObject({ paginaHost: null, paginaCaminho: null, campanhaId: null, campanhaNome: null, identificadorConversao: null });
+    const v = validarEntrada({ titulo: 'x', paginaDestino: 'https://quarkrh.com.br/diagnostico/', campanhas: ['Diag (120219876543210987)'], identificadorConversao: ' Diagnóstico RH ' }, 'criar');
+    expect(v).toMatchObject({ paginaHost: 'quarkrh.com.br', paginaCaminho: '/diagnostico', campanhas: [{ id: '120219876543210987', nome: 'Diag' }], identificadorConversao: 'Diagnóstico RH' });
+    expect(validarEntrada({ paginaDestino: '', campanhas: null, identificadorConversao: '' }, 'editar')).toMatchObject({ paginaHost: null, paginaCaminho: null, campanhas: [], identificadorConversao: null });
     expect(() => validarEntrada({ titulo: 'x', paginaDestino: 'sem dominio' }, 'criar')).toThrow(/página de destino inválida/);
   });
   it('custo exige campanha da Meta quando há escopo; contagem vale com qualquer escopo', () => {
     expect(() => validarEntrada({ titulo: 'x', metrica: 'cpl', meta: 30, paginaDestino: '/diagnostico' }, 'criar')).toThrow(/só existe com uma campanha/);
     expect(() => validarEntrada({ titulo: 'x', metrica: 'cpl', meta: 30, identificadorConversao: 'Diagnóstico' }, 'criar')).toThrow(/só existe com uma campanha/);
-    expect(validarEntrada({ titulo: 'x', metrica: 'cpl', meta: 30, campanha: 'Diag', canal: 'social' }, 'criar').metrica).toBe('cpl'); // com campanha, o canal deixa de importar
+    expect(validarEntrada({ titulo: 'x', metrica: 'cpl', meta: 30, campanhas: ['Diag'], canal: 'social' }, 'criar').metrica).toBe('cpl'); // com campanha, o canal deixa de importar
     expect(validarEntrada({ titulo: 'x', metrica: 'leads', meta: 30, paginaDestino: '/diagnostico' }, 'criar').metrica).toBe('leads');
     // na edição vale o conjunto
     expect(() => validarEntrada({ metrica: 'cpl' }, 'editar', { produto: 'rh', canal: 'meta', metrica: 'leads', meta: 50, inicio: null, fim: null, paginaCaminho: '/x' })).toThrow(/só existe com uma campanha/);
   });
-  const esc = { produto: 'rh', paginaHost: null, paginaCaminho: null, campanhaId: null, campanhaNome: null, identificadorConversao: null } as const;
+  const esc = { produto: 'rh' as const, paginaHost: null as string | null, paginaCaminho: null as string | null, campanhas: [] as Array<{ id: string | null; nome: string | null }>, identificadorConversao: null as string | null };
   it('lê só a fatia: negócios do escopo, gasto da campanha e SQL parametrizado', async () => {
     const sqls: Array<{ sql: string; params: unknown[] }> = [];
     const db = { query: async (sql: string, params: unknown[] = []) => { sqls.push({ sql: sql.replace(/\s+/g, ' '), params }); return { rows: /meta_desempenho_dia/.test(sql) ? [{ dia: '2026-10-02', gasto: 100, impressoes: 5000, cliques: 80 }] : /group by 1 *$|group by 1$/.test(sql.trim()) && /criado_em/.test(sql) ? [{ dia: '2026-10-02', leads: 4, mql: 2 }] : [] }; } } as never;
-    const d = await lerDadosEscopo(db, { ...esc, campanhaId: '120219876543210987', identificadorConversao: "x'); drop table crm.deals; --", paginaHost: 'quarkrh.com.br', paginaCaminho: '/diagnostico' }, '10:00', '2026-09-01');
+    const d = await lerDadosEscopo(db, { ...esc, campanhas: [{ id: '120219876543210987', nome: null }], identificadorConversao: "x'); drop table crm.deals; --", paginaHost: 'quarkrh.com.br', paginaCaminho: '/diagnostico' }, '10:00', '2026-09-01');
     const todos = sqls.map((s) => s.sql).join(' ');
     expect(todos).not.toContain('drop table');
-    expect(sqls[0]!.params).toEqual(['2026-09-01', 'rh', '120219876543210987', "x'); drop table crm.deals; --", '/diagnostico', 'quarkrh.com.br']);
+    expect(sqls[0]!.params).toEqual(['2026-09-01', 'rh', ['120219876543210987'], "x'); drop table crm.deals; --", '/diagnostico', 'quarkrh.com.br']);
     expect(todos).toContain('analytics.negocios_meta');
     expect(todos).toContain('analytics.conversoes_pipe_negocios');
     expect(todos).toContain('analytics.negocios_url');
     expect(todos).not.toContain('site_paginas_dia'); // com campanha, o topo é a mídia da campanha, não as visitas da página
     expect(d.diario.meta.get('2026-10-02')).toMatchObject({ leads: 4, mql: 2, invest: 100, impressoes: 5000, cliques: 80, leadsT: 4 });
     expect(d.diario.google.size + d.diario.social.size + d.diario.organico.size).toBe(0);
+  });
+  it('várias campanhas: lista sem repetição, limite, ids e nomes; e a leitura soma todas (qualquer uma delas)', async () => {
+    expect(normalizarCampanhas(['A (120219876543210987)', '120219876543210987', 'B (120219876543210988)', 'Só nome', 'só nome', ' ', '[GROWTH][81]'])).toEqual([
+      { id: '120219876543210987', nome: 'A' }, { id: '120219876543210988', nome: 'B' }, { id: null, nome: 'Só nome' }, { id: null, nome: '[GROWTH][81]' },
+    ]);
+    expect(normalizarCampanhas(Array.from({ length: 80 }, (_, i) => `Campanha ${i}`))).toHaveLength(40);
+    expect(() => validarEntrada({ titulo: 'x', campanhas: 'não é lista' }, 'criar')).toThrow(/lista de até 40/);
+    expect(() => validarEntrada({ titulo: 'x', campanhas: [5] }, 'criar')).toThrow(/lista de até 40/);
+    const sqls: Array<{ sql: string; params: unknown[] }> = [];
+    const db = { query: async (sql: string, params: unknown[] = []) => { sqls.push({ sql: sql.replace(/\s+/g, ' '), params }); return { rows: /meta_desempenho_dia/.test(sql) ? [{ dia: '2026-10-02', gasto: 250, impressoes: 9000, cliques: 150 }] : [] }; } } as never;
+    const d = await lerDadosEscopo(db, { ...esc, campanhas: [{ id: '120219876543210987', nome: 'A' }, { id: '120219876543210988', nome: 'B' }, { id: null, nome: 'Só Nome' }] }, '10:00', '2026-09-01');
+    expect(sqls[0]!.params).toEqual(['2026-09-01', 'rh', ['120219876543210987', '120219876543210988'], ['só nome']]);
+    expect(sqls[0]!.sql).toContain('campanha_id = any($3::bigint[]) or lower(campanha) = any($4::text[])');
+    const gasto = sqls.find((x) => x.sql.includes('meta_desempenho_dia'))!;
+    expect(gasto.params).toEqual(['2026-09-01', ['120219876543210987', '120219876543210988'], ['só nome']]);
+    expect(gasto.sql).toContain('(campanha_id = any($2::bigint[]) or lower(campanha) = any($3::text[]))');
+    expect(d.diario.meta.get('2026-10-02')).toMatchObject({ invest: 250, impressoes: 9000, cliques: 150 }); // o gasto das campanhas vem somado
   });
   it('só página: o topo são as visualizações dela no GA4 e não há investimento', async () => {
     const sqls: string[] = [];
@@ -312,6 +329,13 @@ describe('Experimentos: repositório (banco simulado)', () => {
     const ins = sqls.find((s) => /insert into/i.test(s.sql))!;
     expect(ins.sql).not.toContain('drop table');
     expect(ins.params).toContain("x'); drop table mkt.experimentos; --");
+  });
+  it('grava a lista de campanhas como JSON (e lê a campanha única antiga da 0024 como lista de uma)', async () => {
+    const { repo, sqls } = montar([linha({ id: 5, campanha_id: '120219876543210987', campanha_nome: 'Antiga' })]);
+    await repo.criar({ titulo: 'x', campanhas: ['A (120219876543210987)', 'B'] });
+    const ins = sqls.find((x) => /insert into/i.test(x.sql))!;
+    expect(ins.params).toContain(JSON.stringify([{ id: '120219876543210987', nome: 'A' }, { id: null, nome: 'B' }]));
+    expect((await repo.listar()).experimentos[0]!.campanhas).toEqual([{ id: '120219876543210987', nome: 'Antiga' }]);
   });
   it('recusa entrada inválida antes de tocar o banco e avisa quando o experimento não existe', async () => {
     const { repo, sqls } = montar([linha()]);

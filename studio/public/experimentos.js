@@ -7,13 +7,15 @@ import { abrirDocumentacao } from './experimentos-doc.js';
 const guardado = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch { /* armazenamento indisponível: segue sem lembrar */ } return null; };
 const S = {
   dados: null, vista: guardado('exp.vista') === 'kanban' ? 'kanban' : 'planilha', filtro: 'ativos', tipo: '', produto: '', busca: '',
-  ficha: null, rascunho: null, pend: {}, enviando: false, opcoes: null,
+  ficha: null, rascunho: null, pend: {}, enviando: false, opcoes: null, campFicha: [],
 };
 const COLUNAS_KANBAN = ['backlog', 'planejado', 'rodando', 'bloqueado', 'concluido', 'cancelado'];
 const paginaTexto = (host, caminho) => (caminho ? `${host ?? ''}${caminho}` : '');
-const campanhaTexto = (e) => (e.campanhaId ? `${e.campanhaNome ?? 'Campanha'} (${e.campanhaId})` : (e.campanhaNome ?? ''));
-const temEscopo = (e) => !!(e.paginaCaminho || e.campanhaId || e.campanhaNome || e.identificadorConversao);
-const escopoRotulos = (e) => [e.paginaCaminho ? `Página ${paginaTexto(e.paginaHost, e.paginaCaminho)}` : '', campanhaTexto(e) ? `Campanha ${campanhaTexto(e)}` : '', e.identificadorConversao ? `Identificador ${e.identificadorConversao}` : ''].filter(Boolean);
+const campanhaItem = (c) => (typeof c === 'string' ? c : c.id ? `${c.nome ?? 'Campanha'} (${c.id})` : (c.nome ?? ''));
+/** Várias campanhas: os resultados somam. Na célula da planilha ficam separadas por ";". */
+const campanhasTexto = (e) => (e.campanhas ?? []).map(campanhaItem).join('; ');
+const temEscopo = (e) => !!(e.paginaCaminho || e.campanhas?.length || e.identificadorConversao);
+const escopoRotulos = (e) => [e.paginaCaminho ? `Página ${paginaTexto(e.paginaHost, e.paginaCaminho)}` : '', e.campanhas?.length ? `${e.campanhas.length === 1 ? 'Campanha' : 'Campanhas (somadas)'} ${e.campanhas.map(campanhaItem).join(', ')}` : '', e.identificadorConversao ? `Identificador ${e.identificadorConversao}` : ''].filter(Boolean);
 /** Páginas do Analytics, campanhas da Meta e identificadores do Pipedrive para escolher; tudo também pode ser digitado à mão. */
 async function carregarOpcoes() {
   try { S.opcoes = await api('/api/experimentos/opcoes'); } catch { S.opcoes = null; }
@@ -163,7 +165,7 @@ function linha(e) {
     ${tdSel('produto', optsHtml(OPT_PROD, e.produto), e.produto)}
     ${tdSel('canal', optsHtml(canaisPara(e).map((c) => [c.id, c.nome]), e.canal), e.canal, temEscopo(e) ? 'disabled title="Com página, campanha ou identificador, o resultado é o da fatia e o canal não é usado"' : '')}
     ${tdTxt('paginaDestino', e.paginaDestino ?? paginaTexto(e.paginaHost, e.paginaCaminho), { extra: 'list="dl-paginas" maxlength="300" placeholder="escolha ou digite" aria-label="Página de destino"' })}
-    ${tdTxt('campanha', e.campanha ?? campanhaTexto(e), { extra: 'list="dl-campanhas" maxlength="200" placeholder="escolha ou digite" aria-label="Campanha da Meta"' })}
+    ${tdTxt('campanhas', e.campanhasTexto ?? campanhasTexto(e), { extra: 'maxlength="2000" placeholder="várias: separe com ;" title="Campanhas da Meta, separadas por ponto e vírgula; os resultados somam. Para escolher da lista, use Abrir." aria-label="Campanhas da Meta"' })}
     ${tdTxt('identificadorConversao', e.identificadorConversao, { extra: 'list="dl-ident" maxlength="200" placeholder="escolha ou digite" aria-label="Identificador de conversão"' })}
     ${tdSel('metrica', `<option value="">— sem métrica —</option>${optsHtml(S.dados.metricas.map((x) => [x.id, x.rotulo]), efetiva)}`, efetiva)}
     <td class="num"><input data-campo="meta" inputmode="decimal" class="${pend ? 'pend' : ''}" value="${esc(paraTela(m, e.meta))}" ${efetiva ? '' : 'disabled'} placeholder="${pend ? 'informe a meta' : ''}" aria-label="Meta"></td>
@@ -180,7 +182,7 @@ function linha(e) {
 }
 
 function planilha(lista) {
-  const cab = ['Título', 'Tipo', 'Status', 'Responsável', 'Área de impacto', 'Produto', 'Canal', 'Página de destino', 'Campanha (Meta)', 'Identificador de conversão', 'Métrica chave', 'Meta', 'Resultado esperado', 'Investimento previsto (R$)', 'Gasto real', 'Início', 'Fim', 'I', 'C', 'E', 'ICE', 'Avaliação', 'Acompanhamento', ''];
+  const cab = ['Título', 'Tipo', 'Status', 'Responsável', 'Área de impacto', 'Produto', 'Canal', 'Página de destino', 'Campanhas (Meta, somam)', 'Identificador de conversão', 'Métrica chave', 'Meta', 'Resultado esperado', 'Investimento previsto (R$)', 'Gasto real', 'Início', 'Fim', 'I', 'C', 'E', 'ICE', 'Avaliação', 'Acompanhamento', ''];
   const th = cab.map((c, i) => `<th class="${i === 0 ? 'col-tit' : ''}" ${c === 'I' ? 'title="ICE: impacto"' : c === 'C' ? 'title="ICE: confiança"' : c === 'E' ? 'title="ICE: facilidade"' : ''}>${esc(c)}</th>`).join('');
   return `<div class="barra-ctl"><button type="button" class="btn-s" id="nova-linha">+ Nova linha</button><span class="nota">Edite direto nas células: cada alteração é salva ao sair do campo. Meta e investimento em R$ (percentuais em %).</span></div>
     <div class="plan-wrap"><table class="plan"><thead><tr>${th}</tr></thead><tbody>${S.rascunho ? linha(S.rascunho) : ''}${lista.map(linha).join('')}</tbody></table>
@@ -241,6 +243,7 @@ function converter(campo, el, e) {
   if (campo === 'iceImpacto' || campo === 'iceConfianca' || campo === 'iceFacilidade') return v === '' ? null : Number(v);
   if (campo === 'meta' || campo === 'linhaBase') { const n = doCampo(mdef(metricaDe(e)), v); if (Number.isNaN(n)) throw new Error('Digite um número (ex.: 1.250,50).'); return n; }
   if (campo === 'investimento') { const n = doCampo(null, v); if (Number.isNaN(n)) throw new Error('Digite um número (ex.: 1.250,50).'); return n; }
+  if (campo === 'campanhas') return v.split(';').map((t) => t.trim()).filter(Boolean);
   if (campo === 'titulo') { if (!v.trim()) throw new Error('O título não pode ficar vazio.'); return v.trim(); }
   if (campo === 'tipo' || campo === 'status' || campo === 'produto' || campo === 'canal') return v;
   return v.trim() === '' ? null : v.trim();
@@ -287,7 +290,7 @@ async function editarCelula(el) {
 
 function novaLinha() {
   S.vista = 'planilha'; guardado('exp.vista', 'planilha');
-  S.rascunho = { id: 'novo', titulo: '', tipo: 'experimento', status: 'backlog', produto: 'rh', canal: 'total', metrica: null, meta: null, responsavel: null, areaImpacto: null, resultadoEsperado: null, investimento: null, inicio: null, fim: null, paginaDestino: null, campanha: null, identificadorConversao: null, iceImpacto: null, iceConfianca: null, iceFacilidade: null, iceScore: null, avaliacao: null, progresso: { estado: 'sem_metrica' } };
+  S.rascunho = { id: 'novo', titulo: '', tipo: 'experimento', status: 'backlog', produto: 'rh', canal: 'total', metrica: null, meta: null, responsavel: null, areaImpacto: null, resultadoEsperado: null, investimento: null, inicio: null, fim: null, paginaDestino: null, campanhas: [], identificadorConversao: null, iceImpacto: null, iceConfianca: null, iceFacilidade: null, iceScore: null, avaliacao: null, progresso: { estado: 'sem_metrica' } };
   desenhar();
   $('tr.rascunho input[data-campo="titulo"]')?.focus();
 }
@@ -295,8 +298,8 @@ async function adicionarLinha() {
   const d = S.rascunho;
   if (!d || S.enviando) return;
   if (!d.titulo.trim()) { mostrarErro('Dê um título à nova linha.'); $('tr.rascunho input[data-campo="titulo"]')?.focus(); return; }
-  const campos = ['titulo', 'tipo', 'status', 'produto', 'canal', 'responsavel', 'areaImpacto', 'resultadoEsperado', 'metrica', 'meta', 'investimento', 'inicio', 'fim', 'paginaDestino', 'campanha', 'identificadorConversao', 'iceImpacto', 'iceConfianca', 'iceFacilidade', 'avaliacao'];
-  const corpo = Object.fromEntries(campos.filter((k) => d[k] != null && d[k] !== '').map((k) => [k, d[k]]));
+  const campos = ['titulo', 'tipo', 'status', 'produto', 'canal', 'responsavel', 'areaImpacto', 'resultadoEsperado', 'metrica', 'meta', 'investimento', 'inicio', 'fim', 'paginaDestino', 'campanhas', 'identificadorConversao', 'iceImpacto', 'iceConfianca', 'iceFacilidade', 'avaliacao'];
+  const corpo = Object.fromEntries(campos.filter((k) => d[k] != null && d[k] !== '' && !(Array.isArray(d[k]) && !d[k].length)).map((k) => [k, d[k]]));
   S.enviando = true;
   try {
     await api('/api/experimentos', { method: 'POST', body: JSON.stringify(corpo) });
@@ -318,13 +321,14 @@ function fichaDesenhar() {
     titulo: e?.titulo ?? '', tipo: e?.tipo ?? 'experimento', status: e?.status ?? 'backlog', responsavel: e?.responsavel ?? '', areaImpacto: e?.areaImpacto ?? '',
     hipotese: e?.hipotese ?? '', resultadoEsperado: e?.resultadoEsperado ?? '', produto: e?.produto ?? 'rh', canal: e?.canal ?? 'total', metrica: e?.metrica ?? '',
     meta: e?.meta, linhaBase: e?.linhaBase, investimento: e?.investimento, inicio: e?.inicio ?? '', fim: e?.fim ?? '', avaliacao: e?.avaliacao ?? '',
-    paginaDestino: e ? paginaTexto(e.paginaHost, e.paginaCaminho) : '', campanha: e ? campanhaTexto(e) : '', identificadorConversao: e?.identificadorConversao ?? '',
+    paginaDestino: e ? paginaTexto(e.paginaHost, e.paginaCaminho) : '', identificadorConversao: e?.identificadorConversao ?? '',
     ice: [e?.iceImpacto, e?.iceConfianca, e?.iceFacilidade], evidencias: e?.evidencias ?? '', aprendizado: e?.aprendizado ?? '',
   };
   const chave = String(S.ficha);
+  if (f.dataset.montado !== chave) S.campFicha = (e?.campanhas ?? []).map(campanhaItem); // campanhas escolhidas: ficam em memória enquanto a ficha está aberta
   if (f.dataset.montado === chave) Object.assign(v, lerFicha(true)); // preserva o que se digitou ao trocar de métrica
   const m = mdef(v.metrica);
-  const comEscopo = !!(v.paginaDestino?.trim() || v.campanha?.trim() || v.identificadorConversao?.trim());
+  const comEscopo = !!(v.paginaDestino?.trim() || S.campFicha.length || v.identificadorConversao?.trim());
   const canais = comEscopo ? S.dados.canais : S.dados.canais.filter((c) => c.pago || !m?.precisaVerba);
   if (!canais.some((c) => c.id === v.canal)) v.canal = 'total';
   const sel = (id, opts, val) => `<select id="${id}">${optsHtml(opts, val)}</select>`;
@@ -349,7 +353,8 @@ function fichaDesenhar() {
         <div class="todo escopo-bloco" style="grid-column:1/-1"><p class="sub" style="margin:4px 0 0"><b>Escopo (opcional).</b> Amarre o teste a uma fatia: escolha da lista (vem das contas reais) ou digite. Com mais de um, vale o conjunto: o negócio precisa bater com todos. O resultado real da métrica chave passa a ser só o dessa fatia. Custo (CPL, CAC...) exige campanha.</p></div>
         <label class="largo">Página de destino (Analytics)<input id="f-pagina" list="dl-paginas" maxlength="300" value="${esc(v.paginaDestino)}" placeholder="quarkrh.com.br/diagnostico ou /diagnostico"></label>
         <label>Identificador de conversão (Pipedrive)<input id="f-ident" list="dl-ident" maxlength="200" value="${esc(v.identificadorConversao)}" placeholder="ex.: o identificador do RD"></label>
-        <label class="todo">Campanha (Meta Ads)<input id="f-campanha" list="dl-campanhas" maxlength="200" value="${esc(v.campanha)}" placeholder="escolha pelo nome ou digite o nome ou o ID"></label>
+        <div class="todo" style="grid-column:1/-1"><label>Campanhas (Meta Ads): escolha uma ou mais; os resultados somam<input id="f-camp-add" list="dl-campanhas" maxlength="200" placeholder="escolha pelo nome da lista (ou digite o nome ou o ID) e tecle Enter"></label>
+          <div class="tags" id="f-camp-chips" style="margin-top:8px">${S.campFicha.map((c, i) => `<span class="tag escopo">${esc(c)} <button type="button" class="btn-mini" data-rm="${i}" aria-label="Remover ${esc(c)}">×</button></span>`).join('') || '<span class="dica">Nenhuma campanha escolhida.</span>'}</div></div>
         <label class="todo">Hipótese<textarea id="f-hipotese" rows="2" maxlength="2000" placeholder="Se fizermos X, esperamos Y, porque Z.">${esc(v.hipotese)}</textarea></label>
         <label class="todo">Resultado esperado<textarea id="f-esperado" rows="2" maxlength="2000" placeholder="Que resultado esperamos? Ex.: CPL abaixo de R$ 35 sem perder a taxa de agendamento.">${esc(v.resultadoEsperado)}</textarea></label>
         <label class="largo">Métrica chave<select id="f-metrica"><option value="">— sem métrica (sem acompanhamento) —</option>${optsHtml(S.dados.metricas.map((x) => [x.id, x.rotulo]), v.metrica)}</select></label>
@@ -368,7 +373,11 @@ function fichaDesenhar() {
       <div class="acoes"><button type="button" class="btn-p" id="f-salvar">${e ? 'Salvar alterações' : 'Criar experimento'}</button><button type="button" class="btn-s" id="f-cancelar">Cancelar</button><span class="dica" id="f-msg" role="status"></span></div>
     </section>`;
   $('#f-metrica').addEventListener('change', () => fichaDesenhar());
-  for (const id of ['f-pagina', 'f-campanha', 'f-ident']) $(`#${id}`).addEventListener('change', () => fichaDesenhar());
+  for (const id of ['f-pagina', 'f-ident']) $(`#${id}`).addEventListener('change', () => fichaDesenhar());
+  const juntar = () => { const inp = $('#f-camp-add'); const t = inp.value.trim(); if (!t) return false; inp.value = ''; if (!S.campFicha.includes(t)) S.campFicha.push(t); fichaDesenhar(); $('#f-camp-add').focus(); return true; };
+  $('#f-camp-add').addEventListener('change', juntar);
+  $('#f-camp-add').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); juntar(); } });
+  $('#f-camp-chips').addEventListener('click', (ev) => { const b = ev.target.closest('[data-rm]'); if (b) { S.campFicha.splice(Number(b.dataset.rm), 1); fichaDesenhar(); } });
   $('#f-produto').addEventListener('change', () => fichaDesenhar());
   $('#f-salvar').addEventListener('click', salvarFicha);
   $('#f-cancelar').addEventListener('click', fecharFicha);
@@ -381,7 +390,7 @@ function lerFicha(cru) {
   const g = (id) => $(`#${id}`)?.value ?? '';
   const out = {
     titulo: g('f-titulo'), tipo: g('f-tipo'), status: g('f-status'), responsavel: g('f-responsavel'), areaImpacto: g('f-area'), hipotese: g('f-hipotese'), resultadoEsperado: g('f-esperado'),
-    produto: g('f-produto'), canal: g('f-canal'), metrica: g('f-metrica'), inicio: g('f-inicio'), fim: g('f-fim'), avaliacao: g('f-avaliacao'), paginaDestino: g('f-pagina'), campanha: g('f-campanha'), identificadorConversao: g('f-ident'), evidencias: g('f-evid'), aprendizado: g('f-aprend'),
+    produto: g('f-produto'), canal: g('f-canal'), metrica: g('f-metrica'), inicio: g('f-inicio'), fim: g('f-fim'), avaliacao: g('f-avaliacao'), paginaDestino: g('f-pagina'), identificadorConversao: g('f-ident'), evidencias: g('f-evid'), aprendizado: g('f-aprend'),
     ice: [g('f-ice0'), g('f-ice1'), g('f-ice2')].map((x) => (x === '' ? null : x)),
   };
   if (cru) return { ...out, meta: g('f-meta'), investimento: g('f-invest'), linhaBase: g('f-base') };
@@ -400,7 +409,7 @@ async function salvarFicha() {
   const corpo = {
     titulo: v.titulo, tipo: v.tipo, status: v.status, responsavel: nulo(v.responsavel), areaImpacto: nulo(v.areaImpacto), hipotese: nulo(v.hipotese), resultadoEsperado: nulo(v.resultadoEsperado),
     produto: v.produto, canal: v.canal, metrica: nulo(v.metrica), meta: v.metrica ? v.meta : null, linhaBase: v.metrica ? v.linhaBase : null, investimento: v.investimento,
-    inicio: nulo(v.inicio), fim: nulo(v.fim), paginaDestino: nulo(v.paginaDestino?.trim()), campanha: nulo(v.campanha?.trim()), identificadorConversao: nulo(v.identificadorConversao?.trim()), avaliacao: nulo(v.avaliacao), evidencias: nulo(v.evidencias), aprendizado: nulo(v.aprendizado),
+    inicio: nulo(v.inicio), fim: nulo(v.fim), paginaDestino: nulo(v.paginaDestino?.trim()), campanhas: [...S.campFicha, ...($('#f-camp-add')?.value.trim() ? [$('#f-camp-add').value.trim()] : [])], identificadorConversao: nulo(v.identificadorConversao?.trim()), avaliacao: nulo(v.avaliacao), evidencias: nulo(v.evidencias), aprendizado: nulo(v.aprendizado),
     iceImpacto: v.ice[0] == null ? null : Number(v.ice[0]), iceConfianca: v.ice[1] == null ? null : Number(v.ice[1]), iceFacilidade: v.ice[2] == null ? null : Number(v.ice[2]),
   };
   S.enviando = true; $('#f-salvar').disabled = true; msg.textContent = 'Salvando…';

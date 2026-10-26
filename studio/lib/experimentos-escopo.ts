@@ -16,13 +16,17 @@ import { TZ_MONITOR, ZERO, somar, type DadosMonitor, type ProdutoMonitor, type S
 
 type Db = Pick<pg.Pool, 'query'>;
 
+/** Uma campanha da Meta: pelo ID, ou só pelo nome quando o ID não é conhecido. */
+export interface CampanhaEscopo { id: string | null; nome: string | null }
+export const MAX_CAMPANHAS = 40;
 export interface Escopo {
   paginaHost: string | null; paginaCaminho: string | null;
-  campanhaId: string | null; campanhaNome: string | null;
+  /** Uma ou mais campanhas da Meta: os resultados somam. */
+  campanhas: CampanhaEscopo[];
   identificadorConversao: string | null;
 }
-export const temEscopo = (e: Partial<Escopo>): boolean => !!(e.paginaCaminho || e.campanhaId || e.campanhaNome || e.identificadorConversao);
-export const temCampanha = (e: Partial<Escopo>): boolean => !!(e.campanhaId || e.campanhaNome);
+export const temCampanha = (e: Partial<Escopo>): boolean => !!e.campanhas?.length;
+export const temEscopo = (e: Partial<Escopo>): boolean => !!(e.paginaCaminho || temCampanha(e) || e.identificadorConversao);
 
 /* ---------- entrada digitada ou escolhida (pura) ---------- */
 /** "https://www.site.com.br/Blog/Post/?a=1" -> host "site.com.br" e caminho "/blog/post"; "/blog/post" -> só o caminho (vale para qualquer host). */
@@ -50,8 +54,21 @@ export function normalizarCampanha(entrada: string): { id: string | null; nome: 
   if (m) { const nome = t.replace(/\s*\(\d{6,20}\)\s*$/, '').trim(); return { id: m[1]!, nome: /^\d+$/.test(nome) || !nome ? null : nome }; }
   return { id: null, nome: t };
 }
-export const campanhaTexto = (e: Pick<Escopo, 'campanhaId' | 'campanhaNome'>): string | null =>
-  e.campanhaId ? `${e.campanhaNome ?? 'Campanha'} (${e.campanhaId})` : e.campanhaNome;
+export const campanhaTexto = (c: CampanhaEscopo): string => (c.id ? `${c.nome ?? 'Campanha'} (${c.id})` : (c.nome ?? ''));
+/** Lista de textos (um por campanha) -> campanhas sem repetição, no máximo MAX_CAMPANHAS; texto vazio é ignorado. */
+export function normalizarCampanhas(textos: readonly string[]): CampanhaEscopo[] {
+  const vistos = new Set<string>();
+  const out: CampanhaEscopo[] = [];
+  for (const t of textos) {
+    const c = normalizarCampanha(t);
+    if (!c) continue;
+    const chave = c.id ?? `nome:${(c.nome ?? '').toLowerCase()}`;
+    if (vistos.has(chave)) continue;
+    vistos.add(chave);
+    out.push(c);
+  }
+  return out.slice(0, MAX_CAMPANHAS);
+}
 
 /* ---------- opções das contas reais ---------- */
 export interface OpcoesEscopo {
@@ -83,8 +100,11 @@ export async function lerDadosEscopo(db: Db, e: Escopo & { produto: ProdutoMonit
   const p: unknown[] = [desde, e.produto];
   const add = (v: unknown) => `$${p.push(v)}`;
   const conds: string[] = [];
-  if (e.campanhaId) conds.push(`d.deal_id in (select deal_id from analytics.negocios_meta where campanha_id = ${add(e.campanhaId)})`);
-  else if (e.campanhaNome) conds.push(`d.deal_id in (select deal_id from analytics.negocios_meta where lower(campanha) = ${add(e.campanhaNome.toLowerCase())})`);
+  // várias campanhas somam: o negócio precisa estar ligado a QUALQUER uma delas (os outros itens do escopo continuam valendo em conjunto)
+  const ids = e.campanhas.map((c) => c.id).filter((x): x is string => !!x);
+  const nomes = e.campanhas.filter((c) => !c.id && c.nome).map((c) => (c.nome as string).toLowerCase());
+  const qualCampanha = (): string => [ids.length ? `campanha_id = any(${add(ids)}::bigint[])` : '', nomes.length ? `lower(campanha) = any(${add(nomes)}::text[])` : ''].filter(Boolean).join(' or ');
+  if (temCampanha(e)) conds.push(`d.deal_id in (select deal_id from analytics.negocios_meta where ${qualCampanha()})`);
   if (e.identificadorConversao) conds.push(`d.deal_id in (select deal_id from analytics.conversoes_pipe_negocios where evento = ${add(e.identificadorConversao)})`);
   if (e.paginaCaminho) conds.push(`d.deal_id in (select deal_id from analytics.negocios_url where caminho_url = ${add(e.paginaCaminho)}${e.paginaHost ? ` and host_url = ${add(e.paginaHost)}` : ''})`);
   const alvo = `d.produto = $2 and ${conds.join(' and ') || 'true'}`;
@@ -105,9 +125,9 @@ export async function lerDadosEscopo(db: Db, e: Escopo & { produto: ProdutoMonit
   if (temCampanha(e)) {
     const q: unknown[] = [desde];
     const a = (v: unknown) => `$${q.push(v)}`;
-    const qual = e.campanhaId ? `campanha_id = ${a(e.campanhaId)}` : `lower(campanha) = ${a((e.campanhaNome ?? '').toLowerCase())}`;
+    const qual = [ids.length ? `campanha_id = any(${a(ids)}::bigint[])` : '', nomes.length ? `lower(campanha) = any(${a(nomes)}::text[])` : ''].filter(Boolean).join(' or ');
     consultas.push(db.query(`select dia::text as dia, sum(gasto)::float8 as gasto, sum(impressoes)::float8 as impressoes, sum(cliques_link)::float8 as cliques
-                               from analytics.meta_desempenho_dia where dia >= $1::date and ${qual} group by 1`, q).then((r) => { for (const x of r.rows) poe(x.dia, { invest: n(x.gasto), impressoes: n(x.impressoes), cliques: n(x.cliques) }); }));
+                               from analytics.meta_desempenho_dia where dia >= $1::date and (${qual}) group by 1`, q).then((r) => { for (const x of r.rows) poe(x.dia, { invest: n(x.gasto), impressoes: n(x.impressoes), cliques: n(x.cliques) }); }));
   } else if (e.paginaCaminho) {
     const q: unknown[] = [desde, e.paginaCaminho];
     consultas.push(db.query(`select dia::text as dia, sum(visualizacoes)::float8 as v from analytics.site_paginas_dia

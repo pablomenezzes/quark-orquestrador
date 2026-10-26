@@ -71,8 +71,8 @@ const periodo = (l) => (l.de === l.ate ? dm(l.de) : `${dm(l.de)} a ${dm(l.ate)}`
 
 /** Rótulos do escopo (página, campanha e identificador) do experimento, como aparecem no cadastro. */
 function rotuloEscopo(e) {
-  const camp = e.campanhaId ? `${e.campanhaNome ?? 'Campanha'} (${e.campanhaId})` : e.campanhaNome;
-  return [e.paginaCaminho ? `Página ${e.paginaHost ?? ''}${e.paginaCaminho}` : '', camp ? `Campanha ${camp}` : '', e.identificadorConversao ? `Identificador ${e.identificadorConversao}` : ''].filter(Boolean);
+  const camps = (e.campanhas ?? []).map((c) => (c.id ? `${c.nome ?? 'Campanha'} (${c.id})` : (c.nome ?? '')));
+  return [e.paginaCaminho ? `Página ${e.paginaHost ?? ''}${e.paginaCaminho}` : '', camps.length ? `${camps.length === 1 ? 'Campanha' : 'Campanhas (somadas)'} ${camps.join(', ')}` : '', e.identificadorConversao ? `Identificador ${e.identificadorConversao}` : ''].filter(Boolean);
 }
 function ctx(R) {
   const e = R.experimento, p = e.progresso, rel = R.relatorio;
