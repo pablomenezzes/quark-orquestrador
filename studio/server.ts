@@ -309,9 +309,18 @@ export function createStudioHandler(opts: StudioOptions): (req: IncomingMessage,
       const repo = opts.experimentos;
       if (!repo) return send(res, 503, { error: 'experimentos_nao_configurado', detail: 'Falta PANEL_DB_URL no .env.local. Peça para gerar com: node scripts/set-role-password.mjs --role orq_panel --apply' });
       if (path === '/api/experimentos') {
-        if (method === 'GET') return send(res, 200, await repo.listar());
+        if (method === 'GET') {
+          // ?rapido=1: só o cadastro (a página pede os resultados em seguida, em /progresso); sem o parâmetro, tudo junto como sempre
+          if (url.searchParams.get('rapido') === '1' && repo.listarBasico) return send(res, 200, await repo.listarBasico());
+          return send(res, 200, await repo.listar());
+        }
         if (method === 'POST') return send(res, 201, await repo.criar(await readJson(req)));
         return send(res, 405, { error: 'method_not_allowed' });
+      }
+      if (path === '/api/experimentos/progresso') {
+        if (method !== 'GET') return send(res, 405, { error: 'method_not_allowed' });
+        if (!repo.progressos) return send(res, 404, { error: 'not_found' });
+        return send(res, 200, await repo.progressos(url.searchParams.get('fresh') === '1'));
       }
       if (path === '/api/experimentos/valores') {
         if (method !== 'GET') return send(res, 405, { error: 'method_not_allowed' });

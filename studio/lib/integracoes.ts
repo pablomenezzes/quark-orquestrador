@@ -112,7 +112,7 @@ const n = (v: number | null | undefined, casas = 4): string => (v == null || !Nu
 const iso = (s: string | null) => s ?? '';
 
 export interface ExperimentoParaSync extends ExperimentoComProgresso { documentacaoHtml: string | null }
-const ESTADO = { sem_metrica: 'Sem acompanhamento', cancelado: 'Cancelado', nao_iniciou: 'Ainda não começou', cedo: 'Poucos dias de dados', sem_dados: 'Sem dados', atingida: 'Meta atingida', em_linha: 'Em linha', atencao: 'Atenção', fora: 'Abaixo do previsto' } as const;
+const ESTADO = { carregando: 'Calculando', sem_metrica: 'Sem acompanhamento', cancelado: 'Cancelado', nao_iniciou: 'Ainda não começou', cedo: 'Poucos dias de dados', sem_dados: 'Sem dados', atingida: 'Meta atingida', em_linha: 'Em linha', atencao: 'Atenção', fora: 'Abaixo do previsto' } as const;
 
 export const CABECALHO_EXPERIMENTOS = ['ID', 'Título', 'Tipo', 'Status', 'Responsável', 'Área de impacto', 'Produto', 'Canal', 'Página de destino', 'Campanhas (Meta)', 'Identificador de conversão', 'Filtros por campo (Pipedrive)', 'Contabilização', 'Métrica chave', 'Meta', 'Real (atual)', 'Atingimento', 'Situação', 'Investimento previsto (R$)', 'Gasto real (R$)', 'Início', 'Fim', 'ICE', 'Avaliação', 'Desfecho', 'Documentação (ClickUp)', 'Atualizado em'];
 export function linhasExperimentos(exps: readonly ExperimentoParaSync[], rotuloMetrica: (id: string | null) => string): string[][] {

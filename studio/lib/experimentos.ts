@@ -92,9 +92,9 @@ export interface Experimento {
   criadoEm: string; atualizadoEm: string;
 }
 
-export type Estado = 'sem_metrica' | 'cancelado' | 'nao_iniciou' | 'cedo' | 'sem_dados' | 'atingida' | 'em_linha' | 'atencao' | 'fora';
+export type Estado = 'carregando' | 'sem_metrica' | 'cancelado' | 'nao_iniciou' | 'cedo' | 'sem_dados' | 'atingida' | 'em_linha' | 'atencao' | 'fora';
 export const ESTADO_ROTULO: Record<Estado, string> = {
-  sem_metrica: 'Sem acompanhamento automático', cancelado: 'Cancelado', nao_iniciou: 'Ainda não começou', cedo: 'Poucos dias de dados', sem_dados: 'Sem dados no período',
+  carregando: 'Calculando…', sem_metrica: 'Sem acompanhamento automático', cancelado: 'Cancelado', nao_iniciou: 'Ainda não começou', cedo: 'Poucos dias de dados', sem_dados: 'Sem dados no período',
   atingida: 'Meta atingida', em_linha: 'Em linha', atencao: 'Atenção', fora: 'Abaixo do previsto',
 };
 export interface PontoSerie { dia: string; real: number | null; esperado: number | null }
@@ -424,6 +424,9 @@ const CAMPO_SQL: Record<keyof ExperimentoEntrada, string> = {
 /** A lista de campanhas vai como JSON (o pg mandaria um array do Postgres, não jsonb). */
 const valorSql = (k: keyof ExperimentoEntrada, v: unknown): unknown => (k === 'campanhas' || k === 'regras' || k === 'filtros' ? JSON.stringify(v ?? []) : v);
 
+export interface ProgressosExperimentos { hoje: string; progressos: Record<number, Progresso> }
+const PROGRESSO_CARREGANDO: Progresso = { estado: 'carregando', dadosAte: '', diasCompletos: 0, totalDias: 0, decorrido: 0, atual: null, esperado: null, linhaBase: null, linhaBaseAuto: true, atingimento: null, projecao: null, gasto: 0, usoOrcamento: null, orcamentoAdiantado: false, serie: [], trajetoria: null };
+
 export interface ListaExperimentos {
   hoje: string;
   metricas: readonly MetricaExp[];
@@ -449,6 +452,9 @@ export interface RelatorioExperimento {
 }
 export interface ExperimentosRepo {
   listar(): Promise<ListaExperimentos>;
+  /** Opcionais: só o cadastro (rápido) e os resultados à parte; sem eles o servidor usa `listar()`. */
+  listarBasico?(): Promise<ListaExperimentos>;
+  progressos?(fresh?: boolean): Promise<ProgressosExperimentos>;
   criar(entrada: unknown): Promise<ExperimentoComProgresso>;
   atualizar(id: number, entrada: unknown): Promise<ExperimentoComProgresso>;
   relatorio(id: number): Promise<RelatorioExperimento>;
@@ -474,25 +480,59 @@ export class PgExperimentosRepo implements ExperimentosRepo, RepoSync {
     const out = new Map<number, DadosExp>();
     const ativos = exps.filter((e) => e.status !== 'cancelado' && e.inicio && e.fim);
     const desdeDe = (e: Experimento) => somaDias(e.inicio!, -diasEntre(e.inicio!, e.fim!));
+    // tudo em paralelo (o pool tem mais de uma conexão): um Monitor por produto e uma fatia por experimento com escopo; cada regra manual lê seus campos logo depois da base dela
+    const tarefas: Array<Promise<void>> = [];
     for (const produto of EXP_PRODUTOS) {
       const meus = ativos.filter((e) => e.produto === produto && !temEscopo(e));
       if (!meus.length) continue;
-      const d = await this.ler(this.db, hoje, hora, produto, meus.map(desdeDe).sort()[0]!);
-      for (const e of meus) out.set(e.id, d);
+      tarefas.push(this.ler(this.db, hoje, hora, produto, meus.map(desdeDe).sort()[0]!).then((d) => { for (const e of meus) out.set(e.id, d); }));
     }
-    for (const e of ativos.filter((x) => temEscopo(x))) out.set(e.id, await this.lerEscopo(this.db, e, hora, desdeDe(e)));
+    const comRegras = (e: Experimento) => e.contabilizacao === 'manual' && e.regras.length > 0;
+    for (const e of ativos.filter((x) => temEscopo(x))) tarefas.push(this.lerEscopo(this.db, e, hora, desdeDe(e)).then((d) => { out.set(e.id, d); }));
+    await Promise.all(tarefas);
     // contabilização manual: lê só os campos que as regras usam e põe o medidor junto dos dados
-    for (const e of ativos.filter((x) => x.contabilizacao === 'manual' && x.regras.length)) {
+    await Promise.all(ativos.filter(comRegras).map(async (e) => {
       const base = out.get(e.id);
-      if (!base) continue;
+      if (!base) return;
       const campos = await this.lerCamposManuais(this.db, e, camposUsados(e.regras), desdeDe(e));
       const canal = temEscopo(e) ? 'meta' : e.canal;
       out.set(e.id, { ...base, medir: criarMedidor(e.regras, campos, (m, j) => valorMetrica(base, canal, m, j)) });
-    }
+    }));
     return out;
   }
   private comProgresso(exps: Experimento[], dados: Map<number, DadosExp>, hoje: string): ExperimentoComProgresso[] {
     return exps.map((e) => ({ ...e, progresso: calcularProgresso(efetivo(e), dados.get(e.id) ?? SEM_DADOS, hoje) }));
+  }
+
+  private cacheProgresso: { assinatura: string; ate: number; valor: Promise<ProgressosExperimentos> } | null = null;
+  private readonly cacheOpcoes = new Map<string, { ate: number; valor: Promise<OpcoesEscopo> }>();
+
+  /** SÓ o cadastro (uma consulta, milissegundos): a lista aparece na hora e o resultado de cada experimento chega por `progressos()`. */
+  async listarBasico(): Promise<ListaExperimentos> {
+    const { hoje } = agoraLocal(this.agora());
+    const r = await this.db.query(`select ${COLUNAS} from mkt.experimentos order by (status = 'rodando') desc, ice_score desc nulls last, id desc`);
+    const exps = r.rows.map(deLinha);
+    return { hoje, metricas: METRICAS_EXP, canais: EXP_CANAIS, tipos: EXP_TIPOS, campos: CAMPOS, experimentos: exps.map((e) => ({ ...e, progresso: PROGRESSO_CARREGANDO })), calibracao: calibracaoPor(exps) };
+  }
+
+  /**
+   * O resultado de todos os experimentos (a parte lenta: lê o Monitor e as fatias do escopo). Guardado por 2 minutos enquanto o cadastro não muda
+   * (os dados de negócios e mídia só mudam a cada sincronização); `fresh` ignora a guarda ("Atualizar agora"). Chamadas simultâneas dividem a mesma leitura.
+   */
+  async progressos(fresh = false): Promise<ProgressosExperimentos> {
+    const { hoje, hora } = agoraLocal(this.agora());
+    const r = await this.db.query(`select ${COLUNAS} from mkt.experimentos order by id`);
+    const exps = r.rows.map(deLinha);
+    const assinatura = `${hoje}|${exps.map((e) => `${e.id}:${e.atualizadoEm}`).join(',')}`;
+    const agora = this.agora().getTime();
+    if (!fresh && this.cacheProgresso && this.cacheProgresso.assinatura === assinatura && this.cacheProgresso.ate > agora) return this.cacheProgresso.valor;
+    const valor = (async (): Promise<ProgressosExperimentos> => {
+      const dados = await this.dadosPor(exps, hoje, hora);
+      return { hoje, progressos: Object.fromEntries(this.comProgresso(exps, dados, hoje).map((e) => [e.id, e.progresso])) };
+    })();
+    this.cacheProgresso = { assinatura, ate: agora + 120_000, valor };
+    valor.catch(() => { if (this.cacheProgresso?.valor === valor) this.cacheProgresso = null; }); // erro não fica guardado
+    return valor;
   }
 
   async listar(): Promise<ListaExperimentos> {
@@ -575,7 +615,15 @@ export class PgExperimentosRepo implements ExperimentosRepo, RepoSync {
 
   async opcoes(produto?: string): Promise<OpcoesEscopo> {
     if (produto && !(EXP_PRODUTOS as readonly string[]).includes(produto)) throw new PainelInvalido('produto deve ser rh ou clinic');
-    return listarOpcoes(this.db, produto as ProdutoMonitor | undefined);
+    // as opções vêm de várias visões (levavam segundos): guardadas por 15 minutos por produto; chamadas simultâneas dividem a mesma leitura
+    const chave = produto ?? '';
+    const agora = this.agora().getTime();
+    const c = this.cacheOpcoes.get(chave);
+    if (c && c.ate > agora) return c.valor;
+    const valor = listarOpcoes(this.db, produto as ProdutoMonitor | undefined);
+    this.cacheOpcoes.set(chave, { ate: agora + 15 * 60_000, valor });
+    valor.catch(() => { if (this.cacheOpcoes.get(chave)?.valor === valor) this.cacheOpcoes.delete(chave); });
+    return valor;
   }
 
   async valores(campo: string, produto?: string, q?: string): Promise<Array<{ valor: string; negocios: number }>> {

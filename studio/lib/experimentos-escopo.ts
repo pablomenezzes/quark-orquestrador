@@ -110,7 +110,7 @@ export interface OpcoesEscopo {
   campanhas: Array<{ id: string; nome: string; gasto: number }>;
   identificadores: Array<{ evento: string; negocios: number }>;
   /** Campos de negócio do Pipedrive que têm valor (para escolher o campo do filtro). */
-  camposPipe: Array<{ nome: string; negocios: number }>;
+  camposPipe: Array<{ nome: string }>;
 }
 export async function listarOpcoes(db: Db, produto?: ProdutoMonitor): Promise<OpcoesEscopo> {
   const host = produto === 'clinic' ? ` and host = 'quarkclinic.com.br'` : produto === 'rh' ? ` and host <> 'quarkclinic.com.br'` : '';
@@ -119,13 +119,14 @@ export async function listarOpcoes(db: Db, produto?: ProdutoMonitor): Promise<Op
     db.query(`select campanha_id::text as id, max(campanha) as nome, sum(gasto)::float8 as gasto from analytics.meta_desempenho_dia
                where dia >= current_date - 365 and campanha_id is not null${produto ? ' and produto = $1' : ''} group by 1 order by max(dia) desc, gasto desc limit 400`, produto ? [produto] : []),
     db.query(`select evento, count(*)::int as n from analytics.conversoes_pipe_negocios where evento is not null and evento not like '[Etapa]%'${produto ? ' and produto = $1' : ''} group by 1 order by n desc limit 400`, produto ? [produto] : []),
-    db.query(`select c.nome_pipedrive as nome, count(distinct c.deal_id)::int as n from analytics.deal_campos c${produto ? ' join analytics.negocios_bi d on d.deal_id = c.deal_id and d.produto = $1' : ''} where coalesce(c.valor_legivel, c.valor #>> '{}') is not null group by 1 order by n desc limit 300`, produto ? [produto] : []),
+    // o catálogo de campos de negócio (139 linhas): contar os valores de cada campo em analytics.deal_campos levava 11 s e rodava a cada abertura da página
+    db.query(`select nome_pipedrive as nome from analytics.campos where entity = 'deal' order by ordem limit 300`),
   ]);
   return {
     paginas: pg.rows.map((r) => ({ host: String(r.host), caminho: String(r.caminho), visualizacoes: Number(r.v) })),
     campanhas: ca.rows.filter((r) => r.nome).map((r) => ({ id: String(r.id), nome: String(r.nome), gasto: Number(r.gasto) })),
     identificadores: id.rows.map((r) => ({ evento: String(r.evento), negocios: Number(r.n) })),
-    camposPipe: cp.rows.map((r) => ({ nome: String(r.nome), negocios: Number(r.n) })),
+    camposPipe: cp.rows.map((r) => ({ nome: String(r.nome) })),
   };
 }
 

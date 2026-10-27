@@ -84,10 +84,11 @@ describe('Filtros por campo do Pipedrive: leitura', () => {
     const db = { query: async (sql: string, params: unknown[] = []) => {
       sqls.push({ sql: sql.replace(/\s+/g, ' '), params });
       if (/group by 1 order by n desc, v/.test(sql)) return { rows: [{ v: 'AD1', n: 901 }, { v: null, n: 3 }] };
-      if (/c\.nome_pipedrive as nome/.test(sql)) return { rows: [{ nome: 'UTM Term', n: 5 }] };
+      if (/from analytics\.campos where entity = 'deal'/.test(sql)) return { rows: [{ nome: 'UTM Term' }] };
       return { rows: [] };
     } } as never;
-    expect((await listarOpcoes(db, 'rh')).camposPipe).toEqual([{ nome: 'UTM Term', negocios: 5 }]);
+    expect((await listarOpcoes(db, 'rh')).camposPipe).toEqual([{ nome: 'UTM Term' }]); // do catálogo de campos, sem contar valores (contar levava 11 s)
+    expect(sqls.some((x) => x.sql.includes('analytics.deal_campos') && x.sql.includes('count(distinct c.deal_id)') && !x.sql.includes('group by 1 order by n desc, v'))).toBe(false);
     expect(await listarValoresCampo(db, 'UTM Term', 'rh', "a'b")).toEqual([{ valor: 'AD1', negocios: 901 }]);
     const v = sqls.find((x) => x.sql.includes('order by n desc, v'))!;
     expect(v.params).toEqual(['UTM Term', 'rh', "a'b"]);

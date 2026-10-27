@@ -7,7 +7,7 @@ import { abrirDocumentacao } from './experimentos-doc.js';
 const guardado = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch { /* armazenamento indisponível: segue sem lembrar */ } return null; };
 const S = {
   dados: null, vista: guardado('exp.vista') === 'kanban' ? 'kanban' : 'planilha', filtro: 'ativos', tipo: '', produto: '', busca: '',
-  ficha: null, rascunho: null, pend: {}, enviando: false, opcoes: null, campFicha: [], contabFicha: 'automatica', regrasFicha: [], filtrosFicha: [], filtrosModoFicha: 'todos', valoresCampo: {},
+  ficha: null, rascunho: null, pend: {}, enviando: false, opcoes: null, campFicha: [], progToken: 0, opcoesPedidas: false, contabFicha: 'automatica', regrasFicha: [], filtrosFicha: [], filtrosModoFicha: 'todos', valoresCampo: {},
 };
 const COLUNAS_KANBAN = ['backlog', 'planejado', 'rodando', 'bloqueado', 'concluido', 'cancelado'];
 const paginaTexto = (host, caminho) => (caminho ? `${host ?? ''}${caminho}` : '');
@@ -49,10 +49,10 @@ const mostrarErro = (msg) => { $('#aviso').innerHTML = msg ? `<div class="erro-m
 const hojeIso = () => S.dados?.hoje ?? new Date().toISOString().slice(0, 10);
 const somaDias = (d, k) => new Date(Date.parse(`${d}T00:00:00Z`) + k * 86_400_000).toISOString().slice(0, 10);
 
-async function carregar() {
+async function carregar(fresh = false) {
   $('#lista').classList.add('carregando');
   try {
-    S.dados = await api('/api/experimentos');
+    S.dados = await api('/api/experimentos?rapido=1'); // só o cadastro: a lista aparece na hora
     mostrarErro('');
   } catch (e) {
     mostrarErro(`Não foi possível carregar os experimentos: ${e.message}`);
@@ -60,11 +60,36 @@ async function carregar() {
     $('#lista').classList.remove('carregando');
     return;
   }
-  carregarOpcoes();
   $('#et-dados').textContent = `Dados completos até ontem · ${dmy(S.dados.hoje)}`;
   if ($('#f-tipo-lista').options.length < 2) $('#f-tipo-lista').insertAdjacentHTML('beforeend', S.dados.tipos.map((t) => `<option value="${esc(t.id)}">${esc(t.nome)}</option>`).join(''));
   desenhar();
   $('#lista').classList.remove('carregando');
+  carregarProgresso(fresh);
+}
+/** Os resultados (a parte lenta) chegam depois da lista e entram nas linhas e nos cards sem apagar o que você estiver digitando. */
+async function carregarProgresso(fresh) {
+  const ficha = ++S.progToken;
+  const et = $('#et-dados');
+  const base = et.textContent;
+  et.textContent = `${base} · calculando os resultados…`;
+  try {
+    const r = await api(`/api/experimentos/progresso${fresh ? '?fresh=1' : ''}`);
+    if (ficha !== S.progToken) return; // chegou outra rodada depois: a mais nova vale
+    for (const e of S.dados.experimentos) if (r.progressos[e.id]) e.progresso = r.progressos[e.id];
+    mostrarErro('');
+  } catch (err) {
+    if (ficha !== S.progToken) return;
+    mostrarErro(`Não foi possível calcular os resultados: ${err.message}`);
+  }
+  et.textContent = base;
+  const foco = document.activeElement;
+  if (!foco || !['INPUT', 'TEXTAREA', 'SELECT'].includes(foco.tagName) || !lista.contains(foco)) desenhar(); // não redesenha a planilha com uma célula em edição
+}
+/** As opções (páginas, campanhas, identificadores e campos do Pipedrive) só são buscadas quando a ficha ou uma célula de escopo é aberta, uma vez. */
+function garantirOpcoes() {
+  if (S.opcoesPedidas) return;
+  S.opcoesPedidas = true;
+  carregarOpcoes();
 }
 
 /* ---------- gráfico: previsto (tracejado) contra o real ---------- */
@@ -106,6 +131,7 @@ function progressoCompleto(e) {
   const m = mdef(e.metrica);
   const canal = S.dados.canais.find((c) => c.id === e.canal);
   const cal = S.dados.calibracao.find((c) => c.metrica === e.metrica);
+  if (p.estado === 'carregando') return '<p class="nota">Calculando o resultado…</p>';
   if (!acompanhavel(e)) return '<p class="aviso-m">Sem acompanhamento automático. Escolha a <b>métrica chave</b> com a meta e defina o início e o fim para o Studio calcular o resultado sozinho.</p>';
   const ehSoma = m?.tipo === 'soma';
   const numeros = `<div class="nums">
@@ -163,7 +189,7 @@ function linha(e) {
   const m = mdef(efetiva);
   const pend = S.pend[e.id] && e.meta == null;
   const p = e.progresso;
-  const gasto = !novo && acompanhavel(e) ? brl0.format(p.gasto) : '—';
+  const gasto = !novo && acompanhavel(e) ? (p.estado === 'carregando' ? '…' : brl0.format(p.gasto)) : '—';
   const acomp = novo ? '' : `${chipEstado(e)}${acompanhavel(e) && p.atual != null ? `<div class="nota">${esc(fmtM(m, p.atual))} de ${esc(fmtM(m, e.meta))}</div>` : ''}`;
   const doc = novo ? '' : `<button type="button" class="btn-mini ${e.temDocumentacao ? 'doc-ok' : ''}" data-acao="doc" title="Editor de documentação com relatório diário, semanal e geral">Documentação</button>`;
   const acoes = novo
@@ -208,7 +234,7 @@ function card(e) {
   const m = mdef(e.metrica);
   const p = e.progresso;
   const ice = e.iceScore == null ? '' : `<span class="tag ice" title="Média de impacto ${e.iceImpacto}, confiança ${e.iceConfianca} e facilidade ${e.iceFacilidade}">ICE ${nf.format(e.iceScore)}</span>`;
-  const barras = acompanhavel(e) && e.status !== 'backlog' ? `<div class="barras">${barra('Prazo', p.decorrido, `${p.diasCompletos}/${p.totalDias} dias`, null, false)}${barra('Meta', p.atingimento, p.atingimento == null ? 'sem dados' : `${nf0.format(p.atingimento * 100)}%`, p.decorrido, true)}</div>` : '';
+  const barras = acompanhavel(e) && e.status !== 'backlog' && p.estado !== 'carregando' ? `<div class="barras">${barra('Prazo', p.decorrido, `${p.diasCompletos}/${p.totalDias} dias`, null, false)}${barra('Meta', p.atingimento, p.atingimento == null ? 'sem dados' : `${nf0.format(p.atingimento * 100)}%`, p.decorrido, true)}</div>` : '';
   return `<article class="card-k" draggable="true" data-id="${e.id}">
     <h3>${esc(e.titulo)}</h3>
     <div class="tags"><span class="tag">${esc(tipoNome(e.tipo))}</span><span class="tag">${esc(PRODUTO_ROTULO[e.produto])}</span>${e.areaImpacto ? `<span class="tag">${esc(e.areaImpacto)}</span>` : ''}${ice}</div>
@@ -240,8 +266,9 @@ function desenhar() {
   const rod = todos.filter((e) => e.status === 'rodando' && acompanhavel(e));
   const cont = (est) => rod.filter((e) => est.includes(e.progresso.estado)).length;
   const nRod = todos.filter((e) => e.status === 'rodando').length;
+  const calculando = todos.some((e) => e.progresso.estado === 'carregando');
   $('#veredito').textContent = todos.length
-    ? `${todos.length} ${todos.length === 1 ? 'item' : 'itens'} na lista, ${nRod} ${nRod === 1 ? 'rodando' : 'rodando'}${rod.length ? `: ${cont(['em_linha', 'atingida'])} em linha, ${cont(['atencao'])} em atenção, ${cont(['fora'])} abaixo do previsto${cont(['cedo', 'sem_dados', 'nao_iniciou']) ? ` e ${cont(['cedo', 'sem_dados', 'nao_iniciou'])} ainda sem leitura` : ''}` : ''}.`
+    ? `${todos.length} ${todos.length === 1 ? 'item' : 'itens'} na lista, ${nRod} ${nRod === 1 ? 'rodando' : 'rodando'}${calculando ? ' (calculando os resultados…)' : rod.length ? `: ${cont(['em_linha', 'atingida'])} em linha, ${cont(['atencao'])} em atenção, ${cont(['fora'])} abaixo do previsto${cont(['cedo', 'sem_dados', 'nao_iniciou']) ? ` e ${cont(['cedo', 'sem_dados', 'nao_iniciou'])} ainda sem leitura` : ''}` : ''}.`
     : 'Nenhum experimento ainda. Use "Novo experimento" ou "+ Nova linha": só o título é obrigatório.';
   $('#v-planilha').setAttribute('aria-pressed', String(S.vista === 'planilha'));
   $('#v-kanban').setAttribute('aria-pressed', String(S.vista === 'kanban'));
@@ -325,7 +352,7 @@ async function adicionarLinha() {
 }
 
 /* ---------- ficha (painel lateral): todos os campos + progresso ---------- */
-function abrirFicha(id) { S.ficha = id; delete $('#ficha').dataset.montado; fichaDesenhar(); $('#ficha').hidden = false; $('#ficha').scrollTop = 0; $('#f-titulo')?.focus(); }
+function abrirFicha(id) { garantirOpcoes(); S.ficha = id; delete $('#ficha').dataset.montado; fichaDesenhar(); $('#ficha').hidden = false; $('#ficha').scrollTop = 0; $('#f-titulo')?.focus(); }
 function fecharFicha() { S.ficha = null; const f = $('#ficha'); f.hidden = true; f.innerHTML = ''; delete f.dataset.montado; }
 
 /** Linhas do editor de filtros por campo: campo (lista dos campos do Pipedrive ou digitado), operador e valor (sugestões do próprio campo). */
@@ -584,7 +611,8 @@ function novoCard(slot, status) {
 /* ---------- eventos ---------- */
 const lista = $('#lista');
 $('#novo').addEventListener('click', () => abrirFicha('novo'));
-$('#atualizar').addEventListener('click', carregar);
+$('#atualizar').addEventListener('click', () => carregar(true));
+lista.addEventListener('focusin', (ev) => { if (ev.target.matches?.('input[list]')) garantirOpcoes(); });
 $('#sync-sheets').addEventListener('click', async () => {
   const b = $('#sync-sheets');
   b.disabled = true; b.textContent = 'Sincronizando…';
