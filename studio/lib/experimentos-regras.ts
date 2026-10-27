@@ -12,7 +12,7 @@
  */
 import type pg from 'pg';
 import { TZ_MONITOR, type Janela } from './monitor.js';
-import { montarAlvo, temCampanha, type Escopo } from './experimentos-escopo.js';
+import { montarAlvo, temCampanha, temFiltros, type Escopo } from './experimentos-escopo.js';
 import type { ProdutoMonitor } from './monitor.js';
 
 type Db = Pick<pg.Pool, 'query'>;
@@ -27,9 +27,9 @@ export const CONTABILIZACOES = ['automatica', 'manual'] as const;
 export type Contabilizacao = (typeof CONTABILIZACOES)[number];
 
 /* ---------- catálogo de campos ---------- */
-export type Origem = 'identificador' | 'pagina' | 'campanhas' | 'escopo';
+export type Origem = 'identificador' | 'pagina' | 'campanhas' | 'filtros' | 'escopo';
 export interface CampoDef { id: string; rotulo: string; origem: Origem; formato: 'int' | 'brl'; grupo: string }
-const ORIGENS: Array<[Origem, string]> = [['identificador', 'do identificador de conversão'], ['pagina', 'da página de destino'], ['campanhas', 'das campanhas (ligação Meta)'], ['escopo', 'do escopo combinado']];
+const ORIGENS: Array<[Origem, string]> = [['identificador', 'do identificador de conversão'], ['pagina', 'da página de destino'], ['campanhas', 'das campanhas (ligação Meta)'], ['filtros', 'dos filtros por campo do Pipedrive'], ['escopo', 'do escopo combinado']];
 const MEDIDAS: Array<[string, string, 'int' | 'brl']> = [['negocios', 'Negócios criados', 'int'], ['leads', 'Leads', 'int'], ['mql', 'MQL', 'int'], ['reunioes', 'Reuniões agendadas', 'int'], ['ganhos', 'Ganhos', 'int'], ['mrr', 'MRR dos ganhos', 'brl'], ['perdidos', 'Perdidos', 'int']];
 export const CAMPOS: readonly CampoDef[] = [
   ...ORIGENS.flatMap(([o, r]) => MEDIDAS.map(([m, rot, f]): CampoDef => ({ id: `${o}.${m}`, rotulo: `${rot} ${r}`, origem: o, formato: f, grupo: `Negócios do Pipedrive ${r}` }))),
@@ -50,9 +50,10 @@ export function origemDisponivel(o: Origem, esc: Partial<Escopo>): boolean {
   if (o === 'identificador') return !!esc.identificadorConversao;
   if (o === 'pagina') return !!esc.paginaCaminho;
   if (o === 'campanhas') return temCampanha(esc);
-  return !!(esc.identificadorConversao || esc.paginaCaminho || temCampanha(esc));
+  if (o === 'filtros') return temFiltros(esc);
+  return !!(esc.identificadorConversao || esc.paginaCaminho || temCampanha(esc) || temFiltros(esc));
 }
-const ORIGEM_NOME: Record<Origem, string> = { identificador: 'o identificador de conversão', pagina: 'a página de destino', campanhas: 'as campanhas', escopo: 'algum item do escopo' };
+const ORIGEM_NOME: Record<Origem, string> = { identificador: 'o identificador de conversão', pagina: 'a página de destino', campanhas: 'as campanhas', filtros: 'ao menos um filtro por campo do Pipedrive', escopo: 'algum item do escopo' };
 
 export function validarRegras(b: unknown, metricasValidas: ReadonlySet<string>, esc: Partial<Escopo>): Regra[] {
   if (b == null) return [];
@@ -165,6 +166,7 @@ function escopoDaOrigem(e: Escopo & { produto: ProdutoMonitor }, o: Origem): Esc
     identificadorConversao: o === 'identificador' ? e.identificadorConversao : null,
     paginaCaminho: o === 'pagina' ? e.paginaCaminho : null, paginaHost: o === 'pagina' ? e.paginaHost : null,
     campanhas: o === 'campanhas' ? e.campanhas : [],
+    filtros: o === 'filtros' ? e.filtros : [],
   };
 }
 

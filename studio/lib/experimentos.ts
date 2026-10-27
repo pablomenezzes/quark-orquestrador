@@ -13,7 +13,7 @@ import type pg from 'pg';
 import { PainelInvalido, PainelNotFound } from './painel-repo.js';
 import type { ExperimentoParaSync, RepoSync } from './integracoes.js';
 import { CAMPOS, CONTABILIZACOES, RegraInvalida, camposUsados, conferirOrigens, criarMedidor, lerCampos, validarRegras, type Contabilizacao, type LeitorCampos, type Medir, type Regra } from './experimentos-regras.js';
-import { ESCOPO_MODOS, campanhaTexto, lerDadosEscopo, lerDetalheEscopo, listarOpcoes, normalizarCampanhas, normalizarPagina, temCampanha, temEscopo, type CampanhaEscopo, type Detalhe, type EscopoModo, type Escopo, type LeitorDetalhe, type LeitorEscopo, type OpcoesEscopo } from './experimentos-escopo.js';
+import { ESCOPO_MODOS, campanhaTexto, lerDadosEscopo, filtroTexto, lerDetalheEscopo, listarOpcoes, listarValoresCampo, normalizarCampanhas, normalizarFiltros, normalizarPagina, temCampanha, temEscopo, type CampanhaEscopo, type Detalhe, type FiltroCampo, type EscopoModo, type Escopo, type LeitorDetalhe, type LeitorEscopo, type OpcoesEscopo } from './experimentos-escopo.js';
 import { agoraLocal, lerDadosMonitor, metricasDe, somaDias, type CanalId, type DadosMonitor, type Janela, type ProdutoMonitor } from './monitor.js';
 
 type Db = Pick<pg.Pool, 'query'>;
@@ -81,6 +81,8 @@ export interface Experimento {
   avaliacao: Avaliacao | null; evidencias: string | null; temDocumentacao: boolean;
   /** Escopo opcional: página de destino (GA4), campanha da Meta e identificador de conversão do Pipedrive. */
   paginaHost: string | null; paginaCaminho: string | null; campanhas: CampanhaEscopo[]; identificadorConversao: string | null; escopoModo: EscopoModo;
+  /** Filtros por campo do Pipedrive (URL de Conversão, UTM Campaign, UTM Content, UTM Term ou qualquer outro campo) e como juntá-los. */
+  filtros: FiltroCampo[]; filtrosModo: 'todos' | 'qualquer';
   /** Automática: o Studio conta pelo escopo. Manual: cada métrica pode ter uma regra (fórmula com campos, métricas e números). */
   contabilizacao: Contabilizacao; regras: Regra[];
   /** Página deste experimento no Doc do ClickUp (preenchida ao enviar). */
@@ -127,6 +129,7 @@ export interface ExperimentoEntrada {
   inicio?: string | null; fim?: string | null; status?: string; avaliacao?: string | null; evidencias?: string | null;
   iceImpacto?: number | null; iceConfianca?: number | null; iceFacilidade?: number | null; aprendizado?: string | null;
   paginaHost?: string | null; paginaCaminho?: string | null; campanhas?: CampanhaEscopo[]; identificadorConversao?: string | null; escopoModo?: EscopoModo;
+  filtros?: FiltroCampo[]; filtrosModo?: 'todos' | 'qualquer';
   contabilizacao?: Contabilizacao; regras?: Regra[];
 }
 const num = (v: unknown, nome: string): number => { if (typeof v !== 'number' || !isFinite(v)) throw inv(`${nome} deve ser um número`); return v; };
@@ -191,6 +194,12 @@ export function validarEntrada(b: unknown, modo: 'criar' | 'editar', atual?: Atu
     if (e.campanhas != null && (!Array.isArray(e.campanhas) || e.campanhas.length > 60 || e.campanhas.some((t) => typeof t !== 'string' || t.length > 200))) throw inv('campanhas deve ser uma lista de até 40 textos');
     out.campanhas = normalizarCampanhas((e.campanhas as string[] | null) ?? []);
   }
+  if (tem('filtros')) {
+    const f = normalizarFiltros(e.filtros ?? []);
+    if (!f) throw inv('filtros inválidos: cada um precisa de campo, operador (igual, contem, comeca, termina, preenchido, vazio) e valor (até 300 caracteres); no máximo 10');
+    out.filtros = f;
+  }
+  if (tem('filtrosModo')) { if (e.filtrosModo !== 'todos' && e.filtrosModo !== 'qualquer') throw inv('filtrosModo deve ser todos ou qualquer'); out.filtrosModo = e.filtrosModo; }
   if (tem('contabilizacao')) { if (!(CONTABILIZACOES as readonly unknown[]).includes(e.contabilizacao)) throw inv(`contabilização inválida (${CONTABILIZACOES.join(', ')})`); out.contabilizacao = e.contabilizacao as Contabilizacao; }
   if (tem('escopoModo')) { if (!(ESCOPO_MODOS as readonly unknown[]).includes(e.escopoModo)) throw inv(`escopoModo inválido (${ESCOPO_MODOS.join(', ')})`); out.escopoModo = e.escopoModo as EscopoModo; }
   if (tem('identificadorConversao')) out.identificadorConversao = texto(e.identificadorConversao, 'identificador de conversão', 200);
@@ -206,6 +215,7 @@ export function validarEntrada(b: unknown, modo: 'criar' | 'editar', atual?: Atu
   const esc: Partial<Escopo> = {
     paginaCaminho: out.paginaCaminho !== undefined ? out.paginaCaminho : atual?.paginaCaminho,
     campanhas: out.campanhas !== undefined ? out.campanhas : atual?.campanhas,
+    filtros: out.filtros !== undefined ? out.filtros : atual?.filtros,
     identificadorConversao: out.identificadorConversao !== undefined ? out.identificadorConversao : atual?.identificadorConversao,
   };
   // regras da contabilização manual: validadas contra o escopo que ficará valendo
@@ -378,7 +388,7 @@ export function montarRelatorio(e: Pick<Experimento, 'canal' | 'metrica' | 'inic
 /* ---------- banco ---------- */
 const COLUNAS = `id, titulo, tipo, responsavel, area_impacto, hipotese, resultado_esperado, produto, canal, metrica, meta::float8 as meta, linha_base::float8 as linha_base,
   investimento::float8 as investimento, inicio::text as inicio, fim::text as fim, status, avaliacao, evidencias, documentacao is not null as tem_documentacao,
-  pagina_host, pagina_caminho, campanhas, campanha_id::text as campanha_id, campanha_nome, identificador_conversao, escopo_modo, contabilizacao, regras, clickup_pagina_id, clickup_url,
+  pagina_host, pagina_caminho, campanhas, campanha_id::text as campanha_id, campanha_nome, identificador_conversao, escopo_modo, filtros, filtros_modo, contabilizacao, regras, clickup_pagina_id, clickup_url,
   ice_impacto, ice_confianca, ice_facilidade, ice_score::float8 as ice_score,
   valor_final::float8 as valor_final, atingimento_final::float8 as atingimento_final, desfecho, aprendizado, criado_em, atualizado_em`;
 const nn = (v: unknown): number | null => (v == null ? null : Number(v));
@@ -396,6 +406,7 @@ function deLinha(r: Record<string, unknown>): Experimento {
     metrica: ns(r.metrica), meta: nn(r.meta), linhaBase: nn(r.linha_base), investimento: nn(r.investimento), inicio: ns(r.inicio), fim: ns(r.fim), status: r.status as ExpStatus,
     avaliacao: (r.avaliacao as Avaliacao | null) ?? null, evidencias: ns(r.evidencias), temDocumentacao: r.tem_documentacao === true,
     paginaHost: ns(r.pagina_host), paginaCaminho: ns(r.pagina_caminho), campanhas: campanhasDe(r), identificadorConversao: ns(r.identificador_conversao), escopoModo: ((ESCOPO_MODOS as readonly unknown[]).includes(r.escopo_modo) ? r.escopo_modo : 'todos') as EscopoModo,
+    filtros: Array.isArray(r.filtros) ? (r.filtros as FiltroCampo[]) : [], filtrosModo: r.filtros_modo === 'qualquer' ? 'qualquer' : 'todos',
     contabilizacao: (r.contabilizacao === 'manual' ? 'manual' : 'automatica') as Contabilizacao, regras: Array.isArray(r.regras) ? (r.regras as Regra[]) : [],
     clickupPaginaId: ns(r.clickup_pagina_id), clickupUrl: ns(r.clickup_url),
     iceImpacto: nn(r.ice_impacto), iceConfianca: nn(r.ice_confianca), iceFacilidade: nn(r.ice_facilidade), iceScore: nn(r.ice_score),
@@ -407,11 +418,11 @@ const CAMPO_SQL: Record<keyof ExperimentoEntrada, string> = {
   titulo: 'titulo', tipo: 'tipo', responsavel: 'responsavel', areaImpacto: 'area_impacto', hipotese: 'hipotese', resultadoEsperado: 'resultado_esperado',
   produto: 'produto', canal: 'canal', metrica: 'metrica', meta: 'meta', linhaBase: 'linha_base', investimento: 'investimento', inicio: 'inicio', fim: 'fim',
   status: 'status', avaliacao: 'avaliacao', evidencias: 'evidencias', iceImpacto: 'ice_impacto', iceConfianca: 'ice_confianca', iceFacilidade: 'ice_facilidade', aprendizado: 'aprendizado',
-  paginaHost: 'pagina_host', paginaCaminho: 'pagina_caminho', campanhas: 'campanhas', identificadorConversao: 'identificador_conversao', escopoModo: 'escopo_modo', contabilizacao: 'contabilizacao', regras: 'regras',
+  paginaHost: 'pagina_host', paginaCaminho: 'pagina_caminho', campanhas: 'campanhas', identificadorConversao: 'identificador_conversao', escopoModo: 'escopo_modo', filtros: 'filtros', filtrosModo: 'filtros_modo', contabilizacao: 'contabilizacao', regras: 'regras',
 };
 
 /** A lista de campanhas vai como JSON (o pg mandaria um array do Postgres, não jsonb). */
-const valorSql = (k: keyof ExperimentoEntrada, v: unknown): unknown => (k === 'campanhas' || k === 'regras' ? JSON.stringify(v ?? []) : v);
+const valorSql = (k: keyof ExperimentoEntrada, v: unknown): unknown => (k === 'campanhas' || k === 'regras' || k === 'filtros' ? JSON.stringify(v ?? []) : v);
 
 export interface ListaExperimentos {
   hoje: string;
@@ -444,13 +455,15 @@ export interface ExperimentosRepo {
   salvarDocumentacao(id: number, corpo: unknown): Promise<{ id: number; atualizadoEm: string }>;
   /** Páginas do Analytics, campanhas da Meta e identificadores de conversão do Pipedrive para escolher no cadastro. */
   opcoes(produto?: string): Promise<OpcoesEscopo>;
+  /** Valores mais comuns de um campo do Pipedrive, para sugerir no filtro por campo. */
+  valores(campo: string, produto?: string, q?: string): Promise<Array<{ valor: string; negocios: number }>>;
 }
 
 export type LeitorDados = (db: Db, hoje: string, hora: string, produto: ProdutoMonitor, desde: string) => Promise<DadosMonitor>;
 /** Com escopo (página, campanha ou identificador), os dados da fatia ficam na chave `meta` (ver experimentos-escopo.ts). */
 const efetivo = <T extends Pick<Experimento, 'canal'> & Partial<Escopo>>(e: T): T => (temEscopo(e) ? { ...e, canal: 'meta' } : e);
-export const rotuloEscopo = (e: Pick<Experimento, 'paginaHost' | 'paginaCaminho' | 'campanhas' | 'identificadorConversao'> & Partial<Pick<Experimento, 'escopoModo'>>): string[] =>
-  [e.paginaCaminho ? `Página ${e.paginaHost ?? ''}${e.paginaCaminho}` : '', e.campanhas.length ? `${e.campanhas.length === 1 ? 'Campanha' : 'Campanhas (somadas)'} ${e.campanhas.map(campanhaTexto).join(', ')}` : '', e.identificadorConversao ? `Identificador ${e.identificadorConversao}` : ''].filter(Boolean);
+export const rotuloEscopo = (e: Pick<Experimento, 'paginaHost' | 'paginaCaminho' | 'campanhas' | 'identificadorConversao'> & Partial<Pick<Experimento, 'escopoModo' | 'filtros' | 'filtrosModo'>>): string[] =>
+  [e.paginaCaminho ? `Página ${e.paginaHost ?? ''}${e.paginaCaminho}` : '', e.campanhas.length ? `${e.campanhas.length === 1 ? 'Campanha' : 'Campanhas (somadas)'} ${e.campanhas.map(campanhaTexto).join(', ')}` : '', e.identificadorConversao ? `Identificador ${e.identificadorConversao}` : '', e.filtros?.length ? `Filtros do Pipedrive (${e.filtrosModo === 'qualquer' ? 'qualquer um' : 'todos juntos'}): ${e.filtros.map(filtroTexto).join('; ')}` : ''].filter(Boolean);
 const SEM_DADOS = { diario: { google: new Map(), meta: new Map(), social: new Map(), organico: new Map() } } as DadosExp;
 
 export class PgExperimentosRepo implements ExperimentosRepo, RepoSync {
@@ -563,6 +576,12 @@ export class PgExperimentosRepo implements ExperimentosRepo, RepoSync {
   async opcoes(produto?: string): Promise<OpcoesEscopo> {
     if (produto && !(EXP_PRODUTOS as readonly string[]).includes(produto)) throw new PainelInvalido('produto deve ser rh ou clinic');
     return listarOpcoes(this.db, produto as ProdutoMonitor | undefined);
+  }
+
+  async valores(campo: string, produto?: string, q?: string): Promise<Array<{ valor: string; negocios: number }>> {
+    if (!campo.trim() || campo.length > 100) throw new PainelInvalido('campo inválido');
+    if (produto && !(EXP_PRODUTOS as readonly string[]).includes(produto)) throw new PainelInvalido('produto deve ser rh ou clinic');
+    return listarValoresCampo(this.db, campo.trim(), produto as ProdutoMonitor | undefined, q?.slice(0, 100));
   }
 
   async salvarDocumentacao(id: number, corpo: unknown): Promise<{ id: number; atualizadoEm: string }> {

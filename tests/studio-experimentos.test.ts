@@ -467,7 +467,8 @@ describe('Experimentos: API do Studio e página', () => {
   const repo: ExperimentosRepo = {
     async listar() { chamadas.push('listar'); return { hoje: '2026-10-11', metricas: METRICAS_EXP, canais: [] as never, tipos: [] as never, campos: [] as never, experimentos: [], calibracao: [] }; },
     async relatorio(id) { chamadas.push(`relatorio:${id}`); return { id } as never; },
-    async opcoes(produto) { chamadas.push(`opcoes:${produto ?? ''}`); return { paginas: [], campanhas: [], identificadores: [] }; },
+    async opcoes(produto) { chamadas.push(`opcoes:${produto ?? ''}`); return { paginas: [], campanhas: [], identificadores: [], camposPipe: [] }; },
+    async valores(campo) { chamadas.push(`valores:${campo}`); return []; },
     async salvarDocumentacao(id, b) { chamadas.push(`doc:${id}`); documentacaoValida(b); return { id, atualizadoEm: 'x' }; },
     async criar(b) { chamadas.push('criar'); validarEntrada(b, 'criar'); return { id: 1 } as never; },
     async atualizar(id, b) { chamadas.push(`atualizar:${id}`); validarEntrada(b, 'editar'); return { id } as never; },

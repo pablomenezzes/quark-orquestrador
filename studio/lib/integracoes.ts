@@ -10,6 +10,7 @@
 import { createSign } from 'node:crypto';
 import { htmlParaMarkdown, htmlParaTexto } from './html-para-md.js';
 import { METRICAS_EXP, type ExperimentoComProgresso } from './experimentos.js';
+import { filtroTexto } from './experimentos-escopo.js';
 
 type FetchLike = typeof fetch;
 export class IntegracaoErro extends Error {
@@ -113,11 +114,11 @@ const iso = (s: string | null) => s ?? '';
 export interface ExperimentoParaSync extends ExperimentoComProgresso { documentacaoHtml: string | null }
 const ESTADO = { sem_metrica: 'Sem acompanhamento', cancelado: 'Cancelado', nao_iniciou: 'Ainda não começou', cedo: 'Poucos dias de dados', sem_dados: 'Sem dados', atingida: 'Meta atingida', em_linha: 'Em linha', atencao: 'Atenção', fora: 'Abaixo do previsto' } as const;
 
-export const CABECALHO_EXPERIMENTOS = ['ID', 'Título', 'Tipo', 'Status', 'Responsável', 'Área de impacto', 'Produto', 'Canal', 'Página de destino', 'Campanhas (Meta)', 'Identificador de conversão', 'Contabilização', 'Métrica chave', 'Meta', 'Real (atual)', 'Atingimento', 'Situação', 'Investimento previsto (R$)', 'Gasto real (R$)', 'Início', 'Fim', 'ICE', 'Avaliação', 'Desfecho', 'Documentação (ClickUp)', 'Atualizado em'];
+export const CABECALHO_EXPERIMENTOS = ['ID', 'Título', 'Tipo', 'Status', 'Responsável', 'Área de impacto', 'Produto', 'Canal', 'Página de destino', 'Campanhas (Meta)', 'Identificador de conversão', 'Filtros por campo (Pipedrive)', 'Contabilização', 'Métrica chave', 'Meta', 'Real (atual)', 'Atingimento', 'Situação', 'Investimento previsto (R$)', 'Gasto real (R$)', 'Início', 'Fim', 'ICE', 'Avaliação', 'Desfecho', 'Documentação (ClickUp)', 'Atualizado em'];
 export function linhasExperimentos(exps: readonly ExperimentoParaSync[], rotuloMetrica: (id: string | null) => string): string[][] {
   return [CABECALHO_EXPERIMENTOS, ...exps.map((e) => [
     String(e.id), e.titulo, e.tipo, e.status, e.responsavel ?? '', e.areaImpacto ?? '', e.produto, e.canal,
-    e.paginaCaminho ? `${e.paginaHost ?? ''}${e.paginaCaminho}` : '', e.campanhas.map((c) => (c.id ? `${c.nome ?? 'Campanha'} (${c.id})` : (c.nome ?? ''))).join('; '), e.identificadorConversao ?? '',
+    e.paginaCaminho ? `${e.paginaHost ?? ''}${e.paginaCaminho}` : '', e.campanhas.map((c) => (c.id ? `${c.nome ?? 'Campanha'} (${c.id})` : (c.nome ?? ''))).join('; '), e.identificadorConversao ?? '', e.filtros.map(filtroTexto).join('; '),
     e.contabilizacao === 'manual' ? `Manual (${e.regras.length} regras)` : 'Automática', rotuloMetrica(e.metrica), n(e.meta), n(e.progresso.atual), n(e.progresso.atingimento), ESTADO[e.progresso.estado],
     n(e.investimento, 2), n(e.progresso.gasto, 2), iso(e.inicio), iso(e.fim), n(e.iceScore, 2), e.avaliacao ?? '', e.desfecho ?? '', e.clickupUrl ?? '', e.atualizadoEm,
   ])];

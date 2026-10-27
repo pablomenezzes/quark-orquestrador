@@ -143,7 +143,7 @@ describe('Integrações: conteúdo das guias e orquestração', () => {
     id: 3, titulo: 'Campanha de Diagnóstico', tipo: 'experimento', responsavel: 'Pablo', areaImpacto: 'Anúncio', hipotese: 'Baixar o CPL', resultadoEsperado: 'CPL de R$ 30', produto: 'rh', canal: 'meta',
     metrica: 'cpl', meta: 30, linhaBase: null, investimento: 9000, inicio: '2026-09-25', fim: '2026-11-08', status: 'rodando', avaliacao: null, evidencias: 'link', temDocumentacao: true,
     paginaHost: 'quarkrh-diagnostico.lovable.app', paginaCaminho: '/', campanhas: [{ id: '120251054032640158', nome: 'Diag 77' }], identificadorConversao: 'diagnostico-quarkrh', escopoModo: 'campanha_so_investimento',
-    contabilizacao: 'manual', regras: [{ metrica: 'leads', formula: [{ k: 'campo', v: 'identificador.leads' }] }], clickupPaginaId: null, clickupUrl: null,
+    contabilizacao: 'manual', regras: [{ metrica: 'leads', formula: [{ k: 'campo', v: 'identificador.leads' }] }], filtros: [{ campo: 'UTM Campaign', operador: 'contem', valor: '[Growth][77]' }], filtrosModo: 'todos', clickupPaginaId: null, clickupUrl: null,
     iceImpacto: 5, iceConfianca: 5, iceFacilidade: 2, iceScore: 4, valorFinal: null, atingimentoFinal: null, desfecho: null, aprendizado: 'Aprendeu', criadoEm: '', atualizadoEm: '2026-10-27T10:00:00Z',
     progresso: { estado: 'em_linha', atual: 22.8314545, atingimento: 0.91, gasto: 2511, esperado: 30, dadosAte: '2026-10-26', diasCompletos: 32, totalDias: 45, decorrido: 0.7, linhaBase: null, linhaBaseAuto: true, projecao: null, usoOrcamento: 0.3, orcamentoAdiantado: false, serie: [], trajetoria: null },
     documentacaoHtml: '<h1>Doc</h1><p>Texto <b>forte</b></p>', ...o,
@@ -159,6 +159,7 @@ describe('Integrações: conteúdo das guias e orquestração', () => {
     expect(l[1]![col('Página de destino')]).toBe('quarkrh-diagnostico.lovable.app/');
     expect(l[1]![col('Campanhas (Meta)')]).toBe('Diag 77 (120251054032640158)');
     expect(l[1]![col('Contabilização')]).toBe('Manual (1 regras)');
+    expect(l[1]![col('Filtros por campo (Pipedrive)')]).toBe('UTM Campaign contém "[Growth][77]"');
     expect(l[1]![col('Real (atual)')]).toBe('22.8315');
     expect(l[1]![col('Atingimento')]).toBe('0.91');
     expect(l[1]![col('Situação')]).toBe('Em linha');

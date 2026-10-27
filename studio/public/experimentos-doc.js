@@ -72,7 +72,7 @@ const periodo = (l) => (l.de === l.ate ? dm(l.de) : `${dm(l.de)} a ${dm(l.ate)}`
 /** Rótulos do escopo (página, campanha e identificador) do experimento, como aparecem no cadastro. */
 function rotuloEscopo(e) {
   const camps = (e.campanhas ?? []).map((c) => (c.id ? `${c.nome ?? 'Campanha'} (${c.id})` : (c.nome ?? '')));
-  return [e.paginaCaminho ? `Página ${e.paginaHost ?? ''}${e.paginaCaminho}` : '', camps.length ? `${camps.length === 1 ? 'Campanha' : 'Campanhas (somadas)'} ${camps.join(', ')}` : '', e.identificadorConversao ? `Identificador ${e.identificadorConversao}` : ''].filter(Boolean);
+  return [e.paginaCaminho ? `Página ${e.paginaHost ?? ''}${e.paginaCaminho}` : '', camps.length ? `${camps.length === 1 ? 'Campanha' : 'Campanhas (somadas)'} ${camps.join(', ')}` : '', e.identificadorConversao ? `Identificador ${e.identificadorConversao}` : '', e.filtros?.length ? `Filtros do Pipedrive (${e.filtrosModo === 'qualquer' ? 'qualquer um' : 'todos juntos'}): ${e.filtros.map((f) => `${f.campo} ${({ igual: 'é igual a', contem: 'contém', comeca: 'começa com', termina: 'termina com', preenchido: 'está preenchido', vazio: 'está vazio' })[f.operador] ?? f.operador}${f.operador === 'preenchido' || f.operador === 'vazio' ? '' : ` "${f.valor}"`}`).join('; ')}` : ''].filter(Boolean);
 }
 /** Regras da contabilização manual em texto: "CPL = Investimento das campanhas (Meta) ÷ Leads". */
 const OPS = { '+': '+', '-': '−', '*': '×', '/': '÷' };
@@ -246,6 +246,7 @@ function blocoConferencia(R) {
   const linhas = [];
   if (c.porIdentificador != null) linhas.push(['Identificador de conversão, sozinho', c.porIdentificador]);
   if (c.porPagina != null) linhas.push(['Página de destino, sozinha (URL de conversão do negócio)', c.porPagina]);
+  if (c.porFiltros != null) linhas.push(['Filtros por campo do Pipedrive, sozinhos', c.porFiltros]);
   if (c.porCampanhas != null) linhas.push(['Campanhas escolhidas, sozinhas (negócios que a ligação Meta atribui a elas)', c.porCampanhas]);
   const maior = Math.max(c.porIdentificador ?? 0, c.porPagina ?? 0);
   const aviso = c.porCampanhas != null && maior > c.porCampanhas * 1.5 && d.modo === 'todos'

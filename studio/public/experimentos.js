@@ -7,7 +7,7 @@ import { abrirDocumentacao } from './experimentos-doc.js';
 const guardado = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch { /* armazenamento indisponível: segue sem lembrar */ } return null; };
 const S = {
   dados: null, vista: guardado('exp.vista') === 'kanban' ? 'kanban' : 'planilha', filtro: 'ativos', tipo: '', produto: '', busca: '',
-  ficha: null, rascunho: null, pend: {}, enviando: false, opcoes: null, campFicha: [], contabFicha: 'automatica', regrasFicha: [],
+  ficha: null, rascunho: null, pend: {}, enviando: false, opcoes: null, campFicha: [], contabFicha: 'automatica', regrasFicha: [], filtrosFicha: [], filtrosModoFicha: 'todos', valoresCampo: {},
 };
 const COLUNAS_KANBAN = ['backlog', 'planejado', 'rodando', 'bloqueado', 'concluido', 'cancelado'];
 const paginaTexto = (host, caminho) => (caminho ? `${host ?? ''}${caminho}` : '');
@@ -22,8 +22,12 @@ const MODOS = { todos: 'Todos os critérios ao mesmo tempo (E)', qualquer: 'Qual
 const campanhaItem = (c) => (typeof c === 'string' ? c : c.id ? `${c.nome ?? 'Campanha'} (${c.id})` : (c.nome ?? ''));
 /** Várias campanhas: os resultados somam. Na célula da planilha ficam separadas por ";". */
 const campanhasTexto = (e) => (e.campanhas ?? []).map(campanhaItem).join('; ');
-const temEscopo = (e) => !!(e.paginaCaminho || e.campanhas?.length || e.identificadorConversao);
-const escopoRotulos = (e) => [e.paginaCaminho ? `Página ${paginaTexto(e.paginaHost, e.paginaCaminho)}` : '', e.campanhas?.length ? `${e.campanhas.length === 1 ? 'Campanha' : 'Campanhas (somadas)'} ${e.campanhas.map(campanhaItem).join(', ')}` : '', e.identificadorConversao ? `Identificador ${e.identificadorConversao}` : ''].filter(Boolean);
+const OPERADORES = { igual: 'é igual a', contem: 'contém', comeca: 'começa com', termina: 'termina com', preenchido: 'está preenchido', vazio: 'está vazio' };
+const filtroTexto = (f) => `${f.campo} ${OPERADORES[f.operador] ?? f.operador}${f.operador === 'preenchido' || f.operador === 'vazio' ? '' : ` "${f.valor}"`}`;
+/** Campos mais usados para filtrar, em atalho: o nome é o do campo no Pipedrive (a comparação ignora maiúsculas). */
+const ATALHOS_CAMPO = ['URL de Conversão', 'UTM Campaign', 'UTM Content', 'UTM Term'];
+const temEscopo = (e) => !!(e.paginaCaminho || e.campanhas?.length || e.identificadorConversao || e.filtros?.length);
+const escopoRotulos = (e) => [e.paginaCaminho ? `Página ${paginaTexto(e.paginaHost, e.paginaCaminho)}` : '', e.campanhas?.length ? `${e.campanhas.length === 1 ? 'Campanha' : 'Campanhas (somadas)'} ${e.campanhas.map(campanhaItem).join(', ')}` : '', e.identificadorConversao ? `Identificador ${e.identificadorConversao}` : '', e.filtros?.length ? `Filtros do Pipedrive (${e.filtrosModo === 'qualquer' ? 'qualquer um' : 'todos juntos'}): ${e.filtros.map(filtroTexto).join('; ')}` : ''].filter(Boolean);
 /** Páginas do Analytics, campanhas da Meta e identificadores do Pipedrive para escolher; tudo também pode ser digitado à mão. */
 async function carregarOpcoes() {
   try { S.opcoes = await api('/api/experimentos/opcoes'); } catch { S.opcoes = null; }
@@ -31,10 +35,11 @@ async function carregarOpcoes() {
   $('#dl-escopo').innerHTML = o
     ? `<datalist id="dl-paginas">${o.paginas.map((p) => `<option value="${esc(p.host + p.caminho)}" label="${esc(nf0.format(p.visualizacoes))} visualizações em 90 dias"></option>`).join('')}</datalist>
        <datalist id="dl-campanhas">${o.campanhas.map((c) => `<option value="${esc(`${c.nome} (${c.id})`)}" label="gasto ${esc(brl0.format(c.gasto))}"></option>`).join('')}</datalist>
+       <datalist id="dl-campos-pipe">${[...ATALHOS_CAMPO, ...(o.camposPipe ?? []).map((c) => c.nome).filter((n) => !ATALHOS_CAMPO.some((a) => a.toLowerCase() === n.toLowerCase()))].map((n) => `<option value="${esc(n)}"></option>`).join('')}</datalist>
        <datalist id="dl-ident">${o.identificadores.map((i) => `<option value="${esc(i.evento)}" label="${esc(nf0.format(i.negocios))} negócios"></option>`).join('')}</datalist>`
     : '';
 }
-const origemOk = (v) => ({ identificador: !!v.identificadorConversao?.trim(), pagina: !!v.paginaDestino?.trim(), campanhas: S.campFicha.length > 0, escopo: !!(v.identificadorConversao?.trim() || v.paginaDestino?.trim() || S.campFicha.length) });
+const origemOk = (v) => ({ identificador: !!v.identificadorConversao?.trim(), pagina: !!v.paginaDestino?.trim(), campanhas: S.campFicha.length > 0, filtros: S.filtrosFicha.length > 0, escopo: !!(v.identificadorConversao?.trim() || v.paginaDestino?.trim() || S.campFicha.length || S.filtrosFicha.length) });
 const mdef = (id) => S.dados.metricas.find((m) => m.id === id) ?? null;
 const exp = (id) => S.dados.experimentos.find((x) => x.id === Number(id));
 const acompanhavel = (e) => !!(e.metrica && e.meta != null && e.inicio && e.fim);
@@ -323,6 +328,46 @@ async function adicionarLinha() {
 function abrirFicha(id) { S.ficha = id; delete $('#ficha').dataset.montado; fichaDesenhar(); $('#ficha').hidden = false; $('#ficha').scrollTop = 0; $('#f-titulo')?.focus(); }
 function fecharFicha() { S.ficha = null; const f = $('#ficha'); f.hidden = true; f.innerHTML = ''; delete f.dataset.montado; }
 
+/** Linhas do editor de filtros por campo: campo (lista dos campos do Pipedrive ou digitado), operador e valor (sugestões do próprio campo). */
+function filtrosHtml() {
+  if (!S.filtrosFicha.length) return '<p class="dica">Nenhum filtro. Use um atalho abaixo ou "Outro campo".</p>';
+  return S.filtrosFicha.map((f, i) => {
+    const sugestoes = S.valoresCampo[f.campo.trim().toLowerCase()] ?? [];
+    const semValor = f.operador === 'preenchido' || f.operador === 'vazio';
+    return `<div class="filtro" data-i="${i}" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:6px 0">
+      <input data-f="campo" data-i="${i}" list="dl-campos-pipe" maxlength="100" value="${esc(f.campo)}" placeholder="campo do Pipedrive" aria-label="Campo do Pipedrive" style="min-width:190px">
+      <select data-f="operador" data-i="${i}" aria-label="Como comparar">${Object.entries(OPERADORES).map(([k, t]) => `<option value="${k}" ${f.operador === k ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>
+      ${semValor ? '' : `<input data-f="valor" data-i="${i}" list="dl-valores-${i}" maxlength="300" value="${esc(f.valor)}" placeholder="valor" aria-label="Valor" style="min-width:260px"><datalist id="dl-valores-${i}">${sugestoes.map((s) => `<option value="${esc(s.valor)}" label="${esc(nf0.format(s.negocios))} negócios"></option>`).join('')}</datalist>`}
+      <button type="button" class="btn-mini" data-f="del" data-i="${i}" aria-label="Remover filtro">×</button></div>`;
+  }).join('');
+}
+/** Busca no servidor os valores mais comuns do campo escolhido (cache por campo) e redesenha a ficha. */
+async function carregarValores(campo) {
+  const chave = campo.trim().toLowerCase();
+  if (!chave || S.valoresCampo[chave]) return;
+  try { S.valoresCampo[chave] = await api(`/api/experimentos/valores?campo=${encodeURIComponent(campo.trim())}&produto=${encodeURIComponent($('#f-produto')?.value ?? '')}`); } catch { S.valoresCampo[chave] = []; }
+  if (S.ficha != null) fichaDesenhar();
+}
+function filtrosEvento(ev) {
+  const el = ev.target.closest('[data-f]');
+  if (!el) return false;
+  const i = Number(el.dataset.i);
+  const acao = el.dataset.f;
+  if (ev.type === 'click') {
+    if (acao === 'atalho') { S.filtrosFicha.push({ campo: el.dataset.campo, operador: 'contem', valor: '' }); carregarValores(el.dataset.campo); }
+    else if (acao === 'novo') S.filtrosFicha.push({ campo: '', operador: 'contem', valor: '' });
+    else if (acao === 'del') S.filtrosFicha.splice(i, 1);
+    else return false;
+  } else if (ev.type === 'change') {
+    const f = S.filtrosFicha[i];
+    if (acao === 'campo') { f.campo = el.value.trim(); carregarValores(f.campo); }
+    else if (acao === 'operador') f.operador = el.value;
+    else if (acao === 'valor') { f.valor = el.value; return true; } // não redesenha: só guarda
+    else return false;
+  } else return false;
+  fichaDesenhar();
+  return true;
+}
 /** Editor das regras da contabilização manual: "métrica = termo op termo ...", com campos do escopo, outras métricas e números. */
 function regrasHtml(v) {
   const ok = origemOk(v);
@@ -394,11 +439,12 @@ function fichaDesenhar() {
     ice: [e?.iceImpacto, e?.iceConfianca, e?.iceFacilidade], evidencias: e?.evidencias ?? '', aprendizado: e?.aprendizado ?? '',
   };
   const chave = String(S.ficha);
+  if (f.dataset.montado !== chave) { S.filtrosFicha = JSON.parse(JSON.stringify(e?.filtros ?? [])); S.filtrosModoFicha = e?.filtrosModo ?? 'todos'; }
   if (f.dataset.montado !== chave) { S.contabFicha = e?.contabilizacao ?? 'automatica'; S.regrasFicha = JSON.parse(JSON.stringify(e?.regras ?? [])); }
   if (f.dataset.montado !== chave) S.campFicha = (e?.campanhas ?? []).map(campanhaItem); // campanhas escolhidas: ficam em memória enquanto a ficha está aberta
   if (f.dataset.montado === chave) Object.assign(v, lerFicha(true)); // preserva o que se digitou ao trocar de métrica
   const m = mdef(v.metrica);
-  const comEscopo = !!(v.paginaDestino?.trim() || S.campFicha.length || v.identificadorConversao?.trim());
+  const comEscopo = !!(v.paginaDestino?.trim() || S.campFicha.length || S.filtrosFicha.length || v.identificadorConversao?.trim());
   const canais = comEscopo ? S.dados.canais : S.dados.canais.filter((c) => c.pago || !m?.precisaVerba);
   if (!canais.some((c) => c.id === v.canal)) v.canal = 'total';
   const sel = (id, opts, val) => `<select id="${id}">${optsHtml(opts, val)}</select>`;
@@ -427,6 +473,14 @@ function fichaDesenhar() {
         <label>Identificador de conversão (Pipedrive)<input id="f-ident" list="dl-ident" maxlength="200" value="${esc(v.identificadorConversao)}" placeholder="ex.: o identificador do RD"></label>
         <div class="todo" style="grid-column:1/-1"><label>Campanhas (Meta Ads): escolha uma ou mais; os resultados somam<input id="f-camp-add" list="dl-campanhas" maxlength="200" placeholder="escolha pelo nome da lista (ou digite o nome ou o ID) e tecle Enter"></label>
           <div class="tags" id="f-camp-chips" style="margin-top:8px">${S.campFicha.map((c, i) => `<span class="tag escopo">${esc(c)} <button type="button" class="btn-mini" data-rm="${i}" aria-label="Remover ${esc(c)}">×</button></span>`).join('') || '<span class="dica">Nenhuma campanha escolhida.</span>'}</div></div>
+        <div class="todo" style="grid-column:1/-1">
+          <p class="sub" style="margin:6px 0 4px"><b>Filtros por campo do Pipedrive.</b> Escolha qual campo do negócio usar para contar (URL de Conversão, UTM Campaign, UTM Content, UTM Term ou qualquer outro) e como comparar. Os valores sugeridos vêm dos seus negócios; você também pode digitar. A comparação ignora maiúsculas e minúsculas.</p>
+          <div id="f-filtros">${filtrosHtml()}</div>
+          <div class="acoes-ex" style="gap:6px;flex-wrap:wrap">
+            ${ATALHOS_CAMPO.map((c) => `<button type="button" class="btn-mini" data-f="atalho" data-campo="${esc(c)}">+ ${esc(c)}</button>`).join('')}
+            <button type="button" class="btn-mini" data-f="novo">+ Outro campo</button>
+            ${S.filtrosFicha.length > 1 ? `<label style="flex-direction:row;align-items:center;gap:6px">Juntar os filtros: <select id="f-filtros-modo"><option value="todos" ${S.filtrosModoFicha === 'todos' ? 'selected' : ''}>todos juntos (E)</option><option value="qualquer" ${S.filtrosModoFicha === 'qualquer' ? 'selected' : ''}>qualquer um (OU)</option></select></label>` : ''}
+          </div></div>
         <div class="todo" style="grid-column:1/-1"><label>Contabilização<select id="f-contab"><option value="automatica" ${S.contabFicha === 'automatica' ? 'selected' : ''}>Automática: o Studio conta pelo escopo (como combinado acima)</option><option value="manual" ${S.contabFicha === 'manual' ? 'selected' : ''}>Manual: eu defino as regras de cada métrica</option></select></label>
           ${S.contabFicha === 'manual' ? regrasHtml(v) : ''}</div>
         <label class="todo">Hipótese<textarea id="f-hipotese" rows="2" maxlength="2000" placeholder="Se fizermos X, esperamos Y, porque Z.">${esc(v.hipotese)}</textarea></label>
@@ -451,6 +505,10 @@ function fichaDesenhar() {
   const juntar = () => { const inp = $('#f-camp-add'); const t = inp.value.trim(); if (!t) return false; inp.value = ''; if (!S.campFicha.includes(t)) S.campFicha.push(t); fichaDesenhar(); $('#f-camp-add').focus(); return true; };
   $('#f-camp-add').addEventListener('change', juntar);
   $('#f-camp-add').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); juntar(); } });
+  const filtrosBox = $('#f-filtros');
+  for (const tipo of ['change', 'click']) { filtrosBox.addEventListener(tipo, filtrosEvento); }
+  for (const b of document.querySelectorAll('#ficha [data-f="atalho"], #ficha [data-f="novo"]')) b.addEventListener('click', filtrosEvento);
+  $('#f-filtros-modo')?.addEventListener('change', (ev) => { S.filtrosModoFicha = ev.target.value; });
   $('#f-contab').addEventListener('change', (ev) => { S.contabFicha = ev.target.value; fichaDesenhar(); });
   const regrasBox = $('#f-regras');
   if (regrasBox) for (const tipo of ['change', 'click']) regrasBox.addEventListener(tipo, regrasEvento);
@@ -486,7 +544,7 @@ async function salvarFicha() {
   const corpo = {
     titulo: v.titulo, tipo: v.tipo, status: v.status, responsavel: nulo(v.responsavel), areaImpacto: nulo(v.areaImpacto), hipotese: nulo(v.hipotese), resultadoEsperado: nulo(v.resultadoEsperado),
     produto: v.produto, canal: v.canal, metrica: nulo(v.metrica), meta: v.metrica ? v.meta : null, linhaBase: v.metrica ? v.linhaBase : null, investimento: v.investimento,
-    inicio: nulo(v.inicio), fim: nulo(v.fim), escopoModo: v.escopoModo || 'todos', contabilizacao: S.contabFicha, regras: S.regrasFicha, paginaDestino: nulo(v.paginaDestino?.trim()), campanhas: [...S.campFicha, ...($('#f-camp-add')?.value.trim() ? [$('#f-camp-add').value.trim()] : [])], identificadorConversao: nulo(v.identificadorConversao?.trim()), avaliacao: nulo(v.avaliacao), evidencias: nulo(v.evidencias), aprendizado: nulo(v.aprendizado),
+    inicio: nulo(v.inicio), fim: nulo(v.fim), escopoModo: v.escopoModo || 'todos', filtros: S.filtrosFicha.filter((f) => f.campo.trim() && (f.operador === 'preenchido' || f.operador === 'vazio' || f.valor.trim())), filtrosModo: S.filtrosModoFicha, contabilizacao: S.contabFicha, regras: S.regrasFicha, paginaDestino: nulo(v.paginaDestino?.trim()), campanhas: [...S.campFicha, ...($('#f-camp-add')?.value.trim() ? [$('#f-camp-add').value.trim()] : [])], identificadorConversao: nulo(v.identificadorConversao?.trim()), avaliacao: nulo(v.avaliacao), evidencias: nulo(v.evidencias), aprendizado: nulo(v.aprendizado),
     iceImpacto: v.ice[0] == null ? null : Number(v.ice[0]), iceConfianca: v.ice[1] == null ? null : Number(v.ice[1]), iceFacilidade: v.ice[2] == null ? null : Number(v.ice[2]),
   };
   S.enviando = true; $('#f-salvar').disabled = true; msg.textContent = 'Salvando…';

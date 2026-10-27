@@ -298,6 +298,12 @@ export function createStudioHandler(opts: StudioOptions): (req: IncomingMessage,
         if (method === 'POST') return send(res, 201, await repo.criar(await readJson(req)));
         return send(res, 405, { error: 'method_not_allowed' });
       }
+      if (path === '/api/experimentos/valores') {
+        if (method !== 'GET') return send(res, 405, { error: 'method_not_allowed' });
+        const campo = url.searchParams.get('campo') ?? '';
+        if (!campo.trim() || campo.length > 100) throw new HttpError(400, 'campo_invalido');
+        return send(res, 200, await repo.valores(campo, url.searchParams.get('produto') || undefined, url.searchParams.get('q') || undefined));
+      }
       if (path === '/api/experimentos/opcoes') {
         if (method !== 'GET') return send(res, 405, { error: 'method_not_allowed' });
         return send(res, 200, await repo.opcoes(url.searchParams.get('produto') || undefined));

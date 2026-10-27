@@ -19,6 +19,34 @@ type Db = Pick<pg.Pool, 'query'>;
 /** Uma campanha da Meta: pelo ID, ou só pelo nome quando o ID não é conhecido. */
 export interface CampanhaEscopo { id: string | null; nome: string | null }
 export const MAX_CAMPANHAS = 40;
+/**
+ * Filtro por CAMPO do Pipedrive: o Pablo escolhe qual campo do negócio usar (URL de Conversão, UTM Campaign, UTM Content, UTM Term, Identificador de Conversão RD ou
+ * qualquer outro campo) e como comparar. O valor lido é o texto do campo (o rótulo da opção, para campos de lista), sem diferenciar maiúsculas de minúsculas.
+ */
+export const OPERADORES_FILTRO = ['igual', 'contem', 'comeca', 'termina', 'preenchido', 'vazio'] as const;
+export type OperadorFiltro = (typeof OPERADORES_FILTRO)[number];
+export interface FiltroCampo { campo: string; operador: OperadorFiltro; valor: string }
+export const MAX_FILTROS = 10;
+export const OPERADOR_ROTULO: Record<OperadorFiltro, string> = { igual: 'é igual a', contem: 'contém', comeca: 'começa com', termina: 'termina com', preenchido: 'está preenchido', vazio: 'está vazio' };
+export const filtroTexto = (f: FiltroCampo): string => `${f.campo} ${OPERADOR_ROTULO[f.operador]}${f.operador === 'preenchido' || f.operador === 'vazio' ? '' : ` "${f.valor}"`}`;
+/** Valida a lista vinda do cadastro: campo e valor em texto, operador conhecido, sem repetição, no máximo MAX_FILTROS. */
+export function normalizarFiltros(entrada: unknown): FiltroCampo[] | null {
+  if (!Array.isArray(entrada) || entrada.length > MAX_FILTROS) return null;
+  const out: FiltroCampo[] = [];
+  const vistos = new Set<string>();
+  for (const f of entrada as Array<Record<string, unknown>>) {
+    if (!f || typeof f !== 'object' || typeof f.campo !== 'string' || !(OPERADORES_FILTRO as readonly unknown[]).includes(f.operador)) return null;
+    const campo = f.campo.trim();
+    const sem = f.operador === 'preenchido' || f.operador === 'vazio';
+    const valor = sem ? '' : typeof f.valor === 'string' ? f.valor.trim() : '';
+    if (!campo || campo.length > 100 || valor.length > 300 || (!sem && !valor)) return null;
+    const chave = `${campo.toLowerCase()}|${f.operador}|${valor.toLowerCase()}`;
+    if (vistos.has(chave)) continue;
+    vistos.add(chave);
+    out.push({ campo, operador: f.operador as OperadorFiltro, valor });
+  }
+  return out;
+}
 export interface Escopo {
   paginaHost: string | null; paginaCaminho: string | null;
   /** Uma ou mais campanhas da Meta: os resultados somam. */
@@ -26,9 +54,13 @@ export interface Escopo {
   identificadorConversao: string | null;
   /** Como combinar os critérios para contar os negócios (padrão: todos). */
   escopoModo?: EscopoModo;
+  /** Filtros por campo do Pipedrive (URL de Conversão, UTMs ou qualquer outro) e como juntá-los entre si: todos (E) ou qualquer (OU). */
+  filtros?: FiltroCampo[];
+  filtrosModo?: 'todos' | 'qualquer';
 }
 export const temCampanha = (e: Partial<Escopo>): boolean => !!e.campanhas?.length;
-export const temEscopo = (e: Partial<Escopo>): boolean => !!(e.paginaCaminho || temCampanha(e) || e.identificadorConversao);
+export const temFiltros = (e: Partial<Escopo>): boolean => !!e.filtros?.length;
+export const temEscopo = (e: Partial<Escopo>): boolean => !!(e.paginaCaminho || temCampanha(e) || e.identificadorConversao || temFiltros(e));
 
 /* ---------- entrada digitada ou escolhida (pura) ---------- */
 /** "https://www.site.com.br/Blog/Post/?a=1" -> host "site.com.br" e caminho "/blog/post"; "/blog/post" -> só o caminho (vale para qualquer host). */
@@ -77,20 +109,54 @@ export interface OpcoesEscopo {
   paginas: Array<{ host: string; caminho: string; visualizacoes: number }>;
   campanhas: Array<{ id: string; nome: string; gasto: number }>;
   identificadores: Array<{ evento: string; negocios: number }>;
+  /** Campos de negócio do Pipedrive que têm valor (para escolher o campo do filtro). */
+  camposPipe: Array<{ nome: string; negocios: number }>;
 }
 export async function listarOpcoes(db: Db, produto?: ProdutoMonitor): Promise<OpcoesEscopo> {
   const host = produto === 'clinic' ? ` and host = 'quarkclinic.com.br'` : produto === 'rh' ? ` and host <> 'quarkclinic.com.br'` : '';
-  const [pg, ca, id] = await Promise.all([
+  const [pg, ca, id, cp] = await Promise.all([
     db.query(`select host, caminho, sum(visualizacoes)::int as v from analytics.site_paginas_dia where dia >= current_date - 90${host} group by 1, 2 order by v desc limit 400`),
     db.query(`select campanha_id::text as id, max(campanha) as nome, sum(gasto)::float8 as gasto from analytics.meta_desempenho_dia
                where dia >= current_date - 365 and campanha_id is not null${produto ? ' and produto = $1' : ''} group by 1 order by max(dia) desc, gasto desc limit 400`, produto ? [produto] : []),
     db.query(`select evento, count(*)::int as n from analytics.conversoes_pipe_negocios where evento is not null and evento not like '[Etapa]%'${produto ? ' and produto = $1' : ''} group by 1 order by n desc limit 400`, produto ? [produto] : []),
+    db.query(`select c.nome_pipedrive as nome, count(distinct c.deal_id)::int as n from analytics.deal_campos c${produto ? ' join analytics.negocios_bi d on d.deal_id = c.deal_id and d.produto = $1' : ''} where coalesce(c.valor_legivel, c.valor #>> '{}') is not null group by 1 order by n desc limit 300`, produto ? [produto] : []),
   ]);
   return {
     paginas: pg.rows.map((r) => ({ host: String(r.host), caminho: String(r.caminho), visualizacoes: Number(r.v) })),
     campanhas: ca.rows.filter((r) => r.nome).map((r) => ({ id: String(r.id), nome: String(r.nome), gasto: Number(r.gasto) })),
     identificadores: id.rows.map((r) => ({ evento: String(r.evento), negocios: Number(r.n) })),
+    camposPipe: cp.rows.map((r) => ({ nome: String(r.nome), negocios: Number(r.n) })),
   };
+}
+
+/** Valores mais comuns de um campo do Pipedrive (com a contagem de negócios), para sugerir no filtro; `q` filtra por trecho. */
+export async function listarValoresCampo(db: Db, campo: string, produto?: ProdutoMonitor, q?: string): Promise<Array<{ valor: string; negocios: number }>> {
+  const p: unknown[] = [campo];
+  const add = (v: unknown) => `$${p.push(v)}`;
+  const juncao = produto ? ` join analytics.negocios_bi d on d.deal_id = c.deal_id and d.produto = ${add(produto)}` : '';
+  const trecho = q?.trim() ? ` and position(lower(${add(q.trim())}::text) in lower(coalesce(c.valor_legivel, c.valor #>> '{}'))) > 0` : '';
+  const r = await db.query(`select left(coalesce(c.valor_legivel, c.valor #>> '{}'), 300) as v, count(distinct c.deal_id)::int as n from analytics.deal_campos c${juncao}
+                             where lower(c.nome_pipedrive) = lower($1) and coalesce(c.valor_legivel, c.valor #>> '{}') <> ''${trecho} group by 1 order by n desc, v limit 60`, p);
+  return r.rows.filter((x) => x.v != null).map((x) => ({ valor: String(x.v), negocios: Number(x.n) }));
+}
+
+/** Condição SQL de um filtro por campo (alias `d` = analytics.negocios_bi); o valor vai como parâmetro. */
+function condFiltro(f: FiltroCampo, add: (v: unknown) => string): string {
+  const texto = "lower(coalesce(c.valor_legivel, c.valor #>> '{}'))";
+  const base = `select c.deal_id from analytics.deal_campos c where lower(c.nome_pipedrive) = lower(${add(f.campo)}::text)`;
+  const v = () => `lower(${add(f.valor)}::text)`;
+  if (f.operador === 'preenchido') return `d.deal_id in (${base} and ${texto} <> '')`;
+  if (f.operador === 'vazio') return `not exists (${base} and c.deal_id = d.deal_id and ${texto} <> '')`; // correlacionado: bem mais rápido que NOT IN
+  if (f.operador === 'igual') return `d.deal_id in (${base} and ${texto} = ${v()})`;
+  if (f.operador === 'contem') return `d.deal_id in (${base} and position(${v()} in ${texto}) > 0)`;
+  if (f.operador === 'comeca') return `d.deal_id in (${base} and starts_with(${texto}, ${v()}))`;
+  const val = v(); // um só parâmetro, usado duas vezes
+  return `d.deal_id in (${base} and right(${texto}, length(${val})) = ${val})`;
+}
+/** Os filtros juntos: todos (E) ou qualquer (OU). */
+export function condFiltros(e: Pick<Escopo, 'filtros' | 'filtrosModo'>, add: (v: unknown) => string): string | null {
+  if (!e.filtros?.length) return null;
+  return `(${e.filtros.map((f) => condFiltro(f, add)).join(e.filtrosModo === 'qualquer' ? ' or ' : ' and ')})`;
 }
 
 /* ---------- como o escopo vira filtro de negócios ---------- */
@@ -116,16 +182,18 @@ export function montarAlvo(e: Escopo & { produto: ProdutoMonitor }, p: unknown[]
   const ids = e.campanhas.map((c) => c.id).filter((x): x is string => !!x);
   const nomes = e.campanhas.filter((c) => !c.id && c.nome).map((c) => (c.nome as string).toLowerCase());
   const modo = e.escopoModo ?? 'todos';
-  const temOutros = !!(e.identificadorConversao || e.paginaCaminho);
+  const temOutros = !!(e.identificadorConversao || e.paginaCaminho || temFiltros(e));
   const usaCampanha = temCampanha(e) && !(modo === 'campanha_so_investimento' && temOutros);
-  const partes: { campanha?: string; identificador?: string; pagina?: string } = {};
+  const partes: { campanha?: string; identificador?: string; pagina?: string; filtros?: string } = {};
   if (usaCampanha) {
     const qual = [ids.length ? `campanha_id = any(${add(ids)}::bigint[])` : '', nomes.length ? `lower(campanha) = any(${add(nomes)}::text[])` : ''].filter(Boolean).join(' or ');
     partes.campanha = `d.deal_id in (select deal_id from analytics.negocios_meta where ${qual})`;
   }
   if (e.identificadorConversao) partes.identificador = `d.deal_id in (select deal_id from analytics.conversoes_pipe_negocios where evento = ${add(e.identificadorConversao)})`;
   if (e.paginaCaminho) partes.pagina = `d.deal_id in (select deal_id from analytics.negocios_url where caminho_url = ${add(e.paginaCaminho)}${e.paginaHost ? ` and host_url = ${add(e.paginaHost)}` : ''})`;
-  const lista = [partes.campanha, partes.identificador, partes.pagina].filter((x): x is string => !!x);
+  const f = condFiltros(e, add);
+  if (f) partes.filtros = f;
+  const lista = [partes.campanha, partes.identificador, partes.pagina, partes.filtros].filter((x): x is string => !!x);
   const filtro = !lista.length ? 'true' : `(${lista.join(modo === 'qualquer' ? ' or ' : ' and ')})`;
   return { sql: `d.produto = $${ip} and not d.is_deleted and ${filtro}`, ids, nomes };
 }
@@ -189,7 +257,7 @@ export interface Detalhe {
   criativos: Array<{ anuncio: string; gasto: number; impressoes: number; cliques: number; leadsMeta: number; negocios: number; ganhos: number }>;
   conferencia: {
     /** Quantos negócios cada critério traz sozinho (mesma janela); nulo = critério não usado. */
-    porIdentificador: number | null; porPagina: number | null; porCampanhas: number | null;
+    porIdentificador: number | null; porPagina: number | null; porCampanhas: number | null; porFiltros: number | null;
     /** Ligação Meta -> Pipedrive dos negócios do escopo, por método (sem_ligacao = nenhum método achou a campanha). */
     ligacaoMeta: Array<{ metodo: string; n: number }>;
     semUtmCampanha: number;
@@ -224,7 +292,13 @@ export async function lerDetalheEscopo(db: Db, e: Escopo & { produto: ProdutoMon
     return { sql: `d.deal_id in (select deal_id from analytics.negocios_meta where ${qual})`, params: pr };
   })();
 
-  const [tot, etapas, colab, saude, cargos, motivos, safra, ligacao, semUtm, amostra, porIdent, porPag, porCamp] = await Promise.all([
+  const filtrosCond = ((): { sql: string; params: unknown[] } | null => {
+    if (!temFiltros(e)) return null;
+    const pr: unknown[] = [];
+    const sql = condFiltros(e, (v) => `$${3 + pr.push(v)}`);
+    return sql ? { sql, params: pr } : null;
+  })();
+  const [tot, etapas, colab, saude, cargos, motivos, safra, ligacao, semUtm, amostra, porIdent, porPag, porCamp, porFiltros] = await Promise.all([
     db.query(`select ${contagens}, count(*) filter (where d.conta_como_lead)::int as leads ${base}`, p),
     db.query(`select d.pipeline as funil, d.etapa as k, ${contagens} ${base} group by 1, 2 order by 1, n desc limit 40`, p),
     quebra(`d.faixa_colab`),
@@ -238,6 +312,7 @@ export async function lerDetalheEscopo(db: Db, e: Escopo & { produto: ProdutoMon
     e.identificadorConversao ? sozinho(`d.deal_id in (select deal_id from analytics.conversoes_pipe_negocios where evento = $4)`, [e.identificadorConversao]) : Promise.resolve(null),
     e.paginaCaminho ? sozinho(`d.deal_id in (select deal_id from analytics.negocios_url where caminho_url = $4${e.paginaHost ? ' and host_url = $5' : ''})`, [e.paginaCaminho, ...(e.paginaHost ? [e.paginaHost] : [])]) : Promise.resolve(null),
     campCond ? sozinho(campCond.sql, campCond.params) : Promise.resolve(null),
+    filtrosCond ? sozinho(filtrosCond.sql, filtrosCond.params) : Promise.resolve(null),
   ]);
 
   // criativos (anúncios) das campanhas escolhidas: mídia (Meta) e negócios ligados
@@ -265,7 +340,7 @@ export async function lerDetalheEscopo(db: Db, e: Escopo & { produto: ProdutoMon
     motivosPerda: motivos.rows.map((x) => ({ rotulo: String(x.k ?? '(sem motivo)'), n: n(x.n) })),
     safra: safra.rows.map((x) => ({ semana: String(x.k), n: n(x.n), abertos: n(x.abertos), ganhos: n(x.ganhos), perdidos: n(x.perdidos) })),
     criativos,
-    conferencia: { porIdentificador: porIdent, porPagina: porPag, porCampanhas: porCamp, ligacaoMeta: ligacao.rows.map((x) => ({ metodo: String(x.k), n: n(x.n) })), semUtmCampanha: n(semUtm.rows[0]?.n) },
+    conferencia: { porIdentificador: porIdent, porPagina: porPag, porCampanhas: porCamp, porFiltros, ligacaoMeta: ligacao.rows.map((x) => ({ metodo: String(x.k), n: n(x.n) })), semUtmCampanha: n(semUtm.rows[0]?.n) },
     amostra: amostra.rows.map((x) => ({ id: Number(x.id), titulo: String(x.titulo ?? ''), etapa: String(x.etapa ?? ''), status: String(x.status ?? ''), criado: String(x.criado) })),
   };
 }
