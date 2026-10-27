@@ -4,6 +4,8 @@ import { extname, join, normalize, resolve, sep } from 'node:path';
 import { FormsStore, StoreError } from './lib/forms-store.js';
 import { FORM_ID_RE } from './lib/form-schema.js';
 import { AuthErro, LimiteLogin, VigenciaCache, assinar, cookieLimpo, cookieSessao, emailValido, lerCookie, PAPEIS, SESSAO_SEGUNDOS, senhaValida, verificar, type AuthService, type Papel, type Sessao } from './lib/auth.js';
+import { IntegracaoErro, type Integracoes } from './lib/integracoes.js';
+import { timingSafeEqual } from 'node:crypto';
 import { PRODUTOS_MONITOR, type MonitorRepo, type ProdutoMonitor } from './lib/monitor.js';
 import type { ExperimentosRepo } from './lib/experimentos.js';
 import { BI_PRODUTOS, BiNotFound, type BiFiltros, type BiProduto, type BiRepo } from './lib/bi.js';
@@ -31,6 +33,8 @@ export type StudioOptions = {
    * Modo publicado: exige login (cookie assinado), separa admin de editor, desliga o Studio de testes (formulários e envio) e libera qualquer Host.
    * Sem isto, o servidor é o local de sempre (só 127.0.0.1, sem login).
    */
+  /** Google Sheets e ClickUp (opcionais: sem credenciais as rotas respondem 503 com o que falta). */
+  integracoes?: Integracoes | null;
   acesso?: { servico: AuthService; segredo: string; seguro?: boolean; agora?: () => number } | null;
 };
 
@@ -163,6 +167,14 @@ export function createStudioHandler(opts: StudioOptions): (req: IncomingMessage,
         res.setHeader('set-cookie', cookieLimpo(acesso.seguro !== false));
         return send(res, 200, { ok: true });
       }
+      // Tarefa agendada da Vercel (cron): sem sessão, só com o segredo no cabeçalho Authorization
+      if (method === 'GET' && path === '/api/cron/experimentos') {
+        const seg = opts.integracoes?.cronSecret;
+        const recebido = String(req.headers.authorization ?? '');
+        const esperado = seg ? `Bearer ${seg}` : null;
+        if (!esperado || recebido.length !== esperado.length || !timingSafeEqual(Buffer.from(recebido), Buffer.from(esperado))) return send(res, 401, { error: 'nao_autenticado' });
+        return send(res, 200, await opts.integracoes!.sincronizarPlanilha());
+      }
       sessao = await sessaoDe(req);
       if (!sessao && !(method === 'GET' && ativos.includes(path))) {
         if (path.startsWith('/api/')) return send(res, 401, { error: 'nao_autenticado' });
@@ -265,6 +277,17 @@ export function createStudioHandler(opts: StudioOptions): (req: IncomingMessage,
       return send(res, 200, await opts.monitor.monitor((produto || undefined) as ProdutoMonitor | undefined));
     }
 
+    // Integrações: estado (o que está configurado) e as ações de sincronizar a planilha e enviar ao ClickUp
+    if (method === 'GET' && path === '/api/integracoes') return send(res, 200, opts.integracoes?.status() ?? { sheets: { configurado: false }, clickup: { configurado: false }, cron: false });
+    if (method === 'POST' && path === '/api/experimentos/sincronizar') {
+      if (!opts.integracoes) return send(res, 503, { error: 'integracao_nao_configurada', detail: 'Google Sheets não configurado: faltam GOOGLE_SA_CLIENT_EMAIL, GOOGLE_SA_PRIVATE_KEY e SHEETS_PLANILHA_ID.' });
+      return send(res, 200, await opts.integracoes.sincronizarPlanilha());
+    }
+    const clickupRota = /^\/api\/experimentos\/(\d{1,15})\/clickup$/.exec(path);
+    if (method === 'POST' && clickupRota) {
+      if (!opts.integracoes) return send(res, 503, { error: 'integracao_nao_configurada', detail: 'ClickUp não configurado: faltam CLICKUP_TOKEN, CLICKUP_WORKSPACE_ID e CLICKUP_DOC_ID.' });
+      return send(res, 200, await opts.integracoes.enviarClickUp(Number(clickupRota[1])));
+    }
     // Experimentos de growth: o cadastro é a única escrita (mkt.experimentos); o resultado vem sozinho das visões de analytics. Sem DELETE: remover é cancelar.
     if (method === 'GET' && path === '/experimentos') return sendFile(res, join(opts.publicDir, 'experimentos.html'));
     if (path === '/api/experimentos' || path.startsWith('/api/experimentos/')) {
@@ -593,6 +616,7 @@ export function createStudioHandler(opts: StudioOptions): (req: IncomingMessage,
       if (e instanceof PainelNotFound || e instanceof BiNotFound) return send(res, 404, { error: 'nao_encontrado', detail: e.message });
       if (e instanceof PainelInvalido) return send(res, 400, { error: 'invalido', detail: e.message });
       if (e instanceof AuthErro) return send(res, e.status, { error: 'auth', detail: e.message });
+      if (e instanceof IntegracaoErro) return send(res, e.status === 503 ? 503 : e.status === 404 ? 502 : e.status, { error: e.status === 503 ? 'integracao_nao_configurada' : 'integracao', detail: e.message });
       console.error('studio:', e instanceof Error ? e.message : e);
       send(res, 500, { error: 'internal_error' });
     });

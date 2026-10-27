@@ -7,6 +7,7 @@ import { PgBiRepo } from '../studio/lib/bi.js';
 import { PgExperimentosRepo } from '../studio/lib/experimentos.js';
 import { PgMonitorRepo } from '../studio/lib/monitor.js';
 import { PgPainelRepo } from '../studio/lib/painel-repo.js';
+import { ClickUpClient, Integracoes, SheetsClient, clickUpConfigDoAmbiente, sheetsConfigDoAmbiente } from '../studio/lib/integracoes.js';
 import { createStudioHandler } from '../studio/server.js';
 
 /**
@@ -27,6 +28,8 @@ function montar() {
   const pool = new pg.Pool({ connectionString: env('PANEL_DB_URL'), max: 1, ssl: { rejectUnauthorized: false } });
   pool.on('error', (e) => console.error('pool: erro no banco', e.message.replace(/postgres(ql)?:\/\/\S+/gi, '<url>')));
   const raiz = process.cwd();
+  const experimentos = new PgExperimentosRepo(pool);
+  const sheetsCfg = sheetsConfigDoAmbiente(process.env), clickCfg = clickUpConfigDoAmbiente(process.env);
   return createStudioHandler({
     formsDir: join(raiz, 'studio', 'forms'),
     publicDir: join(raiz, 'studio', 'public'),
@@ -37,7 +40,8 @@ function montar() {
     painel: new PgPainelRepo(pool),
     bi: new PgBiRepo(pool),
     monitor: new PgMonitorRepo(pool),
-    experimentos: new PgExperimentosRepo(pool),
+    experimentos,
+    integracoes: new Integracoes(experimentos, sheetsCfg ? new SheetsClient(sheetsCfg) : null, clickCfg ? new ClickUpClient(clickCfg) : null, env('CRON_SECRET') || null),
     acesso: { servico: new SupabaseAuth({ url: env('SUPABASE_URL'), anonKey: env('SUPABASE_ANON_KEY'), serviceKey: env('SUPABASE_SERVICE_ROLE_KEY') }), segredo: env('SESSION_SECRET'), seguro: true },
   });
 }

@@ -343,6 +343,8 @@ export async function abrirDocumentacao(id, { aoFechar } = {}) {
       <span class="doc-acoes">
         <button type="button" class="btn-s" id="doc-atualizar" title="Refaz os gráficos e tabelas com os dados mais recentes, sem mexer no seu texto">Atualizar dados do relatório</button>
         <button type="button" class="btn-s" id="doc-salvar">Salvar</button>
+        <button type="button" class="btn-s" id="doc-clickup" title="Cria ou atualiza a página deste experimento no Doc do ClickUp">Enviar para o ClickUp</button>
+        <a id="doc-clickup-link" class="dica" target="_blank" rel="noopener" ${e.clickupUrl ? `href="${esc(e.clickupUrl)}"` : 'hidden'}>Abrir no ClickUp</a>
         <button type="button" class="btn-p" id="doc-pdf" title="Abre a impressão: escolha Salvar como PDF">Exportar PDF</button>
         <button type="button" class="btn-s" id="doc-fechar">Fechar</button>
       </span>
@@ -396,6 +398,18 @@ export async function abrirDocumentacao(id, { aoFechar } = {}) {
     catch (err) { estado(`Não atualizou: ${err.message}`); }
   });
   $('#doc-salvar').addEventListener('click', salvar);
+  $('#doc-clickup').addEventListener('click', async () => {
+    const b = $('#doc-clickup');
+    b.disabled = true;
+    await salvar(); // o que está na tela vai junto
+    estado('Enviando ao ClickUp…');
+    try {
+      const r = await api(`/api/experimentos/${id}/clickup`, { method: 'POST', body: '{}' });
+      const l = $('#doc-clickup-link');
+      l.href = r.url; l.hidden = false;
+      estado(`${r.criada ? 'Página criada' : 'Página atualizada'} no ClickUp${r.planilha === 'ok' ? ' e planilha atualizada' : r.planilha === 'erro' ? ` (a planilha não atualizou: ${r.aviso})` : ''}`);
+    } catch (err) { estado(`Não enviou: ${err.message}`); } finally { b.disabled = false; }
+  });
   $('#doc-pdf').addEventListener('click', async () => {
     await salvar();
     const antes = document.title;

@@ -74,6 +74,7 @@
     svg.gr .grid { stroke: var(--m-line); stroke-width: 1; }
     .nota { font-size: 12px; color: var(--m-muted); margin: 8px 0 0; }
     .aviso-m { background: var(--accent-soft); border-radius: 10px; padding: 8px 12px; margin: 8px 0; font-size: 13px; }
+    .ok-m { background: var(--m-bom-bg); color: var(--m-bom); border-radius: 10px; padding: 10px 14px; margin: 10px 0; }
     .erro-m { background: var(--m-ruim-bg); color: var(--m-ruim); border-radius: 10px; padding: 10px 14px; margin: 10px 0; }
     .vazio { color: var(--m-ink2); padding: 28px 8px; text-align: center; }
     .acoes-ex { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; align-items: center; }
@@ -229,6 +230,7 @@
       <label>Produto <select id="f-prod-lista"><option value="">Todos</option><option value="rh">QuarkRH</option><option value="clinic">QuarkClinic</option></select></label>
       <input id="busca" type="search" placeholder="Buscar por título, responsável ou área" aria-label="Buscar experimentos" style="min-width:240px">
       <button id="atualizar" class="btn-s" type="button">Atualizar agora</button>
+      <button id="sync-sheets" class="btn-s" type="button" title="Copia os experimentos para a planilha do Google Sheets (guias \"Experimentos Quark Dados\" e \"Documentação completa\")">Sincronizar com Google Sheets</button>
     </div>
     <div id="aviso"></div>
     <section id="lista" aria-live="polite"></section>
@@ -237,6 +239,7 @@
       <ul>
         <li><b>Um lugar só:</b> esta página substitui as planilhas "Growth e Experimentos" (formulário e lista de 2025). Ideias, experimentos, melhorias implementadas e documentações de processo ficam na mesma lista, em <b>Planilha</b> (edite direto nas células e use "Nova linha") ou <b>Kanban</b> (arraste o card entre as colunas ou use "+ Novo card").</li>
         <li><b>Você cadastra uma vez:</b> título, hipótese, responsável, produto, canal, <b>resultado esperado</b>, <b>métrica chave</b> com a meta, período, <b>investimento</b> previsto e ICE. Só o título é obrigatório; ideias soltas ficam sem métrica e sem acompanhamento automático. Com métrica, meta e período, o resultado, o gasto e a linha de base vêm sozinhos das mesmas visões do Monitor.</li>
+        <li><b>Google Sheets e ClickUp:</b> "Sincronizar com Google Sheets" copia os experimentos para duas guias novas da planilha ("Experimentos Quark Dados" e "Documentação completa") e roda sozinho uma vez por dia; as guias são do app e são reescritas a cada sincronização. Na documentação, "Enviar para o ClickUp" cria (ou atualiza) uma página do experimento no Doc do ClickUp e guarda o link, que aparece na planilha. Os gráficos viram uma linha de texto no ClickUp; as tabelas levam os mesmos números.</li>
         <li><b>Documentação:</b> o botão "Documentação" abre um editor de texto com o relatório do experimento (resumo, visão geral antes e durante, visão diária e visão semanal, com gráficos). O texto é seu e fica salvo; "Atualizar dados do relatório" refaz só os gráficos e tabelas. "Exportar PDF" abre a impressão do navegador: escolha "Salvar como PDF".</li>
         <li><b>Só dias completos:</b> o dia vira à meia-noite em America/Fortaleza e o dia de hoje fica de fora até fechar. O Google Ads chega com cerca de 1 dia de atraso.</li>
         <li><b>Métricas de contagem</b> (leads, MQL, reuniões, ganhos, MRR): a meta é o <b>total do período</b> e o ritmo previsto é linear. <b>Métricas de custo e taxa</b> (CPL, CAC, CTR, % MQL...): a meta é o <b>valor a atingir</b> e a trajetória prevista vai da linha de base até a meta.</li>

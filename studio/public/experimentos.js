@@ -407,6 +407,7 @@ function fichaDesenhar() {
   f.dataset.montado = chave;
   f.innerHTML = `<button type="button" class="btn-s" id="fx" style="float:right">Fechar</button>
     <h2 style="margin:0 0 4px">${e ? esc(e.titulo) : 'Novo experimento'}</h2>
+    ${e?.clickupUrl ? `<p class="nota">Documento no ClickUp: <a href="${esc(e.clickupUrl)}" target="_blank" rel="noopener">abrir</a></p>` : ''}
     ${e ? `<div class="tags">${chipEstado(e)}${chipResultado(e)}</div><div class="acoes-ex"><button type="button" class="btn-p" id="fx-doc">Documentação</button><span class="nota">Editor de texto com relatório diário, semanal e geral; exporta em PDF.</span></div>` : ''}
     ${e && temEscopo(e) ? `<div class="tags">${escopoRotulos(e).map((t) => `<span class="tag escopo">${esc(t)}</span>`).join('')}</div>` : ''}
     ${e ? `<div class="cartao">${progressoCompleto(e)}</div>` : ''}
@@ -526,6 +527,14 @@ function novoCard(slot, status) {
 const lista = $('#lista');
 $('#novo').addEventListener('click', () => abrirFicha('novo'));
 $('#atualizar').addEventListener('click', carregar);
+$('#sync-sheets').addEventListener('click', async () => {
+  const b = $('#sync-sheets');
+  b.disabled = true; b.textContent = 'Sincronizando…';
+  try {
+    const r = await api('/api/experimentos/sincronizar', { method: 'POST', body: '{}' });
+    $('#aviso').innerHTML = `<div class="ok-m" role="status">Planilha atualizada: ${esc(String(r.experimentos))} experimentos nas guias ${r.abas.map((a) => `"${esc(a)}"`).join(' e ')}.</div>`;
+  } catch (e) { mostrarErro(e.message); } finally { b.disabled = false; b.textContent = 'Sincronizar com Google Sheets'; }
+});
 $('#filtro').addEventListener('change', (ev) => { S.filtro = ev.target.value; if (S.dados) desenhar(); });
 $('#f-tipo-lista').addEventListener('change', (ev) => { S.tipo = ev.target.value; if (S.dados) desenhar(); });
 $('#f-prod-lista').addEventListener('change', (ev) => { S.produto = ev.target.value; if (S.dados) desenhar(); });

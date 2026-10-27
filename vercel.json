@@ -3,6 +3,9 @@
   "functions": {
     "api/studio.ts": { "includeFiles": "studio/public/**" }
   },
+  "crons": [
+    { "path": "/api/cron/experimentos", "schedule": "0 11 * * *" }
+  ],
   "rewrites": [
     { "source": "/api/ingest", "destination": "/api/ingest" },
     { "source": "/(.*)", "destination": "/api/studio" }

@@ -11,6 +11,7 @@
  */
 import type pg from 'pg';
 import { PainelInvalido, PainelNotFound } from './painel-repo.js';
+import type { ExperimentoParaSync, RepoSync } from './integracoes.js';
 import { CAMPOS, CONTABILIZACOES, RegraInvalida, camposUsados, conferirOrigens, criarMedidor, lerCampos, validarRegras, type Contabilizacao, type LeitorCampos, type Medir, type Regra } from './experimentos-regras.js';
 import { ESCOPO_MODOS, campanhaTexto, lerDadosEscopo, lerDetalheEscopo, listarOpcoes, normalizarCampanhas, normalizarPagina, temCampanha, temEscopo, type CampanhaEscopo, type Detalhe, type EscopoModo, type Escopo, type LeitorDetalhe, type LeitorEscopo, type OpcoesEscopo } from './experimentos-escopo.js';
 import { agoraLocal, lerDadosMonitor, metricasDe, somaDias, type CanalId, type DadosMonitor, type Janela, type ProdutoMonitor } from './monitor.js';
@@ -82,6 +83,8 @@ export interface Experimento {
   paginaHost: string | null; paginaCaminho: string | null; campanhas: CampanhaEscopo[]; identificadorConversao: string | null; escopoModo: EscopoModo;
   /** Automática: o Studio conta pelo escopo. Manual: cada métrica pode ter uma regra (fórmula com campos, métricas e números). */
   contabilizacao: Contabilizacao; regras: Regra[];
+  /** Página deste experimento no Doc do ClickUp (preenchida ao enviar). */
+  clickupPaginaId: string | null; clickupUrl: string | null;
   iceImpacto: number | null; iceConfianca: number | null; iceFacilidade: number | null; iceScore: number | null;
   valorFinal: number | null; atingimentoFinal: number | null; desfecho: Desfecho | null; aprendizado: string | null;
   criadoEm: string; atualizadoEm: string;
@@ -375,7 +378,7 @@ export function montarRelatorio(e: Pick<Experimento, 'canal' | 'metrica' | 'inic
 /* ---------- banco ---------- */
 const COLUNAS = `id, titulo, tipo, responsavel, area_impacto, hipotese, resultado_esperado, produto, canal, metrica, meta::float8 as meta, linha_base::float8 as linha_base,
   investimento::float8 as investimento, inicio::text as inicio, fim::text as fim, status, avaliacao, evidencias, documentacao is not null as tem_documentacao,
-  pagina_host, pagina_caminho, campanhas, campanha_id::text as campanha_id, campanha_nome, identificador_conversao, escopo_modo, contabilizacao, regras,
+  pagina_host, pagina_caminho, campanhas, campanha_id::text as campanha_id, campanha_nome, identificador_conversao, escopo_modo, contabilizacao, regras, clickup_pagina_id, clickup_url,
   ice_impacto, ice_confianca, ice_facilidade, ice_score::float8 as ice_score,
   valor_final::float8 as valor_final, atingimento_final::float8 as atingimento_final, desfecho, aprendizado, criado_em, atualizado_em`;
 const nn = (v: unknown): number | null => (v == null ? null : Number(v));
@@ -394,6 +397,7 @@ function deLinha(r: Record<string, unknown>): Experimento {
     avaliacao: (r.avaliacao as Avaliacao | null) ?? null, evidencias: ns(r.evidencias), temDocumentacao: r.tem_documentacao === true,
     paginaHost: ns(r.pagina_host), paginaCaminho: ns(r.pagina_caminho), campanhas: campanhasDe(r), identificadorConversao: ns(r.identificador_conversao), escopoModo: ((ESCOPO_MODOS as readonly unknown[]).includes(r.escopo_modo) ? r.escopo_modo : 'todos') as EscopoModo,
     contabilizacao: (r.contabilizacao === 'manual' ? 'manual' : 'automatica') as Contabilizacao, regras: Array.isArray(r.regras) ? (r.regras as Regra[]) : [],
+    clickupPaginaId: ns(r.clickup_pagina_id), clickupUrl: ns(r.clickup_url),
     iceImpacto: nn(r.ice_impacto), iceConfianca: nn(r.ice_confianca), iceFacilidade: nn(r.ice_facilidade), iceScore: nn(r.ice_score),
     valorFinal: nn(r.valor_final), atingimentoFinal: nn(r.atingimento_final), desfecho: (r.desfecho as Desfecho | null) ?? null, aprendizado: ns(r.aprendizado),
     criadoEm: iso(r.criado_em), atualizadoEm: iso(r.atualizado_em),
@@ -449,7 +453,7 @@ export const rotuloEscopo = (e: Pick<Experimento, 'paginaHost' | 'paginaCaminho'
   [e.paginaCaminho ? `Página ${e.paginaHost ?? ''}${e.paginaCaminho}` : '', e.campanhas.length ? `${e.campanhas.length === 1 ? 'Campanha' : 'Campanhas (somadas)'} ${e.campanhas.map(campanhaTexto).join(', ')}` : '', e.identificadorConversao ? `Identificador ${e.identificadorConversao}` : ''].filter(Boolean);
 const SEM_DADOS = { diario: { google: new Map(), meta: new Map(), social: new Map(), organico: new Map() } } as DadosExp;
 
-export class PgExperimentosRepo implements ExperimentosRepo {
+export class PgExperimentosRepo implements ExperimentosRepo, RepoSync {
   constructor(private readonly db: Db, private readonly agora: () => Date = () => new Date(), private readonly ler: LeitorDados = lerDadosMonitor, private readonly lerEscopo: LeitorEscopo = lerDadosEscopo, private readonly lerDetalhe: LeitorDetalhe = lerDetalheEscopo, private readonly lerCamposManuais: LeitorCampos = lerCampos) {}
 
   /** Dados por experimento: os sem escopo leem o Monitor uma vez por produto; os com escopo leem só a fatia deles. */
@@ -538,6 +542,22 @@ export class PgExperimentosRepo implements ExperimentosRepo {
       detalhe: temEscopo(e) && e.inicio && e.fim && e.inicio <= somaDias(hoje, -1) ? await this.lerDetalhe(this.db, e, e.inicio, e.fim < somaDias(hoje, -1) ? e.fim : somaDias(hoje, -1)) : null,
       documentacao: ns(doc.rows[0]?.documentacao),
     };
+  }
+
+  /** Todos os experimentos, com progresso e a documentação salva, para a planilha. */
+  async paraSincronizar(): Promise<ExperimentoParaSync[]> {
+    const lista = await this.listar();
+    const docs = await this.db.query('select id, documentacao from mkt.experimentos where documentacao is not null');
+    const porId = new Map(docs.rows.map((r) => [Number(r.id), String(r.documentacao)]));
+    return lista.experimentos.map((e) => ({ ...e, documentacaoHtml: porId.get(e.id) ?? null }));
+  }
+  async paraClickUp(id: number): Promise<ExperimentoParaSync> {
+    const e = await this.completo(await this.um(id));
+    const doc = await this.db.query('select documentacao from mkt.experimentos where id = $1', [id]);
+    return { ...e, documentacaoHtml: ns(doc.rows[0]?.documentacao) };
+  }
+  async registrarClickUp(id: number, paginaId: string, url: string): Promise<void> {
+    await this.db.query('update mkt.experimentos set clickup_pagina_id = $1, clickup_url = $2, clickup_enviado_em = now() where id = $3', [paginaId, url, id]);
   }
 
   async opcoes(produto?: string): Promise<OpcoesEscopo> {
