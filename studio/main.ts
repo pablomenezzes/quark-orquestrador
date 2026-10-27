@@ -18,6 +18,7 @@ import { PgPainelRepo } from './lib/painel-repo.js';
 import { PgBiRepo } from './lib/bi.js';
 import { PgMonitorRepo } from './lib/monitor.js';
 import { PgExperimentosRepo } from './lib/experimentos.js';
+import { SincroniaManual, githubConfigDoAmbiente } from './lib/sincronia-manual.js';
 import { ClickUpClient, Integracoes, SheetsClient, clickUpConfigDoAmbiente, sheetsConfigDoAmbiente } from './lib/integracoes.js';
 import { checkPortFree, formatReport, parseEnv, runPreflight } from './lib/preflight.js';
 import { createStudioServer, type SubmitFn } from './server.js';
@@ -120,6 +121,7 @@ const server = createStudioServer({
   bi: biRepo,
   monitor: monitorRepo,
   experimentos: experimentosRepo,
+  sincronia: (() => { const g = githubConfigDoAmbiente(process.env); return g ? new SincroniaManual(g) : null; })(),
   integracoes: experimentosRepo ? (() => { const s = sheetsConfigDoAmbiente(process.env), c = clickUpConfigDoAmbiente(process.env); return s || c ? new Integracoes(experimentosRepo, s ? new SheetsClient(s) : null, c ? new ClickUpClient(c) : null) : null; })() : null,
 });
 

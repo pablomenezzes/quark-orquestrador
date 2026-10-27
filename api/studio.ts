@@ -8,6 +8,7 @@ import { PgExperimentosRepo } from '../studio/lib/experimentos.js';
 import { PgMonitorRepo } from '../studio/lib/monitor.js';
 import { PgPainelRepo } from '../studio/lib/painel-repo.js';
 import { ClickUpClient, Integracoes, SheetsClient, clickUpConfigDoAmbiente, sheetsConfigDoAmbiente } from '../studio/lib/integracoes.js';
+import { SincroniaManual, githubConfigDoAmbiente } from '../studio/lib/sincronia-manual.js';
 import { createStudioHandler } from '../studio/server.js';
 
 /**
@@ -41,6 +42,7 @@ function montar() {
     bi: new PgBiRepo(pool),
     monitor: new PgMonitorRepo(pool),
     experimentos,
+    sincronia: (() => { const g = githubConfigDoAmbiente(process.env); return g ? new SincroniaManual(g) : null; })(),
     integracoes: new Integracoes(experimentos, sheetsCfg ? new SheetsClient(sheetsCfg) : null, clickCfg ? new ClickUpClient(clickCfg) : null, env('CRON_SECRET') || null),
     acesso: { servico: new SupabaseAuth({ url: env('SUPABASE_URL'), anonKey: env('SUPABASE_ANON_KEY'), serviceKey: env('SUPABASE_SERVICE_ROLE_KEY') }), segredo: env('SESSION_SECRET'), seguro: true },
   });

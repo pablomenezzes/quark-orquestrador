@@ -5,6 +5,7 @@ import { FormsStore, StoreError } from './lib/forms-store.js';
 import { FORM_ID_RE } from './lib/form-schema.js';
 import { AuthErro, LimiteLogin, VigenciaCache, assinar, cookieLimpo, cookieSessao, emailValido, lerCookie, PAPEIS, SESSAO_SEGUNDOS, senhaValida, verificar, type AuthService, type Papel, type Sessao } from './lib/auth.js';
 import { IntegracaoErro, type Integracoes } from './lib/integracoes.js';
+import type { SincroniaManual } from './lib/sincronia-manual.js';
 import { timingSafeEqual } from 'node:crypto';
 import { PRODUTOS_MONITOR, type MonitorRepo, type ProdutoMonitor } from './lib/monitor.js';
 import type { ExperimentosRepo } from './lib/experimentos.js';
@@ -35,6 +36,8 @@ export type StudioOptions = {
    */
   /** Google Sheets e ClickUp (opcionais: sem credenciais as rotas respondem 503 com o que falta). */
   integracoes?: Integracoes | null;
+  /** Gatilho manual da sincronização (dispara o workflow do GitHub Actions). Sem token, o estado diz que não está configurado e o disparo responde 503. */
+  sincronia?: SincroniaManual | null;
   acesso?: { servico: AuthService; segredo: string; seguro?: boolean; agora?: () => number } | null;
 };
 
@@ -277,6 +280,18 @@ export function createStudioHandler(opts: StudioOptions): (req: IncomingMessage,
       return send(res, 200, await opts.monitor.monitor((produto || undefined) as ProdutoMonitor | undefined));
     }
 
+    // Saúde da sincronização: estado do gatilho manual, últimas execuções no GitHub e o disparo (só admin, pela regra de /api/painel/ não-GET)
+    if (method === 'GET' && path === '/api/painel/sincronia') {
+      const sinc = opts.sincronia;
+      if (!sinc) return send(res, 200, { configurado: false, repo: null, workflows: [], execucoes: [] });
+      const st = sinc.status();
+      return send(res, 200, { ...st, execucoes: await sinc.execucoes().catch(() => []) });
+    }
+    if (method === 'POST' && path === '/api/painel/sincronia/disparar') {
+      if (!opts.sincronia) return send(res, 503, { error: 'integracao_nao_configurada', detail: 'Gatilho manual não configurado: falta GITHUB_DISPATCH_TOKEN (token do GitHub com permissão Actions: leitura e escrita neste repositório).' });
+      const b = await readJson(req);
+      return send(res, 202, await opts.sincronia.disparar(b?.workflow));
+    }
     // Integrações: estado (o que está configurado) e as ações de sincronizar a planilha e enviar ao ClickUp
     if (method === 'GET' && path === '/api/integracoes') return send(res, 200, opts.integracoes?.status() ?? { sheets: { configurado: false }, clickup: { configurado: false }, cron: false });
     if (method === 'POST' && path === '/api/experimentos/sincronizar') {

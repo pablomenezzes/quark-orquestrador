@@ -42,7 +42,7 @@ function toast(msg) {
   toast.t = setTimeout(() => (t.hidden = true), 2200);
 }
 
-const S = { tab: 'saude', saude: null, config: null, motivos: null, statusCont: null, usuarios: null, campos: null, filtro: '', neg: { resumo: null, lista: null, ficha: null, progresso: null, funil: null, ano: 2026, f: { pipeline: '', status: '', mql: '', mes: '', q: '', pagina: 1 } } };
+const S = { tab: 'saude', sinc: null, souAdmin: false, saude: null, config: null, motivos: null, statusCont: null, usuarios: null, campos: null, filtro: '', neg: { resumo: null, lista: null, ficha: null, progresso: null, funil: null, ano: 2026, f: { pipeline: '', status: '', mql: '', mes: '', q: '', pagina: 1 } } };
 
 const nf = new Intl.NumberFormat('pt-BR');
 const brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
@@ -65,7 +65,7 @@ async function load(tab) {
     ]);
     S.saude = await api('/api/painel/saude');
   }
-  if (tab === 'saude') S.saude = await api('/api/painel/saude');
+  if (tab === 'saude') { S.saude = await api('/api/painel/saude'); await carregarSincronia(); }
   if (tab === 'conversoes') await carregarConversoes();
   if (tab === 'criativos') await carregarCriativos();
   if (tab === 'config' || tab === 'explorar' || tab === 'conferencia') S.config = await api('/api/painel/config');
@@ -78,6 +78,70 @@ async function load(tab) {
 }
 
 /* ---------- Saúde ---------- */
+const SITUACAO = { na_fila: ['Na fila', 'warn'], rodando: ['Rodando', 'warn'], concluida: ['Concluída', 'ok'] };
+const RESULTADO = { success: ['Concluída com sucesso', 'ok'], failure: ['Falhou', 'danger'], cancelled: ['Cancelada', ''], skipped: ['Ignorada', ''], timed_out: ['Estourou o tempo', 'danger'], startup_failure: ['Falhou ao iniciar', 'danger'] };
+const emAndamento = () => !!S.sinc?.execucoes?.some((x) => x.situacao !== 'concluida');
+async function carregarSincronia() {
+  try {
+    S.sinc = await api('/api/painel/sincronia');
+    S.souAdmin = (await api('/api/me').catch(() => ({}))).papel === 'admin';
+  } catch { S.sinc = null; }
+  agendarAtualizacao();
+}
+/** Enquanto houver execução na fila ou rodando, confere de novo a cada 10 segundos (só com a aba Saúde aberta). */
+function agendarAtualizacao() {
+  clearTimeout(agendarAtualizacao.t);
+  if (S.tab !== 'saude' || !emAndamento()) return;
+  agendarAtualizacao.t = setTimeout(async () => {
+    if (S.tab !== 'saude') return;
+    const antes = emAndamento();
+    try { S.sinc = await api('/api/painel/sincronia'); } catch { /* tenta de novo no próximo ciclo */ }
+    if (antes && !emAndamento()) { try { S.saude = await api('/api/painel/saude'); toast('Sincronização terminou'); } catch { /* mantém os dados atuais */ } }
+    if (S.tab === 'saude') $('#view').innerHTML = viewSaude();
+    agendarAtualizacao();
+  }, 10_000);
+}
+function blocoSincronizarAgora() {
+  const s = S.sinc;
+  if (!s) return '';
+  if (!s.configurado) return `<section class="card section" style="margin-bottom:16px"><h2>Sincronizar agora</h2>
+    <p class="muted">O gatilho manual ainda não está configurado: falta a variável <code>GITHUB_DISPATCH_TOKEN</code> (um token do GitHub com permissão <b>Actions: leitura e escrita</b> só neste repositório). Enquanto isso, a sincronização segue rodando sozinha de 2 em 2 horas.</p></section>`;
+  const ocupada = emAndamento();
+  const botoes = s.workflows.map((w) => `<div style="margin:8px 0"><button class="btn" data-sinc="${esc(w.id)}" ${!S.souAdmin || ocupada ? 'disabled' : ''}>${esc(w.nome)}</button> <span class="muted">leva ${esc(w.duracao)}</span></div>`).join('');
+  const linhas = s.execucoes.length
+    ? s.execucoes.slice(0, 8).map((x) => {
+      const [rot, cls] = x.situacao === 'concluida' ? (RESULTADO[x.resultado] ?? [x.resultado ?? 'Concluída', '']) : SITUACAO[x.situacao];
+      const nome = s.workflows.find((w) => w.id === x.workflow)?.nome ?? x.workflow;
+      return `<tr><td>${esc(when(x.inicio))}</td><td>${esc(nome)}</td><td>${esc(x.origem)}</td><td><span class="chip ${cls}">${esc(rot)}</span></td><td>${x.url ? `<a href="${esc(x.url)}" target="_blank" rel="noopener">ver no GitHub</a>` : ''}</td></tr>`;
+    }).join('')
+    : '<tr><td colspan="5" class="empty">Nenhuma execução recente.</td></tr>';
+  return `<section class="card section" style="margin-bottom:16px"><h2>Sincronizar agora</h2>
+    <p class="muted" style="margin:0 0 6px">Pede ao GitHub para rodar a rotina agora, sem esperar as 2 horas. Pipedrive e Google só são lidos; nada é apagado. ${S.souAdmin ? '' : 'Só o admin pode disparar.'}${ocupada ? ' Há uma execução em andamento: aguarde terminar.' : ''}</p>
+    ${botoes}<div id="sinc-msg" class="muted" role="status" style="min-height:20px"></div>
+    <div style="overflow:auto"><table class="t"><thead><tr><th>Início</th><th>Rotina</th><th>Origem</th><th>Situação</th><th></th></tr></thead><tbody>${linhas}</tbody></table></div></section>`;
+}
+async function dispararSincronia(workflow, botao) {
+  const msg = $('#sinc-msg');
+  botao.disabled = true;
+  if (msg) msg.textContent = 'Enviando o pedido ao GitHub…';
+  try {
+    const r = await api('/api/painel/sincronia/disparar', { method: 'POST', body: { workflow } });
+    toast('Sincronização pedida');
+    await new Promise((ok) => setTimeout(ok, 3000)); // o GitHub leva alguns segundos para criar a execução
+    S.sinc = await api('/api/painel/sincronia');
+    if (S.tab === 'saude') $('#view').innerHTML = viewSaude();
+    const m2 = $('#sinc-msg');
+    if (m2) m2.textContent = r.mensagem;
+    agendarAtualizacao();
+  } catch (e) {
+    if (msg) msg.textContent = e.message;
+    botao.disabled = false;
+  }
+}
+document.addEventListener('click', (ev) => {
+  const b = ev.target.closest('[data-sinc]');
+  if (b) dispararSincronia(b.dataset.sinc, b);
+});
 function viewSaude() {
   const { entidades, jobs, erros, uso } = S.saude;
   const byEntity = new Map(entidades.map((e) => [e.entity, e]));
@@ -101,7 +165,7 @@ function viewSaude() {
   const usoHtml = uso.length
     ? uso.map((u) => `<tr><td>${esc(u.dia)}</td><td class="num">${u.tokens_gastos}</td><td class="num">${u.requisicoes}</td><td class="num">${u.limite_429}</td></tr>`).join('')
     : '<tr><td colspan="4" class="empty">Sem uso registrado.</td></tr>';
-  return `${alerta}
+  return `${blocoSincronizarAgora()}${alerta}
     ${nunca.length === ENTIDADES.length ? '<div class="banner warn" style="margin-bottom:12px">Nada foi sincronizado ainda. Quando a primeira sincronização rodar, ela aparece aqui.</div>' : ''}
     <section class="card section"><h2>Última atualização de cada item</h2>
       <table class="t"><thead><tr><th>Item</th><th>Situação</th><th>Última vez com sucesso</th><th></th></tr></thead><tbody>${linhas}</tbody></table></section>
