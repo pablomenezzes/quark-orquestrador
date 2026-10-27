@@ -36,6 +36,11 @@
     .ms-acoes button { padding: 3px 9px; font-size: 12px; border-radius: 7px; border: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer; }
     .ms-op { display: flex; gap: 8px; align-items: center; padding: 4px 6px; border-radius: 6px; font-size: 13.5px; color: var(--text); cursor: pointer; }
     .ms-op:hover { background: var(--surface-2); }
+    .ms-btn.ativo { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .camp-pop { min-width: 440px; }
+    .camp-pop input[type=search] { width: 100%; margin: 4px 0 8px; box-sizing: border-box; }
+    .camp-pop p { margin: 0 0 6px; font-size: 12.5px; }
+    .camp-pop .ms-op span:first-of-type { flex: 1; overflow-wrap: anywhere; }
     .ms-op .pad { margin-left: auto; font-size: 11px; color: var(--muted); }
     .grade { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
     .bi-card { background: var(--viz-surface); color: var(--viz-ink); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px 14px; min-width: 0; }
@@ -146,6 +151,7 @@
       <label id="f-ate-l" hidden>Até <input id="f-ate" type="date"></label>
       <div class="campo"><span>Fonte do Lead</span><div class="ms" id="ms-fontes"></div></div>
       <div class="campo"><span>Tipo do Lead</span><div class="ms" id="ms-tipos"></div></div>
+      <div class="campo"><span>Campanhas Meta fora do CPL</span><div class="ms" id="ms-camp"></div></div>
       <label>Produto
         <select id="f-produto"><option value="">Todos</option><option value="rh">RH (QuarkRH)</option><option value="clinic">Clínica (QuarkClinic)</option></select>
       </label>

@@ -57,6 +57,11 @@ const PRESETS = {
 };
 
 const S = { catalogo: null, pagina: 'geral', filtros: { periodo: 'ano', de: '', ate: '', produto: '', pipeline: '' }, padrao: {}, modo: {}, aberto: null };
+/* Campanhas da Meta fora do cálculo: filtro TEMPORÁRIO (vale só nesta aba do navegador, até limpar), por isso fica em sessionStorage e não em localStorage */
+const sessao = {
+  ler: (k) => { try { return JSON.parse(sessionStorage.getItem(k) ?? 'null'); } catch { return null; } },
+  guardar: (k, v) => { try { sessionStorage.setItem(k, JSON.stringify(v)); } catch { /* sem armazenamento: o filtro vale até recarregar */ } },
+};
 const guardar = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* sem armazenamento: tudo bem */ } };
 const ler = (k) => { try { return JSON.parse(localStorage.getItem(k) ?? 'null'); } catch { return null; } };
 Object.assign(S.filtros, ler('bi.filtros') ?? {});
@@ -64,6 +69,11 @@ S.padrao = ler('bi.padrao') ?? {};
 /** Linhas de referência dos gráficos de colunas: caixas liga/desliga e a série a que valem ('' = a primeira; 'todas'). Lembrado neste navegador. */
 S.linhas = { mes_anterior: true, ano_anterior: true, serie: '', ...(ler('bi.linhas') ?? {}) };
 if (!PRESETS[S.filtros.periodo]) S.filtros.periodo = 'ano';
+S.excluir = (sessao.ler('bi.excluirCampanhas') ?? []).filter((id) => /^\d{1,20}$/.test(String(id))).map(String);
+S.campNomes = sessao.ler('bi.campNomes') ?? {};
+S.campLista = null;
+S.campBusca = '';
+S.campChave = '';
 
 function intervalo() {
   const f = S.filtros;
@@ -93,11 +103,60 @@ function queryFiltros() {
   const p = new URLSearchParams({ de, ate });
   if (S.filtros.produto) p.set('produto', S.filtros.produto);
   if (S.filtros.pipeline) p.set('pipeline', S.filtros.pipeline);
+  if (S.excluir.length) p.set('excluir_campanhas', S.excluir.join(','));
   for (const [campo, param] of [['fontes', 'fonte'], ['tipos', 'tipo']]) {
     const s = sel(campo);
     if (s.length && !todasSel(campo)) p.set(param, s.join(','));
   }
   return p.toString();
+}
+
+/* ---------- campanhas da Meta fora do CPL ---------- */
+const campResumo = () => (S.excluir.length ? `${S.excluir.length} removida${S.excluir.length > 1 ? 's' : ''}` : 'Nenhuma');
+const campVisiveis = () => { const t = S.campBusca.trim().toLowerCase(); return (S.campLista ?? []).filter((c) => !t || c.nome.toLowerCase().includes(t)); };
+function listaCamp() {
+  if (S.campLista == null) return '<p class="muted">Carregando as campanhas…</p>';
+  const v = campVisiveis();
+  const fora = S.excluir.filter((id) => !S.campLista.some((c) => c.id === id));
+  const linhas = v.map((c) => `<label class="ms-op"><input type="checkbox" data-camp-op value="${esc(c.id)}" ${S.excluir.includes(c.id) ? 'checked' : ''}> <span>${esc(c.nome)}</span><span class="pad">${esc(brl.format(c.gasto))}</span></label>`).join('');
+  const vazio = `<p class="muted">Nenhuma campanha com gasto neste período e produto${S.campBusca ? ' que combine com a busca' : ''}.</p>`;
+  const sobras = fora.length ? `<p class="muted">+ ${fora.length} fora do cálculo sem gasto neste período: ${fora.map((id) => esc(S.campNomes[id] ?? `#${id}`)).join('; ')}</p>` : '';
+  return `${linhas || vazio}${sobras}`;
+}
+function pintarCamp() {
+  const el = $('#ms-camp');
+  if (!el) return;
+  const aberto = S.aberto === 'camp';
+  el.innerHTML = `<button type="button" class="ms-btn ${S.excluir.length ? 'ativo' : ''}" data-camp-toggle aria-haspopup="true" aria-expanded="${aberto}" title="Campanhas da Meta que ficam fora do investimento e dos negócios (temporário)">${esc(campResumo())} ▾</button>${aberto ? `<div class="ms-pop camp-pop" role="group" aria-label="Campanhas da Meta fora do CPL">
+      <p class="muted">Marque as campanhas que <b>não</b> devem entrar no cálculo (topo de funil, experimentos...). Saem o investimento delas e os negócios ligados a elas, em todas as páginas. Vale só nesta aba do navegador, até você limpar.</p>
+      <input id="camp-busca" type="search" placeholder="Buscar pelo nome (ex.: topo, experimento)" value="${esc(S.campBusca)}" aria-label="Buscar campanha">
+      <div class="ms-acoes"><button type="button" data-camp-acao="marcar">Marcar as filtradas</button><button type="button" data-camp-acao="desmarcar">Desmarcar as filtradas</button><button type="button" data-camp-acao="limpar">Limpar tudo</button></div>
+      <div id="camp-lista">${listaCamp()}</div></div>` : ''}`;
+}
+/** Busca as campanhas com gasto no período e produto atuais (uma vez por combinação) e redesenha só a lista. */
+async function carregarCampanhas() {
+  const [de, ate] = intervalo();
+  const chave = `${de}|${ate}|${S.filtros.produto}`;
+  if (S.campChave === chave && S.campLista) return;
+  S.campChave = chave;
+  S.campLista = null;
+  $('#camp-lista') && ($('#camp-lista').innerHTML = listaCamp());
+  try {
+    const p = new URLSearchParams({ de, ate });
+    if (S.filtros.produto) p.set('produto', S.filtros.produto);
+    S.campLista = await api(`/api/bi/campanhas?${p}`);
+    for (const c of S.campLista) S.campNomes[c.id] = c.nome;
+    sessao.guardar('bi.campNomes', S.campNomes);
+  } catch { S.campLista = []; S.campChave = ''; }
+  $('#camp-lista') && ($('#camp-lista').innerHTML = listaCamp());
+}
+function excluirMudou() {
+  sessao.guardar('bi.excluirCampanhas', S.excluir);
+  const b = $('#ms-camp .ms-btn');
+  if (b) { b.textContent = `${campResumo()} ▾`; b.classList.toggle('ativo', S.excluir.length > 0); }
+  pintarStatus();
+  clearTimeout(filtrosMudaram.t);
+  filtrosMudaram.t = setTimeout(carregarPagina, 400); // espera o clique seguinte antes de consultar
 }
 
 function pintarMs(campo) {
@@ -116,6 +175,11 @@ function pintarMs(campo) {
   }`;
 }
 
+function pintarStatus() {
+  const [de, ate] = intervalo();
+  const per = de && ate ? `${de.split('-').reverse().join('/')} a ${ate.split('-').reverse().join('/')}` : '';
+  $('#f-status').textContent = S.excluir.length ? `${per} · ${S.excluir.length} campanha${S.excluir.length > 1 ? 's' : ''} da Meta fora` : per;
+}
 function pintarFiltros() {
   $('#f-periodo').innerHTML = Object.entries(PRESETS).map(([k, [l]]) => `<option value="${k}" ${k === S.filtros.periodo ? 'selected' : ''}>${esc(l)}</option>`).join('');
   const custom = S.filtros.periodo === 'custom';
@@ -129,9 +193,10 @@ function pintarFiltros() {
   const pipes = (S.catalogo?.pipelines ?? []).filter((p) => !S.filtros.produto || p.produto === S.filtros.produto);
   $('#f-pipeline').innerHTML = `<option value="">Todos</option>${pipes.map((p) => `<option value="${p.pipeline_id}" ${String(p.pipeline_id) === String(S.filtros.pipeline) ? 'selected' : ''}>${esc(p.pipeline)}</option>`).join('')}`;
   const [de, ate] = intervalo();
-  $('#f-status').textContent = de && ate ? `${de.split('-').reverse().join('/')} a ${ate.split('-').reverse().join('/')}` : '';
+  pintarStatus();
   pintarMs('fontes');
   pintarMs('tipos');
+  pintarCamp();
 }
 
 /* ---------- tooltip ---------- */
@@ -491,6 +556,13 @@ document.addEventListener('change', (ev) => {
     if (a) pintarCard(a);
     return;
   }
+  if (t.dataset && 'campOp' in t.dataset) {
+    const s = new Set(S.excluir);
+    t.checked ? s.add(t.value) : s.delete(t.value);
+    S.excluir = [...s];
+    excluirMudou();
+    return;
+  }
   if (t.dataset?.msOp) {
     const campo = t.dataset.msOp;
     const s = new Set(sel(campo));
@@ -527,12 +599,34 @@ document.addEventListener('click', (ev) => {
     montarPagina();
     return;
   }
+  // campanhas da Meta fora do CPL
+  const cTog = t.closest?.('[data-camp-toggle]');
+  if (cTog) {
+    S.aberto = S.aberto === 'camp' ? null : 'camp';
+    pintarMs('fontes');
+    pintarMs('tipos');
+    pintarCamp();
+    if (S.aberto === 'camp') carregarCampanhas();
+    return;
+  }
+  const cAc = t.closest?.('[data-camp-acao]');
+  if (cAc) {
+    const acao = cAc.dataset.campAcao;
+    const visiveis = campVisiveis().map((c) => c.id);
+    if (acao === 'limpar') S.excluir = [];
+    else if (acao === 'marcar') S.excluir = [...new Set([...S.excluir, ...visiveis])];
+    else if (acao === 'desmarcar') S.excluir = S.excluir.filter((id) => !visiveis.includes(id));
+    $('#camp-lista') && ($('#camp-lista').innerHTML = listaCamp());
+    excluirMudou();
+    return;
+  }
   // seletores de Fonte e Tipo
   const ms = t.closest?.('[data-ms]');
   if (ms) {
     S.aberto = S.aberto === ms.dataset.ms ? null : ms.dataset.ms;
     pintarMs('fontes');
     pintarMs('tipos');
+    pintarCamp();
     return;
   }
   const acao = t.closest?.('[data-ms-acao]');
@@ -560,6 +654,7 @@ document.addEventListener('click', (ev) => {
     S.aberto = null;
     pintarMs('fontes');
     pintarMs('tipos');
+    pintarCamp();
   }
   // cards: Gráfico/Tabela e CSV
   const card = t.closest?.('.bi-card');
@@ -580,11 +675,18 @@ document.addEventListener('click', (ev) => {
   if (t.closest('[data-csv]') && RES.get(chaveDe(a))?.resultado) csv(a, RES.get(chaveDe(a)).resultado);
 });
 
+document.addEventListener('input', (ev) => {
+  if (ev.target.id !== 'camp-busca') return;
+  S.campBusca = ev.target.value;
+  $('#camp-lista') && ($('#camp-lista').innerHTML = listaCamp());
+});
+
 document.addEventListener('keydown', (ev) => {
   if (ev.key === 'Escape' && S.aberto) {
     S.aberto = null;
     pintarMs('fontes');
     pintarMs('tipos');
+    pintarCamp();
   }
 });
 

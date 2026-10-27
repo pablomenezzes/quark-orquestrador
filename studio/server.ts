@@ -356,6 +356,20 @@ export function createStudioHandler(opts: StudioOptions): (req: IncomingMessage,
       }
       if (method !== 'GET') return send(res, 405, { error: 'method_not_allowed' });
       if (path === '/api/bi/catalogo') return send(res, 200, { analises: bi.catalogo(), ...(await bi.opcoes()) });
+      // Campanhas da Meta com gasto no período, para o filtro temporário "Campanhas Meta fora do CPL"
+      if (path === '/api/bi/campanhas') {
+        if (!bi.campanhasMeta) return send(res, 404, { error: 'not_found' });
+        const q = url.searchParams;
+        const dia = (v: string | null, nome: string): string => {
+          if (!v || !/^\d{4}-\d{2}-\d{2}$/.test(v) || new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) !== v) throw new HttpError(400, `${nome}_invalida`, { esperado: 'AAAA-MM-DD' });
+          return v;
+        };
+        const de = dia(q.get('de'), 'de'), ate = dia(q.get('ate'), 'ate');
+        if (de > ate) throw new HttpError(400, 'periodo_invertido');
+        const produto = q.get('produto');
+        if (produto && !(BI_PRODUTOS as readonly string[]).includes(produto)) throw new HttpError(400, 'produto_invalido', { validos: [...BI_PRODUTOS] });
+        return send(res, 200, await bi.campanhasMeta({ de, ate, ...(produto ? { produto: produto as BiProduto } : {}) }));
+      }
       const one = /^\/api\/bi\/analise\/([a-z0-9-]{1,60})$/.exec(path);
       if (one) {
         const q = url.searchParams;
@@ -387,6 +401,13 @@ export function createStudioHandler(opts: StudioOptions): (req: IncomingMessage,
         const tipos = lista('tipo');
         if (fontes) f.fontes = fontes;
         if (tipos) f.tipos = tipos;
+        // campanhas da Meta fora da análise (temporário): IDs de campanha, só dígitos
+        const excl = q.get('excluir_campanhas');
+        if (excl) {
+          const toks = excl.split(',');
+          if (toks.length > 200 || toks.some((t) => !/^\d{1,20}$/.test(t))) throw new HttpError(400, 'excluir_campanhas_invalido');
+          f.excluirCampanhas = [...new Set(toks)];
+        }
         return send(res, 200, await bi.rodar(one[1]!, f));
       }
       return send(res, 404, { error: 'not_found' });

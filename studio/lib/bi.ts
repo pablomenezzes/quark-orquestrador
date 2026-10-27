@@ -33,7 +33,11 @@ export const BI_PAGINAS = [
 export type BiPagina = (typeof BI_PAGINAS)[number]['id'];
 
 /** `fontes` e `tipos`: IDs das opções do Pipedrive (texto de dígitos) e/ou 'branco' (campo não preenchido). Ausente = sem filtro. */
-export type BiFiltros = { de: string; ate: string; produto?: BiProduto; pipeline_id?: number; fontes?: string[]; tipos?: string[] };
+/**
+ * `excluirCampanhas`: IDs (texto de dígitos) de campanhas da Meta que ficam FORA da análise, temporariamente (topo de funil, experimentos...): saem o investimento delas
+ * (analytics.meta_desempenho_dia) e os negócios ligados a elas (analytics.negocios_meta), para o CPL e o funil não misturarem o que não deve ser contabilizado.
+ */
+export type BiFiltros = { de: string; ate: string; produto?: BiProduto; pipeline_id?: number; fontes?: string[]; tipos?: string[]; excluirCampanhas?: string[] };
 
 /** `brl2` = reais com centavos (custos unitários: CPL, CAC...); `dec` = número com 2 casas (ex.: ROAS). */
 export type Coluna = { id: string; rotulo: string; tipo: 'texto' | 'int' | 'pct' | 'brl' | 'brl2' | 'dec' | 'dias' };
@@ -113,6 +117,10 @@ function filtroSql(f: BiFiltros, a: string, params: unknown[]): string[] {
   }
   if (f.fontes?.length) out.push(listaSql(`${a}.fonte_id`, f.fontes, params));
   if (f.tipos?.length) out.push(listaSql(`${a}.tipo_id`, f.tipos, params));
+  if (f.excluirCampanhas?.length) {
+    params.push(f.excluirCampanhas);
+    out.push(`not exists (select 1 from analytics.negocios_meta x where x.deal_id = ${a}.deal_id and x.campanha_id = any($${params.length}::bigint[]))`);
+  }
   return out;
 }
 
@@ -383,6 +391,10 @@ function filtroGasto(f: BiFiltros, p: unknown[]): string[] {
   if (f.produto) {
     p.push(f.produto);
     w.push(`m.produto = $${p.length}`);
+  }
+  if (f.excluirCampanhas?.length) {
+    p.push(f.excluirCampanhas);
+    w.push(`(m.campanha_id is null or m.campanha_id <> all($${p.length}::bigint[]))`);
   }
   return w;
 }
@@ -1806,6 +1818,8 @@ export type BiOpcao = { id: string; nome: string; padrao: boolean };
 
 export interface BiRepo {
   catalogo(): BiCatalogoItem[];
+  /** Campanhas da Meta com gasto no período (e produto), para escolher as que ficam fora do cálculo. */
+  campanhasMeta?(f: { de: string; ate: string; produto?: BiProduto }): Promise<Array<{ id: string; nome: string; produto: string | null; gasto: number }>>;
   opcoes(): Promise<{
     pipelines: Array<{ pipeline_id: number; pipeline: string; produto: string | null }>;
     produtos: readonly string[];
@@ -1849,6 +1863,18 @@ export class PgBiRepo implements BiRepo {
   async rodar(id: string, f: BiFiltros): Promise<BiResultado> {
     const a = BI_ANALISES.find((x) => x.id === id);
     if (!a) throw new BiNotFound('análise');
-    return a.rodar(this.pool, f);
+    const r = await a.rodar(this.pool, f);
+    const n = f.excluirCampanhas?.length ?? 0;
+    // o filtro é temporário e some do resumo sem querer: toda análise avisa que ele está ligado
+    return n ? { ...r, avisos: [`Filtro temporário ligado: ${n} ${n === 1 ? 'campanha da Meta fora' : 'campanhas da Meta fora'} do investimento e dos negócios ligados a ${n === 1 ? 'ela' : 'elas'}. Limpe em "Campanhas Meta fora do CPL".`, ...r.avisos] } : r;
+  }
+
+  async campanhasMeta(f: { de: string; ate: string; produto?: BiProduto }): Promise<Array<{ id: string; nome: string; produto: string | null; gasto: number }>> {
+    const p: unknown[] = [f.de, f.ate];
+    if (f.produto) p.push(f.produto);
+    const rows = await q(this.pool, `select m.campanha_id::text as id, max(m.campanha) as nome, max(m.produto) as produto, sum(m.gasto)::float8 as gasto
+                                      from analytics.meta_desempenho_dia m where m.dia between $1::date and $2::date and m.campanha_id is not null${f.produto ? ' and m.produto = $3' : ''}
+                                      group by m.campanha_id having sum(m.gasto) > 0 order by sum(m.gasto) desc limit 400`, p);
+    return rows.map((r) => ({ id: String(r.id), nome: String(r.nome ?? `#${r.id}`), produto: (r.produto as string | null) ?? null, gasto: n(r.gasto) }));
   }
 }
