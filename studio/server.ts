@@ -648,6 +648,8 @@ export function createStudioHandler(opts: StudioOptions): (req: IncomingMessage,
       if (e instanceof AuthErro) return send(res, e.status, { error: 'auth', detail: e.message });
       if (e instanceof IntegracaoErro) return send(res, e.status === 503 ? 503 : e.status === 404 ? 502 : e.status, { error: e.status === 503 ? 'integracao_nao_configurada' : 'integracao', detail: e.message });
       console.error('studio:', e instanceof Error ? e.message : e);
+      // limite de conexões do papel do painel estourado (código 53300 do Postgres): é passageiro, então diz o que fazer em vez de "erro interno"
+      if ((e as { code?: string } | null)?.code === '53300') return send(res, 503, { error: 'banco_ocupado', detail: 'O banco está com todas as conexões do painel em uso. Aguarde alguns segundos e tente de novo.' });
       send(res, 500, { error: 'internal_error' });
     });
   };

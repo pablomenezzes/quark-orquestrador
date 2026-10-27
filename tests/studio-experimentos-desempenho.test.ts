@@ -137,6 +137,31 @@ describe('Desempenho: rotas e tela', () => {
     const corpoCarregar = js.slice(js.indexOf('async function carregar(fresh'), js.indexOf('async function carregarProgresso'));
     expect(corpoCarregar).not.toContain('carregarOpcoes'); // não busca mais as opções a cada carregamento
     expect(js).toContain('carregar(true)'); // "Atualizar agora" ignora a guarda
-    expect(readFileSync(new URL('../api/studio.ts', import.meta.url), 'utf8')).toContain('max: 4');
+    expect(readFileSync(new URL('../api/studio.ts', import.meta.url), 'utf8')).toContain('max: 2');
+  });
+});
+
+describe('Conexões do banco: limite do papel do painel', () => {
+  it('a migration sobe o limite do papel e o app usa poucas conexões por instância e solta as ociosas', () => {
+    const mig = readFileSync(new URL('../supabase/migrations/0032_papel_painel_mais_conexoes.sql', import.meta.url), 'utf8');
+    expect(mig).toMatch(/alter role orq_panel connection limit 15;/);
+    const api = readFileSync(new URL('../api/studio.ts', import.meta.url), 'utf8');
+    expect(api).toMatch(/max: 2, idleTimeoutMillis: 10_000/);
+    expect(readFileSync(new URL('../studio/main.ts', import.meta.url), 'utf8')).toMatch(/connectionString: painelUrl, max: 2, idleTimeoutMillis: 10_000/);
+  });
+  it('"too many connections" (53300) vira 503 com instrução, não internal_error', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'studio-conn-'));
+    for (const d of ['f', 'p', 't']) mkdirSync(join(dir, d));
+    const repo = { async listar() { throw Object.assign(new Error('too many connections for role "orq_panel"'), { code: '53300' }); } } as unknown as ExperimentosRepo;
+    const s = createStudioServer({ formsDir: join(dir, 'f'), publicDir: join(dir, 'p'), trackingDir: join(dir, 't'), sources: [], dbInfo: () => ({ connected: true }), submit: async () => ({ status: 200, body: {} }), experimentos: repo } as never);
+    await new Promise<void>((r) => s.listen(0, '127.0.0.1', r));
+    const r = await fetch(`http://127.0.0.1:${(s.address() as AddressInfo).port}/api/experimentos`);
+    expect(r.status).toBe(503);
+    const corpo = await r.json();
+    expect(corpo.error).toBe('banco_ocupado');
+    expect(corpo.detail).toMatch(/Aguarde alguns segundos/);
+    expect(JSON.stringify(corpo)).not.toContain('orq_panel');
+    await new Promise((ok) => s.close(ok));
+    rmSync(dir, { recursive: true, force: true });
   });
 });

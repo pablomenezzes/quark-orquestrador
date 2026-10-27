@@ -26,7 +26,7 @@ function montar() {
   if (env('SESSION_SECRET').length < 32) throw new Error('SESSION_SECRET curto demais (mínimo 32 caracteres).');
   assertSafeDbTarget({ target: env('PANEL_DB_URL'), expectedRef: env('SUPABASE_PROJECT_REF') });
   assertRoleUser(env('PANEL_DB_URL'), 'orq_panel');
-  const pool = new pg.Pool({ connectionString: env('PANEL_DB_URL'), max: 4, ssl: { rejectUnauthorized: false } });
+  const pool = new pg.Pool({ connectionString: env('PANEL_DB_URL'), max: 2, idleTimeoutMillis: 10_000, allowExitOnIdle: true, ssl: { rejectUnauthorized: false } });
   pool.on('error', (e) => console.error('pool: erro no banco', e.message.replace(/postgres(ql)?:\/\/\S+/gi, '<url>')));
   const raiz = process.cwd();
   const experimentos = new PgExperimentosRepo(pool);

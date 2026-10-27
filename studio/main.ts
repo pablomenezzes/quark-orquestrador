@@ -82,7 +82,7 @@ const painelUrl = process.env.PANEL_DB_URL ?? '';
 if (painelUrl) {
   assertSafeDbTarget({ target: painelUrl, expectedRef: process.env.SUPABASE_PROJECT_REF! });
   assertRoleUser(painelUrl, 'orq_panel');
-  painelPool = new pg.Pool({ connectionString: painelUrl, max: 4, ssl: { rejectUnauthorized: false } });
+  painelPool = new pg.Pool({ connectionString: painelUrl, max: 2, idleTimeoutMillis: 10_000, ssl: { rejectUnauthorized: false } });
   painelPool.on('error', () => undefined);
   painelRepo = new PgPainelRepo(painelPool);
   biRepo = new PgBiRepo(painelPool); // o BI usa o mesmo papel orq_panel e só lê as visões de analytics
