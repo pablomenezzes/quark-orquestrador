@@ -66,7 +66,7 @@ describe('menu único e páginas', () => {
   it('as páginas do menu seguem a ordem: Início, Monitor, Experimentos, BI, Painel de Dados e, por último, Studio (testes)', () => {
     const nav = readFileSync(new URL('../studio/public/nav.js', import.meta.url), 'utf8');
     const ordem = [...nav.matchAll(/\['(\w+)', '([^']+)', '(\/[^']*)'\]/g)].map((m) => [m[1], m[2], m[3]]);
-    expect(ordem).toEqual([['inicio', 'Início', '/'], ['monitor', 'Monitor', '/monitor'], ['experimentos', 'Experimentos', '/experimentos'], ['bi', 'BI', '/bi'], ['painel', 'Painel de Dados', '/painel'], ['studio', 'Studio (testes)', '/studio'], ['usuarios', 'Usuários', '/usuarios']]); // Usuários só aparece para o admin no modo publicado
+    expect(ordem).toEqual([['inicio', 'Início', '/'], ['monitor', 'Monitor', '/monitor'], ['experimentos', 'Experimentos', '/experimentos'], ['bi', 'BI', '/bi'], ['seo', 'SEO', '/seo'], ['painel', 'Painel de Dados', '/painel'], ['studio', 'Studio (testes)', '/studio'], ['usuarios', 'Usuários', '/usuarios']]); // Usuários só aparece para o admin no modo publicado
   });
   it('todas as páginas usam o mesmo menu (nav.js) e dizem em qual página estão', () => {
     const esperado: Record<string, string> = { 'inicio.html': 'inicio', 'monitor.html': 'monitor', 'bi.html': 'bi', 'painel.html': 'painel', 'index.html': 'studio' };

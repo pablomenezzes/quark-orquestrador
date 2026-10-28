@@ -9,7 +9,7 @@ param([switch]$Apply)
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
 
-$nomes = @('PIPEDRIVE_DOMAIN', 'PIPEDRIVE_API_TOKEN', 'SYNC_DB_URL', 'SUPABASE_PROJECT_REF', 'GOOGLE_SA_CLIENT_EMAIL', 'GOOGLE_SA_PRIVATE_KEY', 'GA4_PROPERTY_ID', 'META_ACCESS_TOKEN', 'META_AD_ACCOUNT_RH', 'META_AD_ACCOUNT_CLINIC')
+$nomes = @('PIPEDRIVE_DOMAIN', 'PIPEDRIVE_API_TOKEN', 'SYNC_DB_URL', 'SUPABASE_PROJECT_REF', 'GOOGLE_SA_CLIENT_EMAIL', 'GOOGLE_SA_PRIVATE_KEY', 'GA4_PROPERTY_ID', 'GA4_PROPERTY_ID_CLINIC', 'GSC_SITE_URL', 'GSC_SITE_URL_CLINIC','META_ACCESS_TOKEN', 'META_AD_ACCOUNT_RH', 'META_AD_ACCOUNT_CLINIC')
 $env_ = @{}
 foreach ($line in Get-Content .env.local) {
   if ($line -match '^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$' -and -not $line.TrimStart().StartsWith('#')) { $env_[$Matches[1]] = $Matches[2].Trim('"') }

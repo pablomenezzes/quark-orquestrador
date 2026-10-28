@@ -1,7 +1,7 @@
 /**
  * Menu único do Quark Dados. Cada página tem <header class="top" data-pagina="...">; este arquivo monta a marca e o menu
  * dentro dele (o que já estiver no header, como as etiquetas do Studio, fica depois do menu).
- * Ordem do menu: Início (última atualização dos dados), Monitor, Experimentos, BI, Painel de Dados e, por último, Studio (testes).
+ * Ordem do menu: Início (última atualização dos dados), Monitor, Experimentos, BI, SEO, Painel de Dados e, por último, Studio (testes).
  * Publicado (com login): sem o Studio de testes, com "Usuários" para o admin e, à direita, o nome, "Minha conta" e "Sair".
  */
 const ITENS = [
@@ -9,6 +9,7 @@ const ITENS = [
   ['monitor', 'Monitor', '/monitor'],
   ['experimentos', 'Experimentos', '/experimentos'],
   ['bi', 'BI', '/bi'],
+  ['seo', 'SEO', '/seo'],
   ['painel', 'Painel de Dados', '/painel'],
   ['studio', 'Studio (testes)', '/studio'],
 ];

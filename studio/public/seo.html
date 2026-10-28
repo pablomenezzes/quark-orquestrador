@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SEO · Quark Dados</title>
+  <link rel="stylesheet" href="/s/studio.css">
+  <style>
+    .seo-root {
+      color-scheme: light;
+      --s-surface: #fcfcfb; --s-ink: #0b0b0b; --s-ink2: #52514e; --s-muted: #898781; --s-grid: #e1e0d9; --s-axis: #c3c2b7;
+      --s-a: #2a78d6; --s-b: #1baf7a; --s-c: #eb6834; --s-d: #eda100; --s-bom: #17794a; --s-ruim: #b3261e;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:where(:not([data-theme='light'])) .seo-root {
+        color-scheme: dark;
+        --s-surface: #1a1a19; --s-ink: #ffffff; --s-ink2: #c3c2b7; --s-muted: #898781; --s-grid: #2c2c2a; --s-axis: #383835;
+        --s-a: #3987e5; --s-b: #199e70; --s-c: #d95926; --s-d: #c98500; --s-bom: #62d49a; --s-ruim: #ff8a80;
+      }
+    }
+    .wrap { max-width: 1280px; margin: 0 auto; padding: 16px 20px 40px; }
+    .cab { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 16px; margin-bottom: 14px; }
+    .cab h1 { font-size: 24px; letter-spacing: -.01em; }
+    .cab p { margin: 4px 0 0; color: var(--muted); font-size: 13px; max-width: 760px; }
+    .cab .lado { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .abas { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+    .aba { padding: 8px 16px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); cursor: pointer; font-weight: 600; color: var(--text); }
+    .aba[aria-selected='true'] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+    .aba:focus-visible, .sc:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .filtros { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 14px; padding: 12px 14px; }
+    .filtros label { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 3px; }
+    .filtros select, .filtros input { padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 14px; }
+    .demo { display: inline-block; font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 6px; background: var(--warn-soft); color: var(--warn); }
+    .fontes { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 10px 14px; margin-bottom: 14px; font-size: 12.5px; }
+    .fontes b { margin-right: 4px; }
+    .fonte { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2); }
+    .fonte i { width: 8px; height: 8px; border-radius: 50%; background: var(--s-muted); display: inline-block; }
+    .fonte.ok i { background: var(--s-bom); }
+    .fonte.parcial i { background: var(--s-d); }
+    .secao { display: flex; align-items: baseline; gap: 10px; margin: 20px 0 10px; }
+    .secao h2 { font-size: 16px; }
+    .secao span { color: var(--muted); font-size: 12.5px; }
+    .kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+    .kpi { background: var(--s-surface); color: var(--s-ink); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; min-width: 0; }
+    .kpi .n { font-size: 12.5px; color: var(--s-ink2); display: flex; justify-content: space-between; gap: 6px; }
+    .kpi .n em { font-style: normal; font-size: 10.5px; color: var(--s-muted); border: 1px solid var(--s-grid); border-radius: 5px; padding: 0 5px; }
+    .kpi .v { font-size: 27px; font-weight: 650; letter-spacing: -.02em; line-height: 1.2; margin: 6px 0 4px; white-space: nowrap; }
+    .kpi .d { font-size: 11.5px; color: var(--s-muted); }
+    .d b.bom { color: var(--s-bom); } .d b.ruim { color: var(--s-ruim); }
+    .par { display: grid; grid-template-columns: 1.4fr 1fr; gap: 12px; margin-top: 12px; align-items: start; }
+    .card2 { background: var(--s-surface); color: var(--s-ink); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; min-width: 0; }
+    .card2 h3 { font-size: 15px; }
+    .card2 .sub { color: var(--s-ink2); font-size: 12.5px; margin: 2px 0 8px; }
+    .card2 .tag { float: right; font-size: 11px; color: var(--s-muted); border: 1px solid var(--s-grid); border-radius: 6px; padding: 1px 7px; }
+    .legenda { display: flex; gap: 16px; font-size: 12.5px; color: var(--s-ink2); margin-bottom: 4px; }
+    .legenda i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; }
+    svg.lin { width: 100%; height: auto; display: block; }
+    svg.lin text { fill: var(--s-muted); font-size: 11px; font-family: var(--font); }
+    .funil { display: flex; flex-direction: column; gap: 9px; margin-top: 8px; }
+    .passo { display: grid; grid-template-columns: 90px 1fr 70px; gap: 10px; align-items: center; font-size: 13px; }
+    .passo .fill { height: 14px; border-radius: 0 4px 4px 0; background: var(--s-a); }
+    .passo .n { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+    .nota { color: var(--s-muted); font-size: 12px; margin: 10px 0 0; }
+    .acoes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
+    .acao { border: 1px solid var(--s-grid); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 6px; background: var(--s-surface); }
+    .acao strong { font-size: 14px; }
+    .acao p { margin: 0; color: var(--s-ink2); font-size: 12.5px; flex: 1; }
+    .acao .imp { font-size: 11px; font-weight: 700; color: var(--warn); }
+    .acao .rod { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .stats4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+    .tabela-wrap { overflow: auto; }
+    table.t { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 760px; }
+    table.t th { text-align: left; font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--s-muted); padding: 6px 8px; border-bottom: 1px solid var(--s-axis); white-space: nowrap; }
+    table.t th.sc { cursor: pointer; user-select: none; }
+    table.t th.sc[aria-sort] { color: var(--s-ink); }
+    table.t td { padding: 7px 8px; border-bottom: 1px solid var(--s-grid); color: var(--s-ink); vertical-align: top; }
+    table.t .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    table.t td small { display: block; color: var(--s-muted); font-size: 11.5px; }
+    .pill { display: inline-block; padding: 1px 8px; border-radius: 6px; font-size: 11.5px; font-weight: 600; background: var(--surface-2); color: var(--s-ink2); white-space: nowrap; }
+    .pill.bom { background: var(--ok-soft); color: var(--ok); } .pill.atencao { background: var(--warn-soft); color: var(--warn); } .pill.ruim { background: var(--danger-soft); color: var(--danger); }
+    .quad { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .tec3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    .tec3 .v { font-size: 27px; font-weight: 650; letter-spacing: -.02em; margin: 6px 0 2px; }
+    .trilho { height: 8px; border-radius: 6px; background: var(--s-grid); overflow: hidden; margin: 8px 0; }
+    .trilho i { display: block; height: 100%; background: var(--s-a); }
+    .trilho.amb i { background: var(--s-d); }
+    .linha { display: flex; justify-content: space-between; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--s-grid); font-size: 13px; }
+    .linha:last-child { border: 0; }
+    .busca { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 10px; }
+    .busca input, .busca select { padding: 6px 9px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); }
+    .busca input { min-width: 240px; }
+    .dica-cvr { color: var(--s-muted); font-size: 12px; }
+    .vazio { text-align: center; padding: 20px; color: var(--s-muted); }
+    .falta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .falta .item { border: 1px dashed var(--s-axis); border-radius: 10px; padding: 10px 12px; font-size: 13px; }
+    .falta .item b { display: block; margin-bottom: 2px; }
+    .rodape { color: var(--muted); font-size: 12.5px; margin-top: 18px; }
+    @media (max-width: 1000px) { .kpis, .stats4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .par, .quad { grid-template-columns: 1fr; } .acoes, .tec3 { grid-template-columns: 1fr; } }
+    @media (max-width: 620px) { .falta { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <header class="top" data-pagina="seo"></header>
+  <div class="wrap seo-root">
+    <div class="cab">
+      <div>
+        <h1>SEO <span class="muted" style="font-weight:400">/ páginas, oportunidades e testes</span></h1>
+        <p>Quais páginas trazem tráfego orgânico que vira lead, onde há ganho rápido e o que vale virar experimento.</p>
+      </div>
+      <div class="lado"><span class="demo">● DADOS DE EXEMPLO</span></div>
+    </div>
+
+    <section class="card filtros" aria-label="Filtros">
+      <label>Período
+        <select id="f-periodo"><option>Últimos 30 dias</option><option>Últimos 90 dias</option><option>Este ano</option></select>
+      </label>
+      <label>Produto
+        <select id="f-produto"><option value="rh">QuarkRH</option><option value="clinic">QuarkClinic</option></select>
+      </label>
+      <label>Comparar com
+        <select id="f-comp"><option>Período anterior</option><option>Mesmo período do ano passado</option></select>
+      </label>
+      <span class="spacer"></span>
+      <span class="muted" style="font-size:12.5px">Os números ainda são fictícios: veja “Fontes de dados” abaixo.</span>
+    </section>
+
+    <div class="abas" role="tablist" id="abas" aria-label="Visões de SEO">
+      <button class="aba" role="tab" data-aba="exec" aria-selected="true">Visão executiva</button>
+      <button class="aba" role="tab" data-aba="paginas" aria-selected="false">Páginas</button>
+      <button class="aba" role="tab" data-aba="oportunidades" aria-selected="false">Oportunidades</button>
+      <button class="aba" role="tab" data-aba="tecnico" aria-selected="false">Técnico</button>
+    </div>
+
+    <div id="fontes" class="card fontes"></div>
+
+    <main id="conteudo"></main>
+
+    <p class="rodape">Protótipo visual com dados de exemplo. GSC, GA4 e Pipedrive não são diretamente equivalentes (metodologias e janelas de atribuição diferentes): leia as taxas como direção, não como número exato. Cada ação recomendada tem um botão que abre o cadastro de Experimentos já preenchido.</p>
+  </div>
+  <script src="/s/nav.js" type="module"></script>
+  <script type="module" src="/s/seo.js"></script>
+</body>
+</html>

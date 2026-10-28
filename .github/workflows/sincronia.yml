@@ -27,6 +27,9 @@ jobs:
       GOOGLE_SA_CLIENT_EMAIL: ${{ secrets.GOOGLE_SA_CLIENT_EMAIL }}
       GOOGLE_SA_PRIVATE_KEY: ${{ secrets.GOOGLE_SA_PRIVATE_KEY }}
       GA4_PROPERTY_ID: ${{ secrets.GA4_PROPERTY_ID }}
+      GA4_PROPERTY_ID_CLINIC: ${{ secrets.GA4_PROPERTY_ID_CLINIC }}
+      GSC_SITE_URL: ${{ secrets.GSC_SITE_URL }}
+      GSC_SITE_URL_CLINIC: ${{ secrets.GSC_SITE_URL_CLINIC }}
       META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
       META_AD_ACCOUNT_RH: ${{ secrets.META_AD_ACCOUNT_RH }}
       META_AD_ACCOUNT_CLINIC: ${{ secrets.META_AD_ACCOUNT_CLINIC }}
@@ -61,6 +64,11 @@ jobs:
           npx tsx scripts/ga4-sync.ts --apply
           # historico comprimido: arquiva UMA vez cada mes fechado (35 dias depois do fim); nao relê nem regrava o que ja foi arquivado
           npx tsx scripts/ga4-arquivar.ts --apply
+      - name: Search Console (ultimos dias)
+        id: gsc
+        if: ${{ env.GSC_SITE_URL != '' || env.GSC_SITE_URL_CLINIC != '' }}
+        continue-on-error: true
+        run: npx tsx scripts/gsc-sync.ts --apply
       # Meta Ads: SO a estrutura (campanhas, conjuntos, anuncios) e a ligacao com o Pipedrive. O DESEMPENHO da Meta nao roda aqui: so por rodada
       # autorizada (scripts/meta-rodada.ts: simulacao, cartao e "pode seguir" do Pablo), nunca agendado. A etapa so roda com a variavel
       # META_ATIVO = "true"; limite de 25 minutos.
@@ -73,7 +81,7 @@ jobs:
           npx tsx scripts/meta-sync.ts --apply --so estrutura
           npx tsx scripts/meta-sync.ts --apply --so ligacao
       - name: Falhar se alguma etapa falhou
-        if: ${{ steps.cadastros.outcome == 'failure' || steps.negocios.outcome == 'failure' || steps.historico.outcome == 'failure' || steps.ga4.outcome == 'failure' || steps.meta.outcome == 'failure' }}
+        if: ${{ steps.cadastros.outcome == 'failure' || steps.negocios.outcome == 'failure' || steps.historico.outcome == 'failure' || steps.ga4.outcome == 'failure' || steps.gsc.outcome == 'failure' || steps.meta.outcome == 'failure' }}
         run: |
           echo "Etapa com falha: cadastros=${{ steps.cadastros.outcome }} negocios=${{ steps.negocios.outcome }} historico=${{ steps.historico.outcome }} ga4=${{ steps.ga4.outcome }} meta=${{ steps.meta.outcome }}"
           exit 1

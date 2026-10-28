@@ -466,6 +466,11 @@ function fichaDesenhar() {
     ice: [e?.iceImpacto, e?.iceConfianca, e?.iceFacilidade], evidencias: e?.evidencias ?? '', aprendizado: e?.aprendizado ?? '',
   };
   const chave = String(S.ficha);
+  if (!e && f.dataset.montado !== chave && S.prefill) { // rascunho vindo de outra página (ex.: SEO > "Gerar experimento")
+    const { origem, ...resto } = S.prefill;
+    Object.assign(v, resto, origem ? { evidencias: origem } : {});
+    S.prefill = null;
+  }
   if (f.dataset.montado !== chave) { S.filtrosFicha = JSON.parse(JSON.stringify(e?.filtros ?? [])); S.filtrosModoFicha = e?.filtrosModo ?? 'todos'; }
   if (f.dataset.montado !== chave) { S.contabFicha = e?.contabilizacao ?? 'automatica'; S.regrasFicha = JSON.parse(JSON.stringify(e?.regras ?? [])); }
   if (f.dataset.montado !== chave) S.campFicha = (e?.campanhas ?? []).map(campanhaItem); // campanhas escolhidas: ficam em memória enquanto a ficha está aberta
@@ -668,4 +673,14 @@ lista.addEventListener('drop', async (ev) => {
 });
 document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && S.ficha != null && $('#doc').hidden) fecharFicha(); });
 
-carregar();
+/* rascunho vindo do SEO: abre o cadastro novo já preenchido (o rascunho é lido uma vez e apagado) */
+carregar().then(() => {
+  if (new URLSearchParams(location.search).get('novo') !== '1') return;
+  try {
+    const cru = sessionStorage.getItem('exp.prefill');
+    sessionStorage.removeItem('exp.prefill');
+    if (cru) S.prefill = JSON.parse(cru);
+  } catch { /* sem rascunho: abre o cadastro vazio */ }
+  history.replaceState(null, '', location.pathname);
+  abrirFicha('novo');
+});

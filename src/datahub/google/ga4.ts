@@ -55,6 +55,18 @@ export function ga4CredentialsFromEnv(env: Record<string, string | undefined>): 
   return { clientEmail, privateKey, propertyId };
 }
 
+/** Marcas com propriedade propria no GA4. A do RH continua em GA4_PROPERTY_ID (nome antigo, nao muda); a do Clinic e opcional. */
+export type MarcaGa4 = 'rh' | 'clinic';
+export const MARCAS_GA4: readonly MarcaGa4[] = ['rh', 'clinic'];
+
+export function ga4PropriedadesFromEnv(env: Record<string, string | undefined>): Array<{ marca: MarcaGa4; propertyId: string }> {
+  const ids: Array<[MarcaGa4, string | undefined]> = [['rh', env.GA4_PROPERTY_ID], ['clinic', env.GA4_PROPERTY_ID_CLINIC]];
+  return ids.filter((x): x is [MarcaGa4, string] => !!x[1]?.trim()).map(([marca, id]) => {
+    if (!/^\d+$/.test(id.trim())) throw new Error(`ID da propriedade do GA4 (${marca}) precisa ser so numeros.`);
+    return { marca, propertyId: id.trim() };
+  });
+}
+
 export class Ga4Client {
   private token: { value: string; expira: number } | null = null;
   requisicoes = 0;

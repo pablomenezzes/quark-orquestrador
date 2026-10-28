@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { generateKeyPairSync } from 'node:crypto';
 import {
-  Ga4Client, PAGE_SIZE, SEM_HOST, SEM_PAGINA, blocosDeDatas, dataGa4, ga4CredentialsFromEnv,
+  Ga4Client, PAGE_SIZE, SEM_HOST, SEM_PAGINA, blocosDeDatas, dataGa4, ga4CredentialsFromEnv, ga4PropriedadesFromEnv,
   mapAds, mapDia, mapEventos, mapPaginas, mapSessoes, relatorio, EVENTOS_FORA, type FetchLike, type ReportRow,
 } from '../src/datahub/google/ga4';
 import { intervalo, REVISAO_DIAS } from '../src/datahub/google/ga4-sync';
@@ -18,6 +18,17 @@ describe('GA4: credenciais', () => {
   });
   it('falta de variável vira erro claro, sem vazar valor', () => {
     expect(() => ga4CredentialsFromEnv({ GOOGLE_SA_CLIENT_EMAIL: 'a@b' })).toThrow(/Faltam/);
+  });
+});
+
+describe('GA4: uma propriedade por marca', () => {
+  it('RH vem de GA4_PROPERTY_ID e Clinic de GA4_PROPERTY_ID_CLINIC; a do Clinic é opcional', () => {
+    expect(ga4PropriedadesFromEnv({ GA4_PROPERTY_ID: '1' })).toEqual([{ marca: 'rh', propertyId: '1' }]);
+    expect(ga4PropriedadesFromEnv({ GA4_PROPERTY_ID: '1', GA4_PROPERTY_ID_CLINIC: ' 2 ' })).toEqual([{ marca: 'rh', propertyId: '1' }, { marca: 'clinic', propertyId: '2' }]);
+    expect(ga4PropriedadesFromEnv({ GA4_PROPERTY_ID: '1', GA4_PROPERTY_ID_CLINIC: '' })).toHaveLength(1);
+  });
+  it('ID que não é só número é recusado', () => {
+    expect(() => ga4PropriedadesFromEnv({ GA4_PROPERTY_ID_CLINIC: 'properties/2' })).toThrow(/so numeros/);
   });
 });
 

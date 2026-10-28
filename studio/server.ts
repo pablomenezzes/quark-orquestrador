@@ -345,6 +345,7 @@ export function createStudioHandler(opts: StudioOptions): (req: IncomingMessage,
     }
 
     // BI: só leitura. O navegador escolhe a análise e os filtros; nunca manda SQL.
+    if (method === 'GET' && path === '/seo') return sendFile(res, join(opts.publicDir, 'seo.html')); // SEO: protótipo com dados de exemplo (GSC, PageSpeed e GA4 por página ainda por conectar)
     if (method === 'GET' && path === '/bi') return sendFile(res, join(opts.publicDir, 'bi.html'));
     if (path.startsWith('/api/bi/')) {
       const bi = opts.bi;

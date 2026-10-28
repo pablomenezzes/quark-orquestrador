@@ -32,7 +32,12 @@ async function upsert(q: Q, sql: string, colunas: unknown[][]): Promise<void> {
 }
 
 export class Ga4Store {
-  constructor(private readonly q: Q, readonly propertyId: number) {}
+  /** `sufixo` separa a marca d'agua e os jobs de cada propriedade; vazio na do RH para manter o que ja foi carregado. */
+  constructor(private readonly q: Q, readonly propertyId: number, private readonly sufixo = '') {}
+
+  private chave(entidade: Ga4Entidade): string {
+    return this.sufixo ? `${entidade}:${this.sufixo}` : entidade;
+  }
 
   async sessoes(rows: SessaoDia[]): Promise<void> {
     for (let i = 0; i < rows.length; i += CHUNK) {
@@ -112,7 +117,7 @@ export class Ga4Store {
   }
 
   async marcaDagua(entidade: Ga4Entidade): Promise<string | null> {
-    const r = await this.q.query(`select marca_dagua::date::text as d from ops.sync_checkpoints where entity = $1`, [entidade]);
+    const r = await this.q.query(`select marca_dagua::date::text as d from ops.sync_checkpoints where entity = $1`, [this.chave(entidade)]);
     return r.rows[0]?.d ?? null;
   }
 
@@ -122,12 +127,12 @@ export class Ga4Store {
        values ($1, $2::date, now(), $3, $4)
        on conflict (entity) do update set marca_dagua = excluded.marca_dagua, ultimo_sucesso_em = now(), ultimo_job = excluded.ultimo_job,
          backfill_concluido = ops.sync_checkpoints.backfill_concluido or excluded.backfill_concluido`,
-      [entidade, dia, jobId, concluido],
+      [this.chave(entidade), dia, jobId, concluido],
     );
   }
 
   async iniciarJob(entidade: Ga4Entidade, modo: 'backfill' | 'incremental', origem: 'agendada' | 'manual'): Promise<string> {
-    const r = await this.q.query(`insert into ops.sync_jobs (entity, modo, origem, status) values ($1, $2, $3, 'rodando') returning job_id`, [entidade, modo, origem]);
+    const r = await this.q.query(`insert into ops.sync_jobs (entity, modo, origem, status) values ($1, $2, $3, 'rodando') returning job_id`, [this.chave(entidade), modo, origem]);
     return r.rows[0].job_id;
   }
 
