@@ -9,6 +9,7 @@ import type { SincroniaManual } from './lib/sincronia-manual.js';
 import { timingSafeEqual } from 'node:crypto';
 import { PRODUTOS_MONITOR, type MonitorRepo, type ProdutoMonitor } from './lib/monitor.js';
 import type { ExperimentosRepo } from './lib/experimentos.js';
+import { SeoInvalido, validarFiltros as validarSeo, type SeoRepo } from './lib/seo.js';
 import { BI_PRODUTOS, BiNotFound, type BiFiltros, type BiProduto, type BiRepo } from './lib/bi.js';
 import { CONVERSAO_ORIGENS, CONVERSAO_TIPOS, MARCOS, PRODUTOS, REGRA_TIPOS, REGRA_URL_MODOS, STATUS_NEGOCIO, PainelInvalido, PainelNotFound, type ConversaoOrigem, type CriativoItem, type CriativoMapaPatch, type Marco, type NegociosFiltro, type PainelRepo, type Produto, type StatusNegocio } from './lib/painel-repo.js';
 
@@ -30,6 +31,8 @@ export type StudioOptions = {
   monitor?: MonitorRepo | null;
   /** Experimentos de growth: cadastro e acompanhamento automático pelas visões de analytics. */
   experimentos?: ExperimentosRepo | null;
+  /** SEO: Search Console + GA4 + Pipedrive por marca e página, e as ações recomendadas. */
+  seo?: SeoRepo | null;
   /**
    * Modo publicado: exige login (cookie assinado), separa admin de editor, desliga o Studio de testes (formulários e envio) e libera qualquer Host.
    * Sem isto, o servidor é o local de sempre (só 127.0.0.1, sem login).
@@ -345,7 +348,17 @@ export function createStudioHandler(opts: StudioOptions): (req: IncomingMessage,
     }
 
     // BI: só leitura. O navegador escolhe a análise e os filtros; nunca manda SQL.
-    if (method === 'GET' && path === '/seo') return sendFile(res, join(opts.publicDir, 'seo.html')); // SEO: protótipo com dados de exemplo (GSC, PageSpeed e GA4 por página ainda por conectar)
+    if (method === 'GET' && path === '/seo') return sendFile(res, join(opts.publicDir, 'seo.html'));
+    if (path === '/api/seo') {
+      if (!opts.seo) return send(res, 503, { error: 'seo_nao_configurado', detail: 'Falta PANEL_DB_URL no .env.local. Peça para gerar com: node scripts/set-role-password.mjs --role orq_panel --apply' });
+      if (method !== 'GET') return send(res, 405, { error: 'method_not_allowed' });
+      try {
+        return send(res, 200, await opts.seo.dados(validarSeo({ marca: url.searchParams.get('marca'), de: url.searchParams.get('de'), ate: url.searchParams.get('ate') })));
+      } catch (e) {
+        if (e instanceof SeoInvalido) return send(res, 400, { error: 'seo_invalido', detail: e.message });
+        throw e;
+      }
+    }
     if (method === 'GET' && path === '/bi') return sendFile(res, join(opts.publicDir, 'bi.html'));
     if (path.startsWith('/api/bi/')) {
       const bi = opts.bi;

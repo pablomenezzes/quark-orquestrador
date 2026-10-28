@@ -18,6 +18,7 @@ import { PgPainelRepo } from './lib/painel-repo.js';
 import { PgBiRepo } from './lib/bi.js';
 import { PgMonitorRepo } from './lib/monitor.js';
 import { PgExperimentosRepo } from './lib/experimentos.js';
+import { PgSeoRepo } from './lib/seo.js';
 import { SincroniaManual, githubConfigDoAmbiente } from './lib/sincronia-manual.js';
 import { ClickUpClient, Integracoes, SheetsClient, clickUpConfigDoAmbiente, sheetsConfigDoAmbiente } from './lib/integracoes.js';
 import { checkPortFree, formatReport, parseEnv, runPreflight } from './lib/preflight.js';
@@ -78,6 +79,7 @@ let painelRepo: PgPainelRepo | null = null;
 let biRepo: PgBiRepo | null = null;
 let monitorRepo: PgMonitorRepo | null = null;
 let experimentosRepo: PgExperimentosRepo | null = null;
+let seoRepo: PgSeoRepo | null = null;
 const painelUrl = process.env.PANEL_DB_URL ?? '';
 if (painelUrl) {
   assertSafeDbTarget({ target: painelUrl, expectedRef: process.env.SUPABASE_PROJECT_REF! });
@@ -88,6 +90,7 @@ if (painelUrl) {
   biRepo = new PgBiRepo(painelPool); // o BI usa o mesmo papel orq_panel e só lê as visões de analytics
   monitorRepo = new PgMonitorRepo(painelPool); // idem o Monitor diário
   experimentosRepo = new PgExperimentosRepo(painelPool); // Experimentos: lê as mesmas visões e grava só mkt.experimentos
+  seoRepo = new PgSeoRepo(painelPool); // SEO: só lê as visões de analytics (GSC, GA4, Pipedrive)
 }
 
 const forms = new FormsStore(join(root, 'studio', 'forms'));
@@ -121,6 +124,7 @@ const server = createStudioServer({
   bi: biRepo,
   monitor: monitorRepo,
   experimentos: experimentosRepo,
+  seo: seoRepo,
   sincronia: (() => { const g = githubConfigDoAmbiente(process.env); return g ? new SincroniaManual(g) : null; })(),
   integracoes: experimentosRepo ? (() => { const s = sheetsConfigDoAmbiente(process.env), c = clickUpConfigDoAmbiente(process.env); return s || c ? new Integracoes(experimentosRepo, s ? new SheetsClient(s) : null, c ? new ClickUpClient(c) : null) : null; })() : null,
 });
