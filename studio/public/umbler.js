@@ -46,6 +46,13 @@ async function carregarPainel(fresh = false) {
     const p = await api(`painel?${qs(fresh ? { fresh: '1' } : {})}`);
     if (mine !== seq) return;
     S.painel = p;
+    // na Vercel cada requisição tem tempo limitado: o servidor devolve o que deu e a tela pede o resto (o cache guarda o progresso)
+    for (let i = 0; S.painel.pendentes > 0 && i < 40 && mine === seq; i++) {
+      S.carregando = false; desenhar();
+      const mais = await api(`painel?${qs()}`);
+      if (mine !== seq) return;
+      S.painel = mais;
+    }
   } catch (e) {
     if (mine !== seq) return;
     S.painel = null; S.erro = e.corpo?.error === 'organizacao_pendente' ? 'org' : e.message; S.orgs = e.corpo?.organizacoes;
@@ -102,7 +109,7 @@ function desenhaPainel() {
     <span>R$ em <b>${nf.format(c.reais.x)}</b> de <b>${nf.format(c.reais.y)}</b></span>
     <span>respostas em <b>${nf.format(c.respondidas.x)}</b> de <b>${nf.format(c.respondidas.y)}</b></span>
     <span>lidas em <b>${nf.format(c.lidas.x)}</b> de <b>${nf.format(c.lidas.y)}</b></span>
-    <span class="muted">${nf.format(p.chamadas)} consulta(s) à Umbler agora · dados de ${dh(p.geradoEm)} (cache de 15 min)</span>
+    ${p.pendentes > 0 ? '<span><b>carregando o resto do período…</b></span>' : ''}<span class="muted">${nf.format(p.chamadas)} consulta(s) à Umbler agora · dados de ${dh(p.geradoEm)} (cache de 15 min)</span>
   </div>`;
   const cartoes = `<div class="kpis">
     ${cartao('Custo (créditos)', val(k.custoCreditos), xy(c.custo))}
@@ -243,7 +250,7 @@ function desenhaConfig() {
   <p class="muted" style="font-size:12px;margin:8px 0 0"><b>Atenção à unidade:</b> a Umbler devolve o custo como número inteiro de créditos (nos testes, um template custou 3.900 créditos), então o preço é de <i>um</i> crédito e costuma ser fração de centavo. Confira comparando um envio com a tela da Umbler. Uma entrada não pode ser editada nem ter data anterior à última. Para mudar o preço, acrescente uma nova a partir da data em que ele passou a valer.</p></div>
   <div class="secao"><h2>Amostra mínima</h2><span>abaixo disso, "amostra pequena" e fora do ranking</span></div>
   <div class="card2"><div class="form"><label>Envios<input type="number" min="1" id="c-amostra" value="${cfg.amostraMinima}" style="width:120px"></label><button class="btn" id="c-aok">Salvar</button></div></div>
-  <p class="muted" style="font-size:12px">Atualizado em ${dh(c.geradoEm)} (cache de 15 min). <button class="btn small" id="c-refresh">Atualizar agora</button></p>`;
+  <p class="muted" style="font-size:12px">Configuração guardada ${cfg.origem === 'banco' ? 'no Supabase (a mesma no Studio local e na Vercel)' : 'no arquivo local'}. Só o admin consegue alterar na versão publicada. Atualizado em ${dh(c.geradoEm)} (cache de 15 min). <button class="btn small" id="c-refresh">Atualizar agora</button></p>`;
 }
 
 /* ---------- geral ---------- */

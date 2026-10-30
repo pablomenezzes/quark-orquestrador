@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { UmblerCliente } from '../studio/lib/umbler/cliente.js';
 import { CacheUmbler } from '../studio/lib/umbler/cache.js';
 import { ServicoUmbler } from '../studio/lib/umbler/servico.js';
+import { ArquivoConfigStore } from '../studio/lib/umbler/config-store.js';
 
 const env = existsSync('.env.local') ? readFileSync('.env.local', 'utf8') : '';
 const lido = (n: string) => process.env[n] || new RegExp(`^${n}=(.*)$`, 'm').exec(env)?.[1]?.trim().replace(/^["']|["']$/g, '') || '';
@@ -19,7 +20,7 @@ const ate = process.argv[3] ?? hoje.toISOString().slice(0, 10);
 const dir = mkdtempSync(join(tmpdir(), 'umb-conf-'));
 try {
   const cli = new UmblerCliente({ token });
-  const svc = new ServicoUmbler({ leitor: cli, cache: new CacheUmbler(join(dir, 'c'), Date.now, undefined, token), configPath: join(dir, 'cfg.json'), token });
+  const svc = new ServicoUmbler({ leitor: cli, cache: new CacheUmbler(join(dir, 'c'), Date.now, undefined, token), store: new ArquivoConfigStore(join(dir, 'cfg.json')), token });
   const cat = await svc.catalogo(true);
   console.log(`catálogo: ${cat.canais.itens.length} canais, ${cat.bots.itens.length} bots, ${cat.setores.itens.length} setores, ${cat.etiquetas.itens.length} etiquetas`);
   const p = await svc.painel({ de, ate, escopo: 'tudo' }, true);

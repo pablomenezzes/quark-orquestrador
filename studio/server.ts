@@ -194,9 +194,9 @@ export function createStudioHandler(opts: StudioOptions): (req: IncomingMessage,
         return res.end();
       }
       // O Studio de testes (formulários e envio ao pipeline) só existe na máquina local.
-      if (path === '/studio' || path === '/attribution.js' || path.startsWith('/f/') || path.startsWith('/api/forms') || path.startsWith('/api/submit') || path === '/api/meta' || path === '/umbler' || path.startsWith('/api/umbler/')) return send(res, 404, { error: 'not_found' });
+      if (path === '/studio' || path === '/attribution.js' || path.startsWith('/f/') || path.startsWith('/api/forms') || path.startsWith('/api/submit') || path === '/api/meta') return send(res, 404, { error: 'not_found' });
       if (sessao) {
-        const soAdmin = path === '/usuarios' || path.startsWith('/api/usuarios') || (path.startsWith('/api/painel/') && method !== 'GET');
+        const soAdmin = path === '/usuarios' || path.startsWith('/api/usuarios') || ((path.startsWith('/api/painel/') || path.startsWith('/api/umbler/config/')) && method !== 'GET');
         if (soAdmin && sessao.papel !== 'admin') {
           if (path.startsWith('/api/')) return send(res, 403, { error: 'sem_permissao', detail: 'Só o admin pode fazer isso.' });
           res.writeHead(302, { location: '/', 'cache-control': 'no-store' });
@@ -363,7 +363,7 @@ export function createStudioHandler(opts: StudioOptions): (req: IncomingMessage,
       const q = url.searchParams;
       const filtrosUmbler = () => validarUmbler({ de: q.get('de'), ate: q.get('ate'), canal: q.get('canal'), tipo: q.get('tipo'), modelo: q.get('modelo'), sessao: q.get('sessao'), escopo: q.get('escopo') });
       if (method === 'GET' && sub === 'estado') return send(res, 200, { ...u.configurado(), geradoEm: Date.now() });
-      if (method === 'GET' && sub === 'config') return send(res, 200, u.config());
+      if (method === 'GET' && sub === 'config') return send(res, 200, { ...(await u.config()), origem: u.origemConfig });
       if (method === 'GET' && sub === 'catalogo') return send(res, 200, await u.catalogo(fresh));
       if (method === 'GET' && sub === 'painel') return send(res, 200, await u.painel(filtrosUmbler(), fresh));
       if (method === 'GET' && sub === 'csv') {
@@ -377,10 +377,10 @@ export function createStudioHandler(opts: StudioOptions): (req: IncomingMessage,
         if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) throw new HttpError(400, 'periodo_invalido', { esperado: 'AAAA-MM-DD' });
         return send(res, 200, await u.passos(q.get('bot') ?? '', de, ate, fresh));
       }
-      if (method === 'PUT' && sub === 'config/fixar') { const b = await readJson(req); return send(res, 200, u.fixar(b?.tipo, b?.id, b?.nome, b?.fixado)); }
-      if (method === 'POST' && sub === 'config/preco') { const b = await readJson(req); return send(res, 200, u.preco(b?.desde, b?.preco)); }
-      if (method === 'PUT' && sub === 'config/amostra') { const b = await readJson(req); return send(res, 200, u.amostra(b?.valor)); }
-      if (method === 'PUT' && sub === 'config/organizacao') { const b = await readJson(req); return send(res, 200, u.escolherOrganizacao(b?.id)); }
+      if (method === 'PUT' && sub === 'config/fixar') { const b = await readJson(req); return send(res, 200, await u.fixar(b?.tipo, b?.id, b?.nome, b?.fixado)); }
+      if (method === 'POST' && sub === 'config/preco') { const b = await readJson(req); return send(res, 200, await u.preco(b?.desde, b?.preco)); }
+      if (method === 'PUT' && sub === 'config/amostra') { const b = await readJson(req); return send(res, 200, await u.amostra(b?.valor)); }
+      if (method === 'PUT' && sub === 'config/organizacao') { const b = await readJson(req); return send(res, 200, await u.escolherOrganizacao(b?.id)); }
       return send(res, 404, { error: 'not_found' });
     }
 

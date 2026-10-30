@@ -11,6 +11,7 @@ import { acrescentarPreco, configVazia, definirFixado, lerConfig, pertenceAoMark
 import { CacheUmbler } from '../studio/lib/umbler/cache';
 import { gerarCsv, montarPainel, validarFiltros, FiltroInvalido, somar, type Filtros } from '../studio/lib/umbler/painel';
 import { ServicoUmbler } from '../studio/lib/umbler/servico';
+import { ArquivoConfigStore, PgConfigStore } from '../studio/lib/umbler/config-store';
 import { sanitizar } from '../studio/lib/umbler/sanitiza';
 
 const TOKEN = 'tok_FICTICIO_abcdef0123456789';
@@ -400,14 +401,14 @@ describe('Umbler: serviço', () => {
   beforeAll(() => { dir = mkdtempSync(join(tmpdir(), 'umb-svc-')); });
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
   const novo = (sub: string, falsa = umblerFalsa(), agora = () => 1_000_000) => {
-    const svc = new ServicoUmbler({ leitor: falsa.leitor, cache: new CacheUmbler(join(dir, sub, 'cache'), agora, undefined, TOKEN), configPath: join(dir, sub, 'cfg.json'), token: TOKEN, agora });
+    const svc = new ServicoUmbler({ leitor: falsa.leitor, cache: new CacheUmbler(join(dir, sub, 'cache'), agora, undefined, TOKEN), store: new ArquivoConfigStore(join(dir, sub, 'cfg.json')), token: TOKEN, agora });
     return { svc, ...falsa, agora };
   };
 
   it('painel completo: lê só rotas de leitura, usa o cache e "atualizar agora" ignora o cache', async () => {
     const { svc, chamadas } = novo('a');
-    svc.fixar('canais', 'c1', 'Canal Marketing', true);
-    svc.preco('2026-01-01', 0.5);
+    await svc.fixar('canais', 'c1', 'Canal Marketing', true);
+    await svc.preco('2026-01-01', 0.5);
     const p1 = await svc.painel(F);
     expect(p1.sessoes).toHaveLength(3);
     expect(p1.cartoes.enviadas.v).toBe(600);
@@ -427,7 +428,7 @@ describe('Umbler: serviço', () => {
   it('cache vencido (15 min) consulta de novo', async () => {
     let t = 1_000_000;
     const { svc, chamadas } = novo('b', umblerFalsa(), () => t);
-    svc.fixar('canais', 'c1', 'Canal', true);
+    await svc.fixar('canais', 'c1', 'Canal', true);
     await svc.painel(F);
     const n = chamadas.length;
     t += 16 * 60_000;
@@ -437,7 +438,7 @@ describe('Umbler: serviço', () => {
 
   it('rota de custo falhando vira null com motivo e aviso; a tela não quebra e o token não vaza', async () => {
     const { svc } = novo('c', umblerFalsa({ custoFalha: true }));
-    svc.fixar('canais', 'c1', 'Canal', true);
+    await svc.fixar('canais', 'c1', 'Canal', true);
     const p = await svc.painel(F);
     expect(p.completude.custo).toEqual({ x: 0, y: 3 });
     expect(p.cartoes.custoCreditos.v).toBeNull();
@@ -448,7 +449,7 @@ describe('Umbler: serviço', () => {
 
   it('o token e dados pessoais da conta nunca vão para o cache em disco nem para a saída', async () => {
     const { svc } = novo('d');
-    svc.fixar('canais', 'c1', 'Canal Marketing', true);
+    await svc.fixar('canais', 'c1', 'Canal Marketing', true);
     const cat = await svc.catalogo();
     await svc.painel(F);
     const todos = [JSON.stringify(cat), ...readdirSync(join(dir, 'd', 'cache')).map((f) => readFileSync(join(dir, 'd', 'cache', f), 'utf8')), readFileSync(join(dir, 'd', 'cfg.json'), 'utf8')].join('\n');
@@ -460,8 +461,8 @@ describe('Umbler: serviço', () => {
 
   it('catálogo: itens fixados primeiro, e o que sumiu da API continua listado', async () => {
     const { svc } = novo('e');
-    svc.fixar('canais', 'c1', 'Canal Marketing', true);
-    svc.fixar('canais', 'velho', 'Canal antigo', true);
+    await svc.fixar('canais', 'c1', 'Canal Marketing', true);
+    await svc.fixar('canais', 'velho', 'Canal antigo', true);
     const cat = await svc.catalogo();
     expect(cat.canais.itens.map((i) => [i.id, i.fixado, i.presente])).toEqual([['velho', true, false], ['c1', true, true], ['c2', false, true]]); // fixados primeiro (por nome), depois os demais
     expect(cat.bots.itens[0]!.nome).toBe('Fluxo A');
@@ -470,9 +471,9 @@ describe('Umbler: serviço', () => {
   });
 
   it('sem token: configura preço/amostra, mas os dados avisam o que falta', async () => {
-    const svc = new ServicoUmbler({ leitor: null, cache: new CacheUmbler(join(dir, 'f', 'cache')), configPath: join(dir, 'f', 'cfg.json') });
+    const svc = new ServicoUmbler({ leitor: null, cache: new CacheUmbler(join(dir, 'f', 'cache')), store: new ArquivoConfigStore(join(dir, 'f', 'cfg.json')) });
     expect(svc.configurado().ok).toBe(false);
-    expect(svc.amostra(250).amostraMinima).toBe(250);
+    expect((await svc.amostra(250)).amostraMinima).toBe(250);
     await expect(svc.painel(F)).rejects.toThrow(/UMBLER_TOKEN/);
   });
 });
@@ -482,7 +483,7 @@ describe('Umbler: rotas do Studio', () => {
   let server: Server, base: string, dir: string;
   beforeAll(async () => {
     dir = mkdtempSync(join(tmpdir(), 'umb-srv-'));
-    const umbler = new ServicoUmbler({ leitor: null, cache: new CacheUmbler(join(dir, 'cache')), configPath: join(dir, 'cfg.json') });
+    const umbler = new ServicoUmbler({ leitor: null, cache: new CacheUmbler(join(dir, 'cache')), store: new ArquivoConfigStore(join(dir, 'cfg.json')) });
     server = createStudioServer({ formsDir: join(dir, 'forms'), publicDir: join(process.cwd(), 'studio', 'public'), trackingDir: join(process.cwd(), 'tracking'), sources: [], dbInfo: () => ({ connected: false }), submit: async () => ({ status: 200, body: {} }), umbler });
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -529,7 +530,7 @@ describe('Umbler: rotas do Studio', () => {
 describe('Umbler: modo publicado', () => {
   it('a área Umbler não existe no modo publicado (só na máquina local)', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'umb-pub-'));
-    const umbler = new ServicoUmbler({ leitor: null, cache: new CacheUmbler(join(dir, 'c')), configPath: join(dir, 'c.json') });
+    const umbler = new ServicoUmbler({ leitor: null, cache: new CacheUmbler(join(dir, 'c')), store: new ArquivoConfigStore(join(dir, 'c.json')) });
     const server = createStudioServer({ formsDir: dir, publicDir: join(process.cwd(), 'studio', 'public'), trackingDir: dir, sources: [], dbInfo: () => ({ connected: false }), submit: async () => ({ status: 200, body: {} }), umbler, acesso: { servico: { entrar: async () => null, listar: async () => [], criar: async () => { throw new Error('x'); }, atualizar: async () => { throw new Error('x'); }, remover: async () => undefined, papelDe: async () => null } as never, segredo: 'segredo-de-teste-com-tamanho-suficiente-123456', seguro: false } });
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
     const b = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -565,5 +566,87 @@ describe('Umbler: formato real conferido na API', () => {
     expect(s.falhas.v).toBe(0);
     expect(s.respondidas.v).toBeNull();
     expect(s.paradas).toEqual([{ motivo: 'ReachedFlowEnd', n: 10 }]);
+  });
+});
+
+describe('Umbler: configuração no banco e execução na Vercel', () => {
+  it('PgConfigStore grava a linha única e relê passando pela validação', async () => {
+    const consultas: { sql: string; params?: unknown[] }[] = [];
+    let guardado: string | null = null;
+    const pool = {
+      query: async (sql: string, params?: unknown[]) => {
+        consultas.push({ sql, params });
+        if (/insert into ops\.cfg_umbler/.test(sql)) { guardado = String(params![0]); return { rows: [] }; }
+        return { rows: guardado ? [{ config: JSON.parse(guardado) }] : [] };
+      },
+    };
+    const store = new PgConfigStore(pool as never);
+    expect(await store.ler()).toEqual(configVazia());
+    const c = acrescentarPreco(definirFixado(configVazia(), 'canais', 'c1', 'Canal', true), '2026-10-01', 0.0001);
+    await store.salvar(c);
+    expect(await store.ler()).toEqual(c);
+    const dado = consultas.map((q) => q.sql).join(' ');
+    expect(dado).toMatch(/on conflict \(chave\) do update/);
+    expect(dado).not.toMatch(/\bpublic\./);
+    // lixo no banco não quebra: vira configuração segura
+    guardado = JSON.stringify({ canais: 'x', precoCredito: [{ desde: 'ontem', preco: -1 }], amostraMinima: 'muito' });
+    expect(await store.ler()).toEqual(configVazia());
+  });
+
+  it('o serviço usa o store informado (banco) e informa a origem', async () => {
+    let guardado: string | null = null;
+    const store = { origem: 'banco' as const, ler: async () => (guardado ? JSON.parse(guardado) : configVazia()), salvar: async (c: unknown) => { guardado = JSON.stringify(c); } };
+    const svc = new ServicoUmbler({ leitor: null, cache: new CacheUmbler(join(tmpdir(), 'umb-x1')), store });
+    await svc.fixar('canais', 'c1', 'Canal', true);
+    expect(JSON.parse(guardado!).canais[0]).toMatchObject({ id: 'c1', fixado: true });
+    expect(svc.origemConfig).toBe('banco');
+  });
+
+  it('orçamento de tempo: devolve o que deu, marca pendentes e termina nas chamadas seguintes pelo cache', async () => {
+    const dir2 = mkdtempSync(join(tmpdir(), 'umb-orc-'));
+    try {
+      let t = 0;
+      const falsa = umblerFalsa();
+      const lento = { async get(rota: string, q?: Record<string, unknown>) { t += 20_000; return falsa.leitor.get(rota, q); } }; // cada consulta "demora" 20 s
+      const store = new ArquivoConfigStore(join(dir2, 'cfg.json'));
+      const svc = new ServicoUmbler({ leitor: lento, cache: new CacheUmbler(join(dir2, 'c'), () => 1_000_000), store, agora: () => t, orcamentoMs: 50_000 });
+      await svc.fixar('canais', 'c1', 'Canal', true);
+      const rodadas: number[] = [];
+      let p = await svc.painel(F);
+      rodadas.push(p.pendentes);
+      expect(p.pendentes).toBeGreaterThan(0);
+      expect(p.avisos.join(' ')).toMatch(/parcial/);
+      expect(p.sessoes.some((s) => s.creditos.m?.includes('Ainda não consultado'))).toBe(true);
+      for (let i = 0; i < 10 && p.pendentes > 0; i++) { p = await svc.painel(F); rodadas.push(p.pendentes); }
+      expect(p.pendentes).toBe(0);
+      expect(p.completude.custo).toEqual({ x: 3, y: 3 });
+      await expect(svc.csv(F)).resolves.toMatch(/^﻿/);
+    } finally { rmSync(dir2, { recursive: true, force: true }); }
+  });
+
+  it('CSV recusa exportar enquanto o painel está parcial', async () => {
+    const dir3 = mkdtempSync(join(tmpdir(), 'umb-csv-'));
+    try {
+      let t = 0;
+      const falsa = umblerFalsa();
+      const lento = { async get(rota: string, q?: Record<string, unknown>) { t += 30_000; return falsa.leitor.get(rota, q); } };
+      const svc = new ServicoUmbler({ leitor: lento, cache: new CacheUmbler(join(dir3, 'c'), () => 1), store: new ArquivoConfigStore(join(dir3, 'cfg.json')), agora: () => t, orcamentoMs: 40_000 });
+      await svc.fixar('canais', 'c1', 'Canal', true);
+      await expect(svc.csv(F)).rejects.toThrow(/ainda está carregando/);
+    } finally { rmSync(dir3, { recursive: true, force: true }); }
+  });
+
+  it('a função da Vercel usa o banco para a configuração, /tmp para o cache e o limite de 60 s', () => {
+    const fn = readFileSync('api/studio.ts', 'utf8');
+    expect(fn).toMatch(/new PgConfigStore\(pool\)/);
+    expect(fn).toMatch(/tmpdir\(\)/);
+    expect(fn).not.toMatch(/ArquivoConfigStore/);
+    expect(JSON.parse(readFileSync('vercel.json', 'utf8')).functions['api/studio.ts'].maxDuration).toBe(60);
+    const sql = readFileSync('supabase/migrations/0034_umbler_config.sql', 'utf8').replace(/--.*$/gm, '');
+    expect(sql).toMatch(/create table ops\.cfg_umbler/);
+    expect(sql).not.toMatch(/\b(drop|delete|truncate|rename)\b/i);
+    expect([...sql.matchAll(/alter table [^;]+;/gi)].every((m) => /enable row level security/i.test(m[0]))).toBe(true);
+    expect(sql).not.toMatch(/\bpublic\./);
+    expect(sql).toMatch(/grant select, insert, update on ops\.cfg_umbler to orq_panel/);
   });
 });

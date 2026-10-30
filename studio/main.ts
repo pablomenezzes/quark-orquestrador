@@ -24,6 +24,7 @@ import { ClickUpClient, Integracoes, SheetsClient, clickUpConfigDoAmbiente, shee
 import { UmblerCliente } from './lib/umbler/cliente.js';
 import { CacheUmbler } from './lib/umbler/cache.js';
 import { ServicoUmbler } from './lib/umbler/servico.js';
+import { ArquivoConfigStore, PgConfigStore } from './lib/umbler/config-store.js';
 import { checkPortFree, formatReport, parseEnv, runPreflight } from './lib/preflight.js';
 import { createStudioServer, type SubmitFn } from './server.js';
 
@@ -101,7 +102,8 @@ const umblerToken = (process.env.UMBLER_TOKEN || process.env.UMBLER_API_TOKEN ||
 const umbler = new ServicoUmbler({
   leitor: umblerToken ? new UmblerCliente({ token: umblerToken }) : null,
   cache: new CacheUmbler(join(root, '.cache', 'umbler'), Date.now, undefined, umblerToken),
-  configPath: join(root, 'studio', 'config', 'umbler-marketing.json'),
+  // com PANEL_DB_URL a configuração mora no Supabase (a mesma da Vercel); sem ele, no arquivo versionado
+  store: painelPool ? new PgConfigStore(painelPool) : new ArquivoConfigStore(join(root, 'studio', 'config', 'umbler-marketing.json')),
   token: umblerToken,
 });
 

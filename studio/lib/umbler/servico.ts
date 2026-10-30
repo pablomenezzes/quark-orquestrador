@@ -1,11 +1,12 @@
 /**
- * Serviço do painel Umbler: junta cliente (somente leitura), cache de 15 min, configuração em JSON e agregações.
- * Nada é gravado no banco nem no Pipedrive; a única escrita é o arquivo de configuração e o cache local.
+ * Serviço do painel Umbler: junta cliente (somente leitura), cache de 15 min, configuração (arquivo ou ops.cfg_umbler) e agregações.
+ * Nada vai para a Umbler nem para o Pipedrive; as únicas escritas são a configuração e o cache local (em /tmp na Vercel).
  */
 import { UmblerErro, ocultarToken, type Consulta } from './cliente.js';
 import { CacheUmbler } from './cache.js';
+import type { ConfigStore } from './config-store.js';
 import {
-  ConfigInvalida, acrescentarPreco, definirAmostra, definirFixado, definirOrganizacao, lerConfig, pertenceAoMarketing, salvarConfig,
+  ConfigInvalida, acrescentarPreco, definirAmostra, definirFixado, definirOrganizacao, pertenceAoMarketing,
   TIPOS_ITEM, type ConfigUmbler, type ItemFixado, type TipoItem,
 } from './config.js';
 import {
@@ -38,6 +39,7 @@ export type Catalogo = {
 
 export type Passos = { lidas: number; total: number | null; porPasso: { passo: string; n: number }[]; porStatus: { status: string; n: number }[]; completo: boolean };
 
+const PENDENTE = Symbol('pendente');
 const TAKE = 100; // a API aceita até 250 por página
 const MAX_PAGINAS = 200;
 
@@ -49,9 +51,11 @@ export class ServicoUmbler {
     private readonly o: {
       leitor: Leitor | null;
       cache: CacheUmbler;
-      configPath: string;
+      store: ConfigStore;
       token?: string;
       agora?: () => number;
+      /** Tempo máximo (ms) de consultas à Umbler por requisição; o que sobrar fica para a próxima (o cache guarda o progresso). Sem valor = sem limite. */
+      orcamentoMs?: number;
     },
   ) {}
 
@@ -61,9 +65,10 @@ export class ServicoUmbler {
     return this.o.leitor ? { ok: true, motivo: null } : { ok: false, motivo: 'Falta UMBLER_TOKEN no .env.local. O painel só lê da Umbler; sem o token não há dados.' };
   }
 
-  config(): ConfigUmbler {
-    return lerConfig(this.o.configPath);
+  config(): Promise<ConfigUmbler> {
+    return this.o.store.ler();
   }
+  get origemConfig() { return this.o.store.origem; }
 
   private leitor(): Leitor {
     if (!this.o.leitor) throw new SemToken('Falta UMBLER_TOKEN no .env.local.');
@@ -107,7 +112,7 @@ export class ServicoUmbler {
       todas = normalizaOrganizacoes(await this.leitor().get('/v1/members/me/'));
       this.o.cache.gravar('organizacoes', todas);
     }
-    const cfg = this.config();
+    const cfg = await this.config();
     if (cfg.organizacaoId) return { id: cfg.organizacaoId, todas };
     if (todas.length === 1) return { id: todas[0]!.id, todas };
     throw new OrganizacaoPendente(todas);
@@ -115,7 +120,7 @@ export class ServicoUmbler {
 
   /* ---------- catálogo para a Configuração ---------- */
   async catalogo(fresh = false): Promise<Catalogo> {
-    const cfg = this.config();
+    const cfg = await this.config();
     let todas: { id: string; nome: string }[] = [];
     let org: string | null = cfg.organizacaoId;
     try {
@@ -147,24 +152,24 @@ export class ServicoUmbler {
   }
 
   /* ---------- alterações da configuração ---------- */
-  private grava(c: ConfigUmbler): ConfigUmbler {
-    salvarConfig(this.o.configPath, c);
+  private async grava(c: ConfigUmbler): Promise<ConfigUmbler> {
+    await this.o.store.salvar(c);
     return c;
   }
-  fixar(tipo: unknown, id: unknown, nome: unknown, fixado: unknown): ConfigUmbler {
+  async fixar(tipo: unknown, id: unknown, nome: unknown, fixado: unknown): Promise<ConfigUmbler> {
     if (!(TIPOS_ITEM as readonly unknown[]).includes(tipo)) throw new ConfigInvalida('Tipo de item inválido.');
     if (typeof id !== 'string' || typeof fixado !== 'boolean') throw new ConfigInvalida('Dados inválidos.');
-    return this.grava(definirFixado(this.config(), tipo as TipoItem, id, typeof nome === 'string' ? nome : id, fixado, new Date(this.agora())));
+    return this.grava(definirFixado(await this.config(), tipo as TipoItem, id, typeof nome === 'string' ? nome : id, fixado, new Date(this.agora())));
   }
-  preco(desde: unknown, preco: unknown): ConfigUmbler {
-    return this.grava(acrescentarPreco(this.config(), desde, preco, new Date(this.agora())));
+  async preco(desde: unknown, preco: unknown): Promise<ConfigUmbler> {
+    return this.grava(acrescentarPreco(await this.config(), desde, preco, new Date(this.agora())));
   }
-  amostra(valor: unknown): ConfigUmbler {
-    return this.grava(definirAmostra(this.config(), valor, new Date(this.agora())));
+  async amostra(valor: unknown): Promise<ConfigUmbler> {
+    return this.grava(definirAmostra(await this.config(), valor, new Date(this.agora())));
   }
-  escolherOrganizacao(id: unknown): ConfigUmbler {
+  async escolherOrganizacao(id: unknown): Promise<ConfigUmbler> {
     if (typeof id !== 'string') throw new ConfigInvalida('Organização inválida.');
-    return this.grava(definirOrganizacao(this.config(), id, new Date(this.agora())));
+    return this.grava(definirOrganizacao(await this.config(), id, new Date(this.agora())));
   }
 
   /* ---------- sessões ---------- */
@@ -189,9 +194,21 @@ export class ServicoUmbler {
     return todas;
   }
 
-  async sessoes(f: Filtros, fresh = false): Promise<{ sessoes: Sessao[]; avisos: string[] }> {
-    const cfg = this.config();
+  /** Consulta com o orçamento de tempo: devolve PENDENTE (sem ir à rede) quando o tempo acabou e o dado não está no cache. */
+  private async getComOrcamento(rota: string, consulta: Consulta, fresh: boolean, estourou: () => boolean): Promise<unknown | typeof PENDENTE> {
+    if (estourou()) {
+      const c = fresh ? null : this.o.cache.ler<unknown>(`${rota}?${JSON.stringify(consulta)}`);
+      return c ? c.dado : PENDENTE;
+    }
+    return this.get(rota, consulta, fresh);
+  }
+
+  async sessoes(f: Filtros, fresh = false): Promise<{ sessoes: Sessao[]; avisos: string[]; pendentes: number }> {
+    const cfg = await this.config();
     const avisos: string[] = [];
+    const inicio = this.agora();
+    const estourou = () => this.o.orcamentoMs != null && this.agora() - inicio > this.o.orcamentoMs;
+    let pendentes = 0;
     const { id: org } = await this.organizacao(fresh);
     const brutas = await this.sessoesBrutas(org, f.de, fresh);
     const base = brutas.map((b) => ({ b, s: normalizaSessao(b) })).filter((x): x is { b: unknown; s: Sessao } => !!x.s && !!x.s.dia && x.s.dia >= f.de && x.s.dia <= f.ate);
@@ -207,7 +224,9 @@ export class ServicoUmbler {
         continue;
       }
       try {
-        comDetalhe.push(normalizaSessao(await this.get(`/v1/bulk-send-session/${s.id}/`, { organizationId: org }, fresh)) ?? s);
+        const d = await this.getComOrcamento(`/v1/bulk-send-session/${s.id}/`, { organizationId: org }, fresh, estourou);
+        if (d === PENDENTE) { pendentes++; comDetalhe.push(s); continue; }
+        comDetalhe.push(normalizaSessao(d) ?? s);
       } catch {
         falhaDetalhe++;
         comDetalhe.push(s);
@@ -227,7 +246,9 @@ export class ServicoUmbler {
         continue;
       }
       try {
-        final.push({ ...s, creditos: normalizaCusto(await this.get(`/v1/bulk-send-session/${s.id}/costs/`, { organizationId: org }, fresh)) });
+        const c = await this.getComOrcamento(`/v1/bulk-send-session/${s.id}/costs/`, { organizationId: org }, fresh, estourou);
+        if (c === PENDENTE) { pendentes++; final.push({ ...s, creditos: { v: null, m: 'Ainda não consultado: o limite de tempo da requisição acabou. A tela continua sozinha.' } }); continue; }
+        final.push({ ...s, creditos: normalizaCusto(c) });
       } catch (e) {
         falhaCusto++;
         primeiroErro ||= this.msg(e);
@@ -235,7 +256,8 @@ export class ServicoUmbler {
       }
     }
     if (falhaCusto) avisos.push(`A rota de custo falhou em ${falhaCusto} sessão(ões) (${primeiroErro}). O custo aparece como indisponível nelas.`);
-    return { sessoes: final, avisos };
+    if (pendentes) avisos.push(`Carregamento parcial: ${pendentes} consulta(s) à Umbler ainda pendente(s). A tela pede o resto sozinha.`);
+    return { sessoes: final, avisos, pendentes };
   }
 
   async nomesDeCanais(fresh = false): Promise<Map<string, string>> {
@@ -247,16 +269,18 @@ export class ServicoUmbler {
     }
   }
 
-  async painel(f: Filtros, fresh = false): Promise<PainelUmbler & { geradoEm: number; chamadas: number }> {
+  async painel(f: Filtros, fresh = false): Promise<PainelUmbler & { geradoEm: number; chamadas: number; pendentes: number }> {
     const antes = this.chamadas;
-    const { sessoes, avisos } = await this.sessoes(f, fresh);
-    const p = montarPainel(this.config(), sessoes, await this.nomesDeCanais(fresh), f);
+    const { sessoes, avisos, pendentes } = await this.sessoes(f, fresh);
+    const p = montarPainel(await this.config(), sessoes, await this.nomesDeCanais(fresh), f);
     p.avisos.push(...avisos);
-    return { ...p, geradoEm: this.agora(), chamadas: this.chamadas - antes };
+    return { ...p, geradoEm: this.agora(), chamadas: this.chamadas - antes, pendentes };
   }
 
   async csv(f: Filtros): Promise<string> {
-    return gerarCsv((await this.painel(f)) as PainelUmbler);
+    const p = await this.painel(f);
+    if (p.pendentes) throw new ConfigInvalida('O painel ainda está carregando partes do período. Espere a tela terminar de carregar e exporte de novo.');
+    return gerarCsv(p as PainelUmbler);
   }
 
   /**

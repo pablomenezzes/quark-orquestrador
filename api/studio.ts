@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pg from 'pg';
 import { assertRoleUser, assertSafeDbTarget } from '../src/db/guard.js';
@@ -8,6 +9,10 @@ import { PgExperimentosRepo } from '../studio/lib/experimentos.js';
 import { PgMonitorRepo } from '../studio/lib/monitor.js';
 import { PgPainelRepo } from '../studio/lib/painel-repo.js';
 import { ClickUpClient, Integracoes, SheetsClient, clickUpConfigDoAmbiente, sheetsConfigDoAmbiente } from '../studio/lib/integracoes.js';
+import { UmblerCliente } from '../studio/lib/umbler/cliente.js';
+import { CacheUmbler } from '../studio/lib/umbler/cache.js';
+import { PgConfigStore } from '../studio/lib/umbler/config-store.js';
+import { ServicoUmbler } from '../studio/lib/umbler/servico.js';
 import { SincroniaManual, githubConfigDoAmbiente } from '../studio/lib/sincronia-manual.js';
 import { createStudioHandler } from '../studio/server.js';
 
@@ -30,6 +35,15 @@ function montar() {
   pool.on('error', (e) => console.error('pool: erro no banco', e.message.replace(/postgres(ql)?:\/\/\S+/gi, '<url>')));
   const raiz = process.cwd();
   const experimentos = new PgExperimentosRepo(pool);
+  // Umbler: leitura (GET) com token sensível da Vercel. Cache em /tmp (único disco gravável) e configuração em ops.cfg_umbler.
+  const umblerToken = (env('UMBLER_TOKEN') || env('UMBLER')).trim().replace(/^Bearer\s+/i, '');
+  const umbler = new ServicoUmbler({
+    leitor: umblerToken ? new UmblerCliente({ token: umblerToken }) : null,
+    cache: new CacheUmbler(join(tmpdir(), 'umbler-cache'), Date.now, undefined, umblerToken),
+    store: new PgConfigStore(pool),
+    token: umblerToken,
+    orcamentoMs: 35_000, // a função tem 60 s; o resto do período vem nas próximas chamadas da tela
+  });
   const sheetsCfg = sheetsConfigDoAmbiente(process.env), clickCfg = clickUpConfigDoAmbiente(process.env);
   return createStudioHandler({
     formsDir: join(raiz, 'studio', 'forms'),
@@ -42,6 +56,7 @@ function montar() {
     bi: new PgBiRepo(pool),
     monitor: new PgMonitorRepo(pool),
     experimentos,
+    umbler,
     sincronia: (() => { const g = githubConfigDoAmbiente(process.env); return g ? new SincroniaManual(g) : null; })(),
     integracoes: new Integracoes(experimentos, sheetsCfg ? new SheetsClient(sheetsCfg) : null, clickCfg ? new ClickUpClient(clickCfg) : null, env('CRON_SECRET') || null),
     acesso: { servico: new SupabaseAuth({ url: env('SUPABASE_URL'), anonKey: env('SUPABASE_ANON_KEY'), serviceKey: env('SUPABASE_SERVICE_ROLE_KEY') }), segredo: env('SESSION_SECRET'), seguro: true },

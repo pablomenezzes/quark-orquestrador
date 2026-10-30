@@ -39,13 +39,13 @@ function itens(x: unknown): ItemFixado[] {
 }
 
 /** Lê o JSON. Arquivo ausente = configuração vazia. Arquivo torto = erro claro (nunca sobrescreve em silêncio). */
-export function lerConfig(caminho: string): ConfigUmbler {
-  if (!existsSync(caminho)) return configVazia();
+export function lerConfig(caminho: string, textoJson = false): ConfigUmbler {
+  if (!textoJson && !existsSync(caminho)) return configVazia();
   let raw: unknown;
   try {
-    raw = JSON.parse(readFileSync(caminho, 'utf8'));
+    raw = JSON.parse(textoJson ? caminho : readFileSync(caminho, 'utf8'));
   } catch {
-    throw new ConfigInvalida(`O arquivo ${caminho} não é um JSON válido. Corrija ou apague para recomeçar.`);
+    throw new ConfigInvalida(textoJson ? 'A configuração guardada não é um JSON válido.' : `O arquivo ${caminho} não é um JSON válido. Corrija ou apague para recomeçar.`);
   }
   const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const precos = (Array.isArray(o.precoCredito) ? o.precoCredito : [])
