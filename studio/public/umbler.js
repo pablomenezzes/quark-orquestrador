@@ -17,13 +17,31 @@ const nd = (m) => `<span class="nd" tabindex="0" title="${esc(m || 'Dado indispo
 const val = (x, f = nf.format) => (x == null || x.v == null ? nd(x?.m) : f(x.v));
 
 const hoje = new Date();
+const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+/** Opções de período: os últimos 6 meses (mês corrente até hoje), 30 e 90 dias, ou datas livres. */
+function opcoesPeriodo() {
+  const o = [];
+  for (let i = 0; i < 6; i++) {
+    const d0 = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1);
+    const fim = i === 0 ? hoje : new Date(hoje.getFullYear(), hoje.getMonth() - i + 1, 0);
+    o.push([`mes${i}`, `${MESES[d0.getMonth()]}/${d0.getFullYear()}${i === 0 ? ' (até hoje)' : ''}`, iso(d0), iso(fim)]);
+  }
+  o.push(['d30', 'Últimos 30 dias', iso(new Date(hoje.getTime() - 29 * 86400000)), iso(hoje)]);
+  o.push(['d90', 'Últimos 90 dias', iso(new Date(hoje.getTime() - 89 * 86400000)), iso(hoje)]);
+  return o;
+}
+function aplicaPeriodo(id) {
+  const o = opcoesPeriodo().find((x) => x[0] === id);
+  if (!o) return;
+  S.periodo = id; S.f.de = o[2]; S.f.ate = o[3]; S.f.sessao = ''; S.passosAuto = ''; S.passos = null;
+}
 const ler = (k) => { try { return JSON.parse(localStorage.getItem(k) ?? 'null'); } catch { return null; } };
 const guardar = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* sem armazenamento */ } };
 
 const S = {
   aba: 'painel',
   f: { de: iso(new Date(hoje.getFullYear(), hoje.getMonth(), 1)), ate: iso(hoje), canal: '', tipo: '', modelo: '', sessao: '', escopo: 'marketing' },
-  painel: null, cat: null, erro: '', carregando: false, ordem: { col: 'dia', dir: -1 }, sel: null, passos: null, passosBot: '',
+  periodo: 'mes0', meses: null, passosAuto: '', painel: null, cat: null, erro: '', carregando: false, ordem: { col: 'dia', dir: -1 }, sel: null, passos: null, passosBot: '',
 };
 
 async function api(rota, opt = {}) {
@@ -46,6 +64,7 @@ async function carregarPainel(fresh = false) {
     const p = await api(`painel?${qs(fresh ? { fresh: '1' } : {})}`);
     if (mine !== seq) return;
     S.painel = p;
+    escolheFluxoAuto();
     // na Vercel cada requisição tem tempo limitado: o servidor devolve o que deu e a tela pede o resto (o cache guarda o progresso)
     for (let i = 0; S.painel.pendentes > 0 && i < 40 && mine === seq; i++) {
       S.carregando = false; desenhar();
@@ -92,6 +111,7 @@ function desenhaPainel() {
   const sess = p.sessoes.map((s) => [s.id, `${dmy(s.dia)} · ${s.titulo ?? s.id}`]);
   const barra = `
   <section class="card filtros" aria-label="Filtros">
+    <label>Período <select id="f-periodo">${opcoesPeriodo().map((o) => `<option value="${o[0]}"${o[0] === S.periodo ? ' selected' : ''}>${esc(o[1])}</option>`).join('')}<option value="livre"${S.periodo === 'livre' ? ' selected' : ''}>Datas livres</option></select></label>
     <label>De <input type="date" id="f-de" value="${S.f.de}"></label>
     <label>Até <input type="date" id="f-ate" value="${S.f.ate}"></label>
     <label>Canal <select id="f-canal">${filtrosOpc(canais, S.f.canal, 'Todos')}</select></label>
@@ -121,7 +141,7 @@ function desenhaPainel() {
     ${cartao('Custo por resposta (R$)', val(k.cprReais, brl.format), k.cprReais.x != null ? `base: ${nf.format(k.cprReais.x)} de ${nf.format(k.cprReais.y)} sessões` : '')}
     ${cartao('Custo por resposta (créditos)', val(k.cprCreditos, nf2.format), k.cprCreditos.x != null ? `base: ${nf.format(k.cprCreditos.x)} de ${nf.format(k.cprCreditos.y)} sessões` : '')}
   </div>`;
-  return barra + completude + (p.avisos.length ? `<div class="banner warn aviso"><ul>${p.avisos.map((a) => `<li>${esc(a)}</li>`).join('')}</ul></div>` : '') + cartoes + funis(p) + serie(p) + tabela(p) + comparacao(p) + fluxos(p);
+  return barra + completude + (p.avisos.length ? `<div class="banner warn aviso"><ul>${p.avisos.map((a) => `<li>${esc(a)}</li>`).join('')}</ul></div>` : '') + cartoes + estimativaHtml(p) + funis(p) + serie(p) + tabela(p) + comparacao(p) + fluxos(p);
 }
 
 function barrasFunil(etapas, topo) {
@@ -210,19 +230,95 @@ function fluxos(p) {
   }
   const bots = (S.cat?.bots?.itens ?? []).filter((b) => b.fixado);
   const passos = S.passos;
-  const passosHtml = passos ? `<p class="muted" style="font-size:12.5px">Instâncias lidas: <b>${nf.format(passos.lidas)}</b>${passos.total != null ? ` de <b>${nf.format(passos.total)}</b>` : ''}${passos.completo ? '' : ' (leitura parcial: limite de páginas)'}. Último passo registrado de cada contato:</p>` +
-    (passos.porPasso.length ? `<table class="t" style="min-width:0"><thead><tr><th>Passo (ID)</th><th>Contatos</th></tr></thead><tbody>${passos.porPasso.slice(0, 20).map((x) => `<tr><td class="mono">${esc(x.passo)}</td><td class="num">${nf.format(x.n)}</td></tr>`).join('')}</tbody></table>` : '<p>Nenhuma instância no período.</p>') : '';
+  const passosHtml = S.passosCarregando ? '<p class="muted" style="font-size:13px">Lendo o caminho dos contatos no fluxo…</p>' : passos ? graficoPassos(passos) : '';
   return `<div class="secao"><h2>Fluxos: onde os contatos páram</h2><span>e o que acontece depois da resposta</span></div>
   <div class="card2">${corpo}
     <hr style="border:0;border-top:1px solid var(--border);margin:12px 0">
-    <h3 style="font-size:14px">Passo do fluxo</h3>
-    <p class="muted" style="font-size:12.5px;margin:2px 0 8px">A API expõe o caminho de cada contato dentro do fluxo (por ID do passo, sem o nome). Para escolher o fluxo, ele precisa estar fixado em Configuração. A leitura percorre as instâncias (até 500) e guarda só contagens.</p>
-    <div class="form"><label>Fluxo<select id="p-bot"><option value="">Escolha…</option>${bots.map((b) => `<option value="${esc(b.id)}"${b.id === S.passosBot ? ' selected' : ''}>${esc(b.nome)}</option>`).join('')}</select></label><button class="btn" id="p-ir">Ver passos</button></div>
+    <h3 style="font-size:14px">Caminho dos contatos no fluxo</h3>
+    <p class="muted" style="font-size:12.5px;margin:2px 0 8px">Quantos contatos chegaram em cada passo e em quantos o fluxo terminou ali. Lê até 500 instâncias do período (só contagens são guardadas).</p>
+    <div class="form"><label>Fluxo<select id="p-bot">${opcoesFluxo(p, bots)}</select></label><button class="btn" id="p-ir">Atualizar passos</button></div>
     ${passosHtml}
     <hr style="border:0;border-top:1px solid var(--border);margin:12px 0">
     <h3 style="font-size:14px">Depois da resposta</h3>
     <p class="muted" style="font-size:13px;margin:4px 0 0">Não exposto pela API como número agregado. O que a Umbler devolve sobre o que o contato disse ou fez depois são as conversas individuais (mensagens, nome e telefone), e este painel não lê nem guarda dados pessoais. Por isso não há estimativa aqui.</p>
   </div>`;
+}
+
+/* ---------- estimativa, passos, por mês ---------- */
+function estimativaHtml(p) {
+  const e = p.estimativa;
+  const base = e.base.length ? e.base.map((b) => `${b.tipo === 'Bot' ? 'fluxos' : 'templates'}: ${nf.format(Math.round(b.creditosPorEnvio))} créditos por envio (média de ${b.amostra} sessões com custo registrado)`).join(' · ') : 'nenhuma sessão recente com custo registrado';
+  return `<div class="card2 est"><b>Estimativa de custo</b><span class="tag">ESTIMATIVA, NÃO É DADO DA UMBLER</span>
+    <p class="muted" style="font-size:12.5px;margin:4px 0 8px">Só para sessões que a Umbler não tem custo gravado (${nf.format(e.sessoes.y)} no filtro). Envios da sessão x média de créditos por envio de sessões recentes do mesmo tipo. Fica separada do custo real acima e nunca é somada a ele.</p>
+    <div class="kpis" style="grid-template-columns:repeat(3,minmax(0,1fr))">
+      ${cartao('Créditos estimados', val(e.creditos), `em ${nf.format(e.sessoes.x)} de ${nf.format(e.sessoes.y)} sessões sem registro`)}
+      ${cartao('R$ estimado', val(e.reais, brl.format), 'pelo preço vigente de cada sessão')}
+      ${cartao('Base da média', `<span style="font-size:13px;white-space:normal">${esc(base)}</span>`, 'conferir antes de usar')}
+    </div></div>`;
+}
+
+function opcoesFluxo(p, bots) {
+  const doPeriodo = p.fluxos.map((g) => [g.chave, g.nome]);
+  const ids = new Set(doPeriodo.map(([k]) => k));
+  const extras = bots.filter((b) => !ids.has(b.id)).map((b) => [b.id, b.nome]);
+  return `<option value="">Escolha…</option>` + [...doPeriodo, ...extras].map(([k, n]) => `<option value="${esc(k)}"${k === S.passosBot ? ' selected' : ''}>${esc(n)}</option>`).join('');
+}
+
+function graficoPassos(g) {
+  if (!g.lidas) return '<p class="muted" style="font-size:13px">Nenhum contato entrou neste fluxo no período.</p>';
+  const max = Math.max(1, ...g.porPasso.map((x) => x.alcancaram));
+  const linhas = g.porPasso.map((x) => `<div class="passo" style="grid-template-columns:minmax(160px,260px) 1fr 190px">
+    <span title="${esc(x.rotulo)} · ID ${esc(x.passo)}" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(x.rotulo)}</span>
+    <div><div class="barra" style="width:${Math.max(1, (x.alcancaram / max) * 100)}%"></div><div class="barra b2" style="width:${Math.max(x.pararam ? 1 : 0, (x.pararam / max) * 100)}%;margin-top:3px"></div></div>
+    <span class="n">${nf.format(x.alcancaram)} chegaram · <b>${nf.format(x.pararam)}</b> pararam</span></div>`).join('');
+  const st = g.porStatus.map((x) => `${esc(x.status === 'Complete' ? 'Concluídos' : x.status === 'Running' ? 'Em andamento' : x.status)}: ${nf.format(x.n)}`).join(' · ');
+  return `<p class="muted" style="font-size:12.5px;margin:0 0 6px">Instâncias lidas: <b>${nf.format(g.lidas)}</b>${g.total != null ? ` de <b>${nf.format(g.total)}</b>` : ''}${g.completo ? '' : ' (leitura parcial: limite de 500)'} · ${st}. Barra azul = chegaram no passo; barra laranja = o fluxo terminou ali.${g.rotulosOk ? '' : ' Nomes dos passos indisponíveis: mostrando o ID.'}</p>${linhas}`;
+}
+
+function escolheFluxoAuto() {
+  const p = S.painel;
+  if (!p?.fluxos?.length) return;
+  const chave = `${p.filtros.de}|${p.filtros.ate}`;
+  if (S.passosAuto === chave) return;
+  S.passosAuto = chave;
+  const alvo = (S.passosBot && p.fluxos.some((g) => g.chave === S.passosBot) ? S.passosBot : p.fluxos[0].chave);
+  if (!/^[\w.\-:]{1,100}$/.test(alvo)) return;
+  carregaPassos(alvo);
+}
+async function carregaPassos(bot, fresh = false) {
+  S.passosBot = bot; S.passosCarregando = true; if (S.aba === 'painel') desenhar();
+  try { S.passos = await api(`passos?bot=${encodeURIComponent(bot)}&de=${S.f.de}&ate=${S.f.ate}${fresh ? '&fresh=1' : ''}`); } catch (e) { S.passos = null; S.passosErro = e.message; }
+  S.passosCarregando = false; if (S.aba === 'painel') desenhar();
+}
+
+async function carregarMeses(fresh = false) {
+  S.carregando = true; S.erro = ''; desenhar();
+  try {
+    let m = await api(`meses?n=6&escopo=${S.f.escopo}${fresh ? '&fresh=1' : ''}`);
+    S.meses = m;
+    for (let i = 0; m.pendentes > 0 && i < 60 && S.aba === 'meses'; i++) { S.carregando = false; desenhar(); m = await api(`meses?n=6&escopo=${S.f.escopo}`); S.meses = m; }
+  } catch (e) { S.meses = null; S.erro = e.corpo?.error === 'organizacao_pendente' ? 'org' : e.message; S.orgs = e.corpo?.organizacoes; }
+  S.carregando = false; desenhar();
+}
+const nomeMes = (ym) => `${MESES[Number(ym.slice(5, 7)) - 1]}/${ym.slice(0, 4)}`;
+function desenhaMeses() {
+  const m = S.meses;
+  if (!m) return '';
+  const maxEnv = Math.max(1, ...m.meses.map((x) => x.enviadas.v ?? 0));
+  const maxCred = Math.max(1, ...m.meses.map((x) => x.creditos.v ?? 0));
+  const linhas = m.meses.map((x) => `<tr data-mes="${x.mes}" title="Abrir ${esc(nomeMes(x.mes))} no Painel">
+    <td><b>${esc(nomeMes(x.mes))}</b><small>${dmy(x.de)} a ${dmy(x.ate)}</small></td><td class="num">${nf.format(x.sessoes)}</td>
+    <td class="num">${val(x.enviadas)}<div class="barra" style="width:${((x.enviadas.v ?? 0) / maxEnv) * 100}%"></div></td>
+    <td class="num">${val(x.lidas)}</td><td class="num">${val(x.respondidas)}</td><td class="num">${val(x.falhas)}</td>
+    <td class="num">${val(x.creditos)}<div class="barra b2" style="width:${((x.creditos.v ?? 0) / maxCred) * 100}%"></div><small>em ${x.completudeCusto.x} de ${x.completudeCusto.y} sessões</small></td>
+    <td class="num">${val(x.reais, brl.format)}</td>
+    <td class="num"><span class="muted">${x.estimativa.creditos.v != null ? `~${nf.format(x.estimativa.creditos.v)} créd.` : nd(x.estimativa.creditos.m)}${x.estimativa.reais.v != null ? `<small>~${brl.format(x.estimativa.reais.v)}</small>` : ''}</span></td></tr>`).join('');
+  return `<section class="card filtros"><label class="chk"><input type="checkbox" id="f-escopo"${S.f.escopo === 'marketing' ? ' checked' : ''}> Só o que está fixado como Marketing</label><button class="btn" id="b-atualizar-meses">Atualizar agora</button>
+    <span class="muted" style="font-size:12.5px">Últimos 6 meses, mês a mês. Clique numa linha para abrir aquele mês no Painel.</span></section>
+    ${m.pendentes > 0 ? '<div class="banner warn aviso">Carregando o resto do período…</div>' : ''}
+    ${m.avisos.length ? `<div class="banner warn aviso"><ul>${m.avisos.map((a) => `<li>${esc(a)}</li>`).join('')}</ul></div>` : ''}
+    <div class="card2 tabela-wrap"><table class="t" style="min-width:900px"><thead><tr><th>Mês</th><th>Sessões</th><th>Enviadas</th><th>Lidas</th><th>Respondidas</th><th>Falhas</th><th>Créditos (real)</th><th>R$ (real)</th><th>Estimativa*</th></tr></thead><tbody>${linhas}</tbody></table>
+    <p class="muted" style="font-size:12px;margin:8px 0 0">*Estimativa só para sessões sem custo gravado na Umbler; não é dado da Umbler e não entra nas colunas reais. Atualizado em ${dh(m.geradoEm)} (cache de 15 min).</p></div>`;
 }
 
 /* ---------- Configuração ---------- */
@@ -264,15 +360,18 @@ function desenhar() {
     return;
   }
   if (S.erro) { av.innerHTML += `<div class="banner danger" role="alert">${esc(S.erro)}</div>`; main.innerHTML = ''; return; }
-  main.innerHTML = S.aba === 'painel' ? desenhaPainel() : desenhaConfig();
+  main.innerHTML = S.aba === 'painel' ? desenhaPainel() : S.aba === 'meses' ? desenhaMeses() : desenhaConfig();
 }
 
 document.addEventListener('click', async (ev) => {
   const t = ev.target;
   if (!(t instanceof Element)) return;
   const aba = t.closest('.aba');
-  if (aba) { S.aba = aba.dataset.aba; S.erro = ''; if (S.aba === 'painel') { if (!S.painel) await carregarPainel(); else desenhar(); if (!S.cat) carregarCatSilencioso(); } else await carregarConfig(); return; }
+  if (aba) { S.aba = aba.dataset.aba; S.erro = ''; if (S.aba === 'painel') { if (!S.painel) await carregarPainel(); else desenhar(); if (!S.cat) carregarCatSilencioso(); } else if (S.aba === 'meses') await carregarMeses(); else await carregarConfig(); return; }
   if (t.id === 'b-atualizar') return void carregarPainel(true);
+  if (t.id === 'b-atualizar-meses') return void carregarMeses(true);
+  const trm = t.closest('tr[data-mes]');
+  if (trm) { const ym = trm.dataset.mes; const o = opcoesPeriodo().find((x) => x[2].startsWith(ym)); if (o) aplicaPeriodo(o[0]); else { S.periodo = 'livre'; S.f.de = `${ym}-01`; S.f.ate = iso(new Date(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)), 0)); } S.aba = 'painel'; S.painel = null; return void carregarPainel(); }
   if (t.id === 'c-refresh') return void carregarConfig(true);
   const th = t.closest('th.sc');
   if (th) { const c = th.dataset.col; S.ordem = { col: c, dir: S.ordem.col === c ? -S.ordem.dir : (c === 'dia' || c === 'titulo' || c === 'tipo' || c === 'alvo' ? 1 : -1) }; return desenhar(); }
@@ -280,9 +379,7 @@ document.addEventListener('click', async (ev) => {
   if (tr) { S.sel = S.sel === tr.dataset.id ? null : tr.dataset.id; return desenhar(); }
   if (t.id === 'p-ir') {
     const bot = $('#p-bot').value; if (!bot) return;
-    S.passosBot = bot; t.disabled = true; t.textContent = 'Lendo…';
-    try { S.passos = await api(`passos?bot=${encodeURIComponent(bot)}&de=${S.f.de}&ate=${S.f.ate}`); } catch (e) { S.passos = null; alert(e.message); }
-    return desenhar();
+    return void carregaPassos(bot, true);
   }
   if (t.classList.contains('m-fixar')) {
     const li = t.closest('.lista-item');
@@ -302,14 +399,17 @@ document.addEventListener('change', (ev) => {
   const t = ev.target;
   if (!(t instanceof Element)) return;
   if (t.classList.contains('m-chk')) { const li = t.closest('.lista-item'); li.querySelector('.m-fixar').disabled = (t.checked ? 1 : 0) === Number(li.dataset.salvo); return; }
+  if (t.id === 'f-periodo') { if (t.value === 'livre') S.periodo = 'livre'; else aplicaPeriodo(t.value); guardar('umbler.f', S.f); return void carregarPainel(); }
   const mapa = { 'f-de': 'de', 'f-ate': 'ate', 'f-canal': 'canal', 'f-tipo': 'tipo', 'f-modelo': 'modelo', 'f-sessao': 'sessao' };
   if (mapa[t.id]) {
     S.f[mapa[t.id]] = t.value;
+    if (t.id === 'f-de' || t.id === 'f-ate') S.periodo = 'livre';
     if (t.id !== 'f-sessao') S.f.sessao = ''; // escolher outro filtro solta a sessão específica
     guardar('umbler.f', S.f);
     return void carregarPainel();
   }
-  if (t.id === 'f-escopo') { S.f.escopo = t.checked ? 'marketing' : 'tudo'; guardar('umbler.f', S.f); carregarPainel(); }
+  if (t.id === 'p-bot') { if (t.value) carregaPassos(t.value); return; }
+  if (t.id === 'f-escopo') { S.f.escopo = t.checked ? 'marketing' : 'tudo'; guardar('umbler.f', S.f); S.aba === 'meses' ? carregarMeses() : carregarPainel(); }
 });
 
 async function carregarCatSilencioso() { try { S.cat = await api('catalogo'); if (S.aba === 'painel') desenhar(); } catch { /* o painel já mostra o seu próprio erro */ } }

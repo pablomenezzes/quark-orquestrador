@@ -366,6 +366,7 @@ export function createStudioHandler(opts: StudioOptions): (req: IncomingMessage,
       if (method === 'GET' && sub === 'config') return send(res, 200, { ...(await u.config()), origem: u.origemConfig });
       if (method === 'GET' && sub === 'catalogo') return send(res, 200, await u.catalogo(fresh));
       if (method === 'GET' && sub === 'painel') return send(res, 200, await u.painel(filtrosUmbler(), fresh));
+      if (method === 'GET' && sub === 'meses') return send(res, 200, await u.mensal(q.get('escopo') === 'tudo' ? 'tudo' : 'marketing', Number(q.get('n') ?? 6), fresh));
       if (method === 'GET' && sub === 'csv') {
         const f = filtrosUmbler();
         const csv = await u.csv(f);

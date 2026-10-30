@@ -390,6 +390,8 @@ function umblerFalsa(opts: { custoFalha?: boolean } = {}) {
       if (rota === '/v1/tags/') return { items: [{ id: 'g1', name: 'Lead' }] };
       if (rota === '/v1/bulk-send-session/') return { page: { totalItems: 3 }, items: Number(q.Skip) === 0 ? [base(3), base(2), base(1)] : [] };
       if (rota.endsWith('/costs/')) { if (opts.custoFalha) throw new UmblerErro(`falhou com Bearer ${TOKEN}`, 500, rota); return { totalCredits: Number(/s(\d)/.exec(rota)![1]) * 10, lines: [] }; }
+      const det = /\/v1\/bulk-send-session\/s(\d)\/$/.exec(rota);
+      if (det) return base(Number(det[1]));
       throw new Error(`rota inesperada ${rota}`);
     },
   };
@@ -648,5 +650,72 @@ describe('Umbler: configuração no banco e execução na Vercel', () => {
     expect([...sql.matchAll(/alter table [^;]+;/gi)].every((m) => /enable row level security/i.test(m[0]))).toBe(true);
     expect(sql).not.toMatch(/\bpublic\./);
     expect(sql).toMatch(/grant select, insert, update on ops\.cfg_umbler to orq_panel/);
+  });
+});
+
+describe('Umbler: estimativa, mês a mês e passos do fluxo', () => {
+  const semRegistro = (o: Record<string, unknown>) => { const s = normalizaSessao(sess(o))!; return { ...s, creditos: normalizaCusto({ totalCredits: 0, lines: [] }) }; };
+
+  it('estimativa só para sessão sem registro de custo, separada do custo real, e sem base não inventa', () => {
+    const cfg = cfgBase();
+    const real = comCusto({ id: 'a', messagesSent: 100 }, 1000);
+    const sem = semRegistro({ id: 'b', messagesSent: 200, totalSent: 200 });
+    const falhou = comCusto({ id: 'c' }, null); // rota falhou: não é "sem registro", não se estima
+    const p = montarPainel(cfg, [real, sem, falhou], new Map(), F, { Template: { creditosPorEnvio: 10, amostra: 5 } });
+    expect(p.cartoes.custoCreditos.v).toBe(1000); // a estimativa NÃO entra no custo real
+    expect(p.estimativa.sessoes).toEqual({ x: 1, y: 1 });
+    expect(p.estimativa.creditos.v).toBe(2000); // 200 envios x 10
+    expect(p.estimativa.reais.v).toBe(1000); // x R$ 0,50
+    const semBase = montarPainel(cfg, [sem], new Map(), F, {});
+    expect(semBase.estimativa.creditos.v).toBeNull();
+    expect(semBase.estimativa.creditos.m).toMatch(/Sem base/);
+  });
+
+  it('mensal: agrupa por mês, usa dia do Brasil e inclui estimativa', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'umb-mes-'));
+    try {
+      const agora = Date.parse('2026-10-30T15:00:00Z');
+      const sessoesApi = [
+        { id: 'o1', createdAtUTC: '2026-10-05T15:00:00Z', title: 'o', type: 'Template', channel: { id: 'c1' }, messagesSent: 100, totalSent: 100, totalRead: 50, totalFailed: 0, template: { id: 't', label: 'M' } },
+        { id: 's1', createdAtUTC: '2026-09-20T15:00:00Z', title: 's', type: 'Template', channel: { id: 'c1' }, messagesSent: 300, totalSent: 300, totalRead: 90, totalFailed: 0, template: { id: 't', label: 'M' } },
+      ];
+      const leitor = { async get(rota: string) {
+        if (rota === '/v1/members/me/') return { organizations: [{ id: 'org1', name: 'Q', active: true }] };
+        if (rota === '/v1/channels/') return [{ id: 'c1', name: 'Canal' }];
+        if (rota === '/v1/bulk-send-session/') return { items: sessoesApi };
+        const id = /session\/(\w+)\//.exec(rota)![1];
+        if (rota.endsWith('/costs/')) return id === 'o1' ? { totalCredits: 500, lines: [{ credits: 500 }] } : { totalCredits: 0, lines: [] };
+        return sessoesApi.find((x) => x.id === id);
+      } };
+      const svc = new ServicoUmbler({ leitor, cache: new CacheUmbler(join(dir, 'c'), () => agora), store: new ArquivoConfigStore(join(dir, 'cfg.json')), agora: () => agora });
+      await svc.fixar('canais', 'c1', 'Canal', true);
+      const r = await svc.mensal('marketing', 3);
+      expect(r.meses.map((m) => m.mes)).toEqual(['2026-08', '2026-09', '2026-10']);
+      const [ago, set, out] = r.meses;
+      expect(ago!.sessoes).toBe(0);
+      expect(set!.enviadas.v).toBe(300);
+      expect(set!.creditos.v).toBeNull(); // setembro sem registro de custo
+      expect(set!.estimativa.creditos.v).toBe(1500); // 300 envios x 5 créditos/envio observados em outubro
+      expect(out!.creditos.v).toBe(500);
+      expect(out!.estimativa.creditos.v).toBeNull(); // nada a estimar em outubro
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('passos: nomes do fluxo, quantos chegaram em cada passo e onde terminaram', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'umb-pas-'));
+    try {
+      const nav = (...ids: string[]) => ids.map((stepId) => ({ stepId }));
+      const leitor = { async get(rota: string) {
+        if (rota === '/v1/members/me/') return { organizations: [{ id: 'org1', name: 'Q', active: true }] };
+        if (rota === '/v1/bots/b1/') return { bot: { steps: [{ id: 'p1', _t: 'FlowchartBotManualStartedEventModel', triggerName: 'Início' }, { id: 'p2', _t: 'SendMessageActionModel', message: 'Olá, tudo bem?' }, { id: 'p3', _t: 'MemberTransferActionModel' }] } };
+        return { page: { totalItems: 3 }, items: [{ status: 'Complete', navigationPath: nav('p1', 'p2', 'p3') }, { status: 'Running', navigationPath: nav('p1', 'p2') }, { status: 'Running', navigationPath: nav('p1') }] };
+      } };
+      const svc = new ServicoUmbler({ leitor, cache: new CacheUmbler(join(dir, 'c')), store: new ArquivoConfigStore(join(dir, 'cfg.json')) });
+      const g = await svc.passos('b1', '2026-09-01', '2026-09-30');
+      expect(g.rotulosOk).toBe(true);
+      expect(g.porPasso.map((x) => [x.rotulo, x.alcancaram, x.pararam])).toEqual([['Início do fluxo: Início', 3, 1], ['Mensagem: Olá, tudo bem?', 2, 1], ['Transferir para atendente', 1, 1]]);
+      expect(g.porStatus).toEqual([{ status: 'Running', n: 2 }, { status: 'Complete', n: 1 }]);
+      expect(readdirSync(join(dir, 'c')).map((f) => readFileSync(join(dir, 'c', f), 'utf8')).join('')).not.toContain('navigationPath'); // o bruto das instâncias não vai para o cache
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });

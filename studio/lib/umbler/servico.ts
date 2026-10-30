@@ -13,7 +13,7 @@ import {
   diaBR, itensDe, normalizaBots, normalizaCanais, normalizaCusto, normalizaEtiquetas, normalizaOrganizacoes, normalizaSessao, normalizaSetores, pick, temTotais,
   type ItemCatalogo, type Sessao,
 } from './normaliza.js';
-import { filtrar, gerarCsv, montarPainel, type Filtros, type PainelUmbler } from './painel.js';
+import { filtrar, gerarCsv, montarPainel, type Estimativa, type Filtros, type PainelUmbler, type Referencias, type Soma } from './painel.js';
 
 export type Leitor = { get(rota: string, consulta?: Consulta): Promise<unknown> };
 
@@ -37,9 +37,21 @@ export type Catalogo = {
   geradoEm: number;
 };
 
-export type Passos = { lidas: number; total: number | null; porPasso: { passo: string; n: number }[]; porStatus: { status: string; n: number }[]; completo: boolean };
+export type ResumoMes = {
+  mes: string; de: string; ate: string; sessoes: number;
+  enviadas: Soma; lidas: Soma; respondidas: Soma; falhas: Soma; creditos: Soma; reais: Soma;
+  completudeCusto: { x: number; y: number };
+  estimativa: Estimativa;
+};
+export type PassoFluxo = { passo: string; rotulo: string; tipo: string | null; alcancaram: number; pararam: number; ordem: number };
+export type Passos = { lidas: number; total: number | null; porPasso: PassoFluxo[]; porStatus: { status: string; n: number }[]; completo: boolean; rotulosOk: boolean };
 
 const PENDENTE = Symbol('pendente');
+const TIPOS_PASSO: Record<string, string> = {
+  SendMessageActionModel: 'Mensagem', TemplateMessageStepModel: 'Template', WaitingActionModel: 'Espera', MemberTransferActionModel: 'Transferir para atendente',
+  TagActionModel: 'Etiqueta', CloseChatActionModel: 'Encerrar conversa', NotifyMemberActionModel: 'Avisar atendente', WebhookActionModel: 'Integração (webhook)',
+  DayOfTheWeekStepModel: 'Dia da semana', TimeOfDayStepModel: 'Horário', FlowchartBotManualStartedEventModel: 'Início do fluxo',
+};
 const TAKE = 100; // a API aceita até 250 por página
 const MAX_PAGINAS = 200;
 
@@ -203,7 +215,7 @@ export class ServicoUmbler {
     return this.get(rota, consulta, fresh);
   }
 
-  async sessoes(f: Filtros, fresh = false): Promise<{ sessoes: Sessao[]; avisos: string[]; pendentes: number }> {
+  async sessoes(f: Filtros, fresh = false): Promise<{ sessoes: Sessao[]; avisos: string[]; pendentes: number; refs: Referencias }> {
     const cfg = await this.config();
     const avisos: string[] = [];
     const inicio = this.agora();
@@ -256,8 +268,39 @@ export class ServicoUmbler {
       }
     }
     if (falhaCusto) avisos.push(`A rota de custo falhou em ${falhaCusto} sessão(ões) (${primeiroErro}). O custo aparece como indisponível nelas.`);
+    const refs = await this.referencias(org, brutas, fresh, estourou, () => { pendentes++; });
     if (pendentes) avisos.push(`Carregamento parcial: ${pendentes} consulta(s) à Umbler ainda pendente(s). A tela pede o resto sozinha.`);
-    return { sessoes: final, avisos, pendentes };
+    return { sessoes: final, avisos, pendentes, refs };
+  }
+
+  /**
+   * Base da estimativa: créditos por envio das sessões MAIS RECENTES (de qualquer canal) que têm custo registrado, por tipo.
+   * Olha no máximo 40 sessões e para quando acha 5 de cada tipo. Nunca entra no custo real.
+   */
+  private async referencias(org: string, brutas: unknown[], fresh: boolean, estourou: () => boolean, pendente: () => void): Promise<Referencias> {
+    const acum: Record<'Template' | 'Bot', { cred: number; env: number; n: number }> = { Template: { cred: 0, env: 0, n: 0 }, Bot: { cred: 0, env: 0, n: 0 } };
+    let vistas = 0;
+    for (const b of brutas) {
+      if (vistas >= 40 || (acum.Template.n >= 5 && acum.Bot.n >= 5)) break;
+      const s0 = normalizaSessao(b);
+      if (!s0?.tipo || acum[s0.tipo].n >= 5) continue;
+      vistas++;
+      try {
+        const d = await this.getComOrcamento(`/v1/bulk-send-session/${s0.id}/`, { organizationId: org }, fresh, estourou);
+        if (d === PENDENTE) { pendente(); continue; }
+        const s = normalizaSessao(d);
+        if (!s || !s.enviadas.v) continue;
+        const c = await this.getComOrcamento(`/v1/bulk-send-session/${s0.id}/costs/`, { organizationId: org }, fresh, estourou);
+        if (c === PENDENTE) { pendente(); continue; }
+        const custo = normalizaCusto(c);
+        if (custo.v == null || custo.v <= 0) continue;
+        const a = acum[s0.tipo];
+        a.cred += custo.v; a.env += s.enviadas.v; a.n++;
+      } catch { /* sem base desta sessão: segue */ }
+    }
+    const refs: Referencias = {};
+    for (const t of ['Template', 'Bot'] as const) if (acum[t].n > 0 && acum[t].env > 0) refs[t] = { creditosPorEnvio: acum[t].cred / acum[t].env, amostra: acum[t].n };
+    return refs;
   }
 
   async nomesDeCanais(fresh = false): Promise<Map<string, string>> {
@@ -271,10 +314,32 @@ export class ServicoUmbler {
 
   async painel(f: Filtros, fresh = false): Promise<PainelUmbler & { geradoEm: number; chamadas: number; pendentes: number }> {
     const antes = this.chamadas;
-    const { sessoes, avisos, pendentes } = await this.sessoes(f, fresh);
-    const p = montarPainel(await this.config(), sessoes, await this.nomesDeCanais(fresh), f);
+    const { sessoes, avisos, pendentes, refs } = await this.sessoes(f, fresh);
+    const p = montarPainel(await this.config(), sessoes, await this.nomesDeCanais(fresh), f, refs);
     p.avisos.push(...avisos);
     return { ...p, geradoEm: this.agora(), chamadas: this.chamadas - antes, pendentes };
+  }
+
+  /** Resultado mês a mês (um mês = 1º ao último dia, ou até hoje no mês corrente), para comparar setembro, outubro etc. */
+  async mensal(escopo: 'marketing' | 'tudo', meses: number, fresh = false): Promise<{ meses: ResumoMes[]; avisos: string[]; pendentes: number; geradoEm: number }> {
+    const n = Math.min(Math.max(Math.trunc(meses) || 6, 1), 12);
+    const hoje = new Date(this.agora() - 3 * 3_600_000); // dia do Brasil
+    const ate = hoje.toISOString().slice(0, 10);
+    const ini = new Date(Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth() - (n - 1), 1)).toISOString().slice(0, 10);
+    const { sessoes, avisos, pendentes, refs } = await this.sessoes({ de: ini, ate, escopo }, fresh);
+    const cfg = await this.config();
+    const nomes = await this.nomesDeCanais(fresh);
+    const out: ResumoMes[] = [];
+    for (let i = n - 1; i >= 0; i--) {
+      const d0 = new Date(Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth() - i, 1));
+      const de = d0.toISOString().slice(0, 10);
+      const fim = new Date(Date.UTC(d0.getUTCFullYear(), d0.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
+      const fimReal = fim < ate ? fim : ate;
+      const p = montarPainel(cfg, sessoes, nomes, { de, ate: fimReal, escopo }, refs);
+      const c = p.cartoes;
+      out.push({ mes: de.slice(0, 7), de, ate: fimReal, sessoes: p.sessoes.length, enviadas: c.enviadas, lidas: c.lidas, respondidas: c.respondidas, falhas: c.falhas, creditos: c.custoCreditos, reais: c.custoReais, completudeCusto: p.completude.custo, estimativa: p.estimativa });
+    }
+    return { meses: out, avisos, pendentes, geradoEm: this.agora() };
   }
 
   async csv(f: Filtros): Promise<string> {
@@ -295,7 +360,28 @@ export class ServicoUmbler {
       if (c) return c.dado;
     }
     const { id: org } = await this.organizacao(fresh);
-    const passos = new Map<string, number>();
+    // nomes dos passos: o detalhe do fluxo traz tipo e (em alguns) título/mensagem de cada passo
+    const rotulos = new Map<string, { rotulo: string; tipo: string | null }>();
+    let rotulosOk = false;
+    try {
+      const det = await this.get(`/v1/bots/${botId}/`, { organizationId: org }, fresh);
+      const steps = pick(pick(det, 'bot'), 'steps') ?? pick(det, 'steps');
+      for (const st of Array.isArray(steps) ? steps : []) {
+        const id = pick(st, 'id');
+        if (typeof id !== 'string') continue;
+        const tipo = typeof pick(st, '_t') === 'string' ? (pick(st, '_t') as string) : null;
+        const titulo = pick(st, 'title', 'triggerName', 'name');
+        const msg = pick(st, 'message');
+        const base = (tipo && TIPOS_PASSO[tipo]) || (tipo ? tipo.replace(/(ActionModel|StepModel|EventModel|Model)$/, '').replace(/([a-z])([A-Z])/g, '$1 $2') : 'Passo');
+        const extra = typeof titulo === 'string' && titulo.trim() ? titulo.trim() : typeof msg === 'string' && msg.trim() ? msg.trim().replace(/\s+/g, ' ') : '';
+        rotulos.set(id, { rotulo: extra ? `${base}: ${extra.slice(0, 60)}` : base, tipo });
+      }
+      rotulosOk = rotulos.size > 0;
+    } catch { /* sem nomes: mostra o ID do passo */ }
+
+    const alcancou = new Map<string, number>();
+    const parou = new Map<string, number>();
+    const posicao = new Map<string, { soma: number; n: number }>();
     const status = new Map<string, number>();
     let lidas = 0;
     let total: number | null = null;
@@ -311,10 +397,11 @@ export class ServicoUmbler {
       for (const inst of it) {
         lidas++;
         const nav = pick(inst, 'navigationPath');
-        const ultimo = Array.isArray(nav) && nav.length ? nav[nav.length - 1] : null;
-        const sid = ultimo ? pick(ultimo, 'stepId') : null;
-        const k = typeof sid === 'string' ? sid : '(sem passo registrado)';
-        passos.set(k, (passos.get(k) ?? 0) + 1);
+        const caminho = (Array.isArray(nav) ? nav : []).map((n) => pick(n, 'stepId')).filter((x): x is string => typeof x === 'string');
+        [...new Set(caminho)].forEach((sid) => alcancou.set(sid, (alcancou.get(sid) ?? 0) + 1));
+        caminho.forEach((sid, idx) => { const p = posicao.get(sid) ?? { soma: 0, n: 0 }; p.soma += idx; p.n++; posicao.set(sid, p); });
+        const ult = caminho[caminho.length - 1] ?? '(sem passo registrado)';
+        parou.set(ult, (parou.get(ult) ?? 0) + 1);
         const st = pick(inst, 'status');
         const sk = typeof st === 'string' ? st : '(sem status)';
         status.set(sk, (status.get(sk) ?? 0) + 1);
@@ -324,10 +411,12 @@ export class ServicoUmbler {
         break;
       }
     }
+    const ids = new Set([...alcancou.keys(), ...parou.keys()]);
     const out: Passos = {
-      lidas, total, completo,
-      porPasso: [...passos].map(([passo, n]) => ({ passo, n })).sort((a, b) => b.n - a.n),
-      porStatus: [...status].map(([s, n]) => ({ status: s, n })).sort((a, b) => b.n - a.n),
+      lidas, total, completo, rotulosOk,
+      porPasso: [...ids].map((sid) => ({ passo: sid, rotulo: rotulos.get(sid)?.rotulo ?? `Passo ${sid.slice(0, 6)}`, tipo: rotulos.get(sid)?.tipo ?? null, alcancaram: alcancou.get(sid) ?? 0, pararam: parou.get(sid) ?? 0, ordem: posicao.has(sid) ? posicao.get(sid)!.soma / posicao.get(sid)!.n : 1e9 }))
+        .sort((a, b) => a.ordem - b.ordem),
+      porStatus: [...status].map(([st2, n]) => ({ status: st2, n })).sort((a, b) => b.n - a.n),
     };
     this.o.cache.gravar(chave, out);
     return out;

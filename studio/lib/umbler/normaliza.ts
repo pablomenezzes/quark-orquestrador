@@ -6,6 +6,8 @@
 /** Valor numérico que pode estar ausente: `v` é null quando faltou, e `m` diz por quê. */
 export type V = { v: number | null; m: string | null };
 export const ok = (v: number): V => ({ v, m: null });
+/** Início do motivo quando a Umbler não tem custo gravado para a sessão (base da estimativa). */
+export const SEM_REGISTRO = 'A Umbler não tem registro de custo';
 export const falta = (m: string): V => ({ v: null, m });
 
 type Obj = Record<string, unknown>;
@@ -193,7 +195,7 @@ export function normalizaCusto(raw: unknown): V {
   const total = numero(pick(raw, 'totalCredits', 'total'));
   const linhas = pick(raw, 'lines');
   // Conferido na API real: sessões antigas (antes de ~set/2026) devolvem totalCredits 0 e nenhuma linha. Isso é "sem registro de custo", não "custou zero".
-  if (total === 0 && Array.isArray(linhas) && linhas.length === 0) return falta('A Umbler não tem registro de custo para esta sessão (total 0 e nenhuma linha de cobrança; comum em sessões antigas).');
+  if (total === 0 && Array.isArray(linhas) && linhas.length === 0) return falta(`${SEM_REGISTRO} para esta sessão (total 0 e nenhuma linha de cobrança; comum em sessões antigas).`);
   if (total != null) return ok(total);
   if (Array.isArray(linhas)) {
     const somas = linhas.map((l) => numero(pick(l, 'credits'))).filter((n): n is number => n != null);

@@ -2,7 +2,7 @@
  * Agregações do painel Umbler. Funções puras sobre as sessões já normalizadas: nada aqui fala com a rede ou com o disco.
  * Regras: ausência é null com motivo; toda soma diz de quantas sessões veio (completude); abaixo da amostra mínima não ranqueia.
  */
-import { falta, ok, type Parada, type Sessao, type V } from './normaliza.js';
+import { SEM_REGISTRO, falta, ok, type Parada, type Sessao, type V } from './normaliza.js';
 import { precoVigente, pertenceAoMarketing, type ConfigUmbler } from './config.js';
 
 export type Filtros = {
@@ -152,6 +152,36 @@ function agrupar(ss: SessaoCalc[], chave: (s: SessaoCalc) => string | null, nome
   return grupos.sort((a, b) => (a.posicao ?? 1e9) - (b.posicao ?? 1e9) || (b.enviadas.v ?? 0) - (a.enviadas.v ?? 0));
 }
 
+/** Créditos por mensagem enviada observados em sessões que TÊM custo registrado, por tipo (base da estimativa). */
+export type Referencias = Partial<Record<'Template' | 'Bot', { creditosPorEnvio: number; amostra: number }>>;
+
+export type Estimativa = {
+  /** Sessões sem registro de custo que receberam estimativa, de quantas sem registro havia. */
+  sessoes: { x: number; y: number };
+  creditos: V;
+  reais: V;
+  base: { tipo: string; creditosPorEnvio: number; amostra: number }[];
+};
+
+/** ESTIMATIVA, nunca dado da Umbler: envios da sessão x média de créditos por envio de sessões do mesmo tipo que têm custo registrado. Fica separada do custo real. */
+export function estimar(cfg: ConfigUmbler, ss: SessaoCalc[], refs: Referencias): Estimativa {
+  const sem = ss.filter((s) => s.creditos.v == null && (s.creditos.m ?? '').startsWith(SEM_REGISTRO));
+  const com = sem.filter((s) => s.enviadas.v != null && s.tipo && refs[s.tipo]);
+  const base = (['Template', 'Bot'] as const).filter((t) => refs[t]).map((t) => ({ tipo: t, ...refs[t]! }));
+  if (!com.length) {
+    return { sessoes: { x: 0, y: sem.length }, creditos: falta(sem.length ? 'Sem base: nenhuma sessão recente do mesmo tipo tem custo registrado para servir de referência.' : 'Todas as sessões do filtro têm custo registrado (ou aguardam consulta): nada a estimar.'), reais: falta('Sem estimativa de créditos.'), base };
+  }
+  const cred = com.reduce((a, s) => a + s.enviadas.v! * refs[s.tipo!]!.creditosPorEnvio, 0);
+  const reaisParts = com.map((s) => { const p = precoVigente(cfg, s.dia); return p == null ? null : s.enviadas.v! * refs[s.tipo!]!.creditosPorEnvio * p; });
+  const todosComPreco = reaisParts.every((x) => x != null);
+  return {
+    sessoes: { x: com.length, y: sem.length },
+    creditos: ok(Math.round(cred)),
+    reais: todosComPreco ? ok(reaisParts.reduce<number>((a, b) => a + (b ?? 0), 0)) : falta('Sem preço do crédito vigente em parte das sessões. Cadastre em Configuração.'),
+    base,
+  };
+}
+
 export type PainelUmbler = {
   filtros: Filtros;
   amostraMinima: number;
@@ -164,9 +194,10 @@ export type PainelUmbler = {
   modelos: Grupo[];
   fluxos: Grupo[];
   paradas: { itens: Parada[]; sessoesComDado: number; sessoesDeBot: number } | null;
+  estimativa: Estimativa;
 };
 
-export function montarPainel(cfg: ConfigUmbler, todas: Sessao[], canalNomes: Map<string, string>, f: Filtros): PainelUmbler {
+export function montarPainel(cfg: ConfigUmbler, todas: Sessao[], canalNomes: Map<string, string>, f: Filtros, refs: Referencias = {}): PainelUmbler {
   const ss = filtrar(cfg, todas, f).map((s) => calcularSessao(cfg, s, canalNomes));
   ss.sort((a, b) => (b.criadaEm ?? '').localeCompare(a.criadaEm ?? ''));
   const cont = (pega: (s: SessaoCalc) => V) => ({ x: ss.filter((s) => pega(s).v != null).length, y: ss.length });
@@ -209,6 +240,7 @@ export function montarPainel(cfg: ConfigUmbler, todas: Sessao[], canalNomes: Map
     sessoes: ss,
     modelos: agrupar(ss.filter((s) => s.tipo === 'Template'), (s) => s.modeloId, (s) => s.modeloNome ?? s.titulo ?? s.modeloId ?? '?', cfg.amostraMinima),
     fluxos: agrupar(ss.filter((s) => s.tipo === 'Bot'), (s) => s.botId ?? s.botNome, (s) => s.botNome ?? s.botId ?? '?', cfg.amostraMinima),
+    estimativa: estimar(cfg, ss, refs),
     paradas: bots.length ? { itens: [...mapaParada].map(([motivo, n]) => ({ motivo, n })).sort((a, b) => b.n - a.n), sessoesComDado: comParada.length, sessoesDeBot: bots.length } : null,
   };
 }
