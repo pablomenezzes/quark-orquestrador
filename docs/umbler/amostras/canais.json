@@ -1,0 +1,24 @@
+[
+  {
+    "_t": "OrganizationMembersChannelReferenceModel",
+    "state": "Live",
+    "name": "[nome]",
+    "id": "ID-5"
+  },
+  {
+    "_t": "[texto]",
+    "channelType": "WhatsappBroker",
+    "groupIds": [],
+    "phoneNumber": null,
+    "state": "Deleted",
+    "name": "[nome]",
+    "id": "ID-6"
+  },
+  {
+    "_t": "[texto]",
+    "channelType": "Welcomer",
+    "state": "Live",
+    "name": "[nome]",
+    "id": "ID-7"
+  }
+]

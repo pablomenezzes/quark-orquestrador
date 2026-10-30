@@ -1,0 +1,50 @@
+{
+  "bot": {
+    "botName": "[nome]",
+    "triggerName": "[nome]",
+    "id": "ID-37"
+  },
+  "template": null,
+  "fileId": null,
+  "totalFailed": 0,
+  "totalRead": 0,
+  "totalProcessing": 0,
+  "totalSent": 59,
+  "totalAnswered": null,
+  "answersFlowId": null,
+  "messageStates": [],
+  "scheduleStates": [
+    {
+      "state": "Sent",
+      "count": 59
+    }
+  ],
+  "botStatuses": [
+    {
+      "state": "Running",
+      "count": 49
+    },
+    {
+      "state": "Complete",
+      "count": 10
+    }
+  ],
+  "botStopReasons": [
+    {
+      "state": "ReachedFlowEnd",
+      "count": 10
+    }
+  ],
+  "title": "[nome]",
+  "initiatedBy": {
+    "id": "ID-31"
+  },
+  "type": "Bot",
+  "messagesSent": 0,
+  "totalScheduled": 59,
+  "channel": {
+    "id": "ID-16"
+  },
+  "id": "ID-33",
+  "createdAtUTC": "2026-10-30T11:06:00.537Z"
+}

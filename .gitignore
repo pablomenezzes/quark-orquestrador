@@ -23,3 +23,6 @@ mcp/dist/
 .github/skills/impeccable/
 .github/agents/impeccable-*.md
 .github/hooks/impeccable.json
+
+# cache do painel Umbler (respostas da API, 15 min): local, nunca versionado
+.cache/

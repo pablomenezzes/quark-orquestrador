@@ -1,0 +1,184 @@
+{
+  "page": {
+    "totalItems": -1,
+    "skipped": 0,
+    "took": 3,
+    "maxTake": 250,
+    "searchEngine": "Pipeline",
+    "countsByGroup": null
+  },
+  "items": [
+    {
+      "channel": {
+        "id": "ID-16"
+      },
+      "channels": [
+        {
+          "channel": {
+            "id": "ID-16"
+          },
+          "creationStatus": "Success",
+          "creationError": null,
+          "templateId": "ID-24",
+          "elementName": "[nome]",
+          "status": "APPROVED",
+          "category": "MARKETING",
+          "quality": null,
+          "rejectReason": null,
+          "approvedAtUTC": "2026-01-25T22:41:23.61Z"
+        }
+      ],
+      "requiresMediaReupload": false,
+      "label": "[nome]",
+      "category": "MARKETING",
+      "status": "APPROVED",
+      "header": null,
+      "content": "[removido]",
+      "footer": null,
+      "buttons": [
+        {
+          "text": "[removido]",
+          "type": "QUICK_REPLY",
+          "otpType": null,
+          "autofillText": null,
+          "supportedApps": [],
+          "zeroTapTermsAccepted": false,
+          "phoneNumber": null,
+          "url": null,
+          "variable": null,
+          "postbackText": null,
+          "flowId": null
+        }
+      ],
+      "variables": [
+        {
+          "name": "[nome]",
+          "example": "[removido]"
+        }
+      ],
+      "templateType": "TEXT",
+      "approvedAtUTC": "2026-01-25T22:41:23.61Z",
+      "rejectErrorReason": null,
+      "groupIds": [],
+      "carousel": [],
+      "id": "ID-25",
+      "createdAtUTC": "2026-01-25T22:29:04.274Z"
+    },
+    {
+      "channel": {
+        "id": "ID-16"
+      },
+      "channels": [
+        {
+          "channel": {
+            "id": "ID-16"
+          },
+          "creationStatus": "Success",
+          "creationError": null,
+          "templateId": "ID-26",
+          "elementName": "[nome]",
+          "status": "APPROVED",
+          "category": "MARKETING",
+          "quality": null,
+          "rejectReason": null,
+          "approvedAtUTC": "2026-02-11T19:46:02.26Z"
+        }
+      ],
+      "requiresMediaReupload": false,
+      "label": "[nome]",
+      "category": "MARKETING",
+      "status": "APPROVED",
+      "header": null,
+      "content": "[removido]",
+      "footer": null,
+      "buttons": [
+        {
+          "text": "[removido]",
+          "type": "QUICK_REPLY",
+          "otpType": null,
+          "autofillText": null,
+          "supportedApps": [],
+          "zeroTapTermsAccepted": false,
+          "phoneNumber": null,
+          "url": null,
+          "variable": null,
+          "postbackText": null,
+          "flowId": null
+        }
+      ],
+      "variables": [
+        {
+          "name": "[nome]",
+          "example": "[removido]"
+        }
+      ],
+      "templateType": "TEXT",
+      "approvedAtUTC": "2026-02-11T19:46:02.26Z",
+      "rejectErrorReason": null,
+      "groupIds": [
+        "ID-27"
+      ],
+      "carousel": [],
+      "id": "ID-28",
+      "createdAtUTC": "2026-02-11T19:43:02.123Z"
+    },
+    {
+      "channel": {
+        "id": "ID-16"
+      },
+      "channels": [
+        {
+          "channel": {
+            "id": "ID-16"
+          },
+          "creationStatus": "Success",
+          "creationError": null,
+          "templateId": "ID-29",
+          "elementName": "[nome]",
+          "status": "APPROVED",
+          "category": "MARKETING",
+          "quality": null,
+          "rejectReason": null,
+          "approvedAtUTC": "2026-02-13T17:13:21.749Z"
+        }
+      ],
+      "requiresMediaReupload": false,
+      "label": "[nome]",
+      "category": "MARKETING",
+      "status": "APPROVED",
+      "header": null,
+      "content": "[removido]",
+      "footer": null,
+      "buttons": [
+        {
+          "text": "[removido]",
+          "type": "QUICK_REPLY",
+          "otpType": null,
+          "autofillText": null,
+          "supportedApps": [],
+          "zeroTapTermsAccepted": false,
+          "phoneNumber": null,
+          "url": null,
+          "variable": null,
+          "postbackText": null,
+          "flowId": null
+        }
+      ],
+      "variables": [
+        {
+          "name": "[nome]",
+          "example": "[removido]"
+        }
+      ],
+      "templateType": "TEXT",
+      "approvedAtUTC": "2026-02-13T17:13:21.749Z",
+      "rejectErrorReason": null,
+      "groupIds": [
+        "ID-27"
+      ],
+      "carousel": [],
+      "id": "ID-30",
+      "createdAtUTC": "2026-02-13T17:11:13.789Z"
+    }
+  ]
+}

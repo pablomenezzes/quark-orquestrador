@@ -1,0 +1,26 @@
+{
+  "totalCredits": 149992,
+  "lines": [
+    {
+      "creditType": "Template",
+      "templateId": "ID-38",
+      "templateName": "[nome]",
+      "count": 38,
+      "credits": 148200
+    },
+    {
+      "creditType": "Message",
+      "templateId": "ID-38",
+      "templateName": "[nome]",
+      "count": 2,
+      "credits": 896
+    },
+    {
+      "creditType": "Message",
+      "templateId": null,
+      "templateName": null,
+      "count": 2,
+      "credits": 896
+    }
+  ]
+}

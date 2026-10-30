@@ -170,3 +170,12 @@ Cada análise tem **Gráfico** (ou **Mapa**), **Tabela**, **CSV** (planilha para
 **Definições:** *chegou em SQL / reunião / proposta* = passou pela etapa marcada com esse nome **ou por uma posterior** (muitos negócios pulam etapas; assim o funil só diminui e os passos nunca passam de 100%); *ganho* vem sempre do Status do negócio. *inválido* = lead perdido por um motivo que a regra do Painel tira do MQL (hoje: Lead Invalido, Cliente em Busca de Suporte, Contato Inexistente, Oportunidade Duplicada). *Em branco* = campo do Pipedrive não preenchido.
 
 **Como acrescentar uma análise (peça para o Claude):** cada análise é um bloco independente em `studio/lib/bi.ts` (lista `BI_ANALISES`: id, título, pergunta, "como ler", largura e uma função que consulta **só visões de `analytics`**). Ao acrescentar um bloco, a análise ganha sozinha o filtro, o gráfico (KPIs, colunas, barras ou tabela), a tabela e o CSV. O navegador nunca manda SQL: escolhe a análise e os filtros, validados no servidor e passados ao banco sempre como parâmetros. Testes provam os números com negócios fictícios (`tests/integration/bi.int.test.ts`) e a segurança (`tests/studio-bi.test.ts`).
+
+## Umbler (resultados dos envios e fluxos)
+
+Em http://127.0.0.1:4310/umbler (item **Umbler** do menu, só na máquina local; some no modo publicado). Mostra custo e efetividade dos envios em massa e fluxos da Umbler, **somente leitura** (só GET, só o domínio da Umbler; o navegador nunca vê o token). O token fica no `.env.local` como `UMBLER_TOKEN` (também aceita `UMBLER_API_TOKEN` ou `UMBLER`).
+
+- **Configuração:** lista canais, bots, setores e etiquetas devolvidos pela Umbler, cada um com "É do Marketing" e **Fixar**. Grava em `studio/config/umbler-marketing.json` (versionado, sem segredo). Também guarda o preço do crédito (só se acrescenta, com data de início) e a amostra mínima (padrão 100 envios).
+- **Painel:** filtros fixos no topo (período, canal, tipo, template ou fluxo, sessão; padrão "só o que está fixado como Marketing"), cartões, funil, série por dia, tabela ordenável, comparação de templates e fluxos (abaixo da amostra mínima não ranqueia), paradas dos fluxos e **Exportar CSV**. Toda tela mostra a completude ("custo disponível em X de Y"). Ausência aparece como "indisponível" com o motivo ao passar o mouse.
+- Cache de 15 min em `.cache/umbler/` (ignorado pelo git); **Atualizar agora** ignora o cache. Limite da API respeitado (fila, 1 requisição por vez, recuo no 429).
+- Detalhes e limites da API: `docs/umbler/achados.md`. Não grava no banco, não toca o Pipedrive.

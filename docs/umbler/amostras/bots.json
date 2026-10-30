@@ -1,0 +1,108 @@
+{
+  "page": {
+    "totalItems": 0,
+    "skipped": 0,
+    "took": 3,
+    "maxTake": 250,
+    "searchEngine": "Pipeline",
+    "countsByGroup": null
+  },
+  "items": [
+    {
+      "_t": "FlowchartBotModel",
+      "triggers": [
+        "[nome]",
+        "[nome]",
+        "[nome]"
+      ],
+      "manualTriggers": [
+        "[nome]",
+        "[nome]",
+        "[nome]"
+      ],
+      "steps": [],
+      "lastSnapshotId": "ID-8",
+      "channels": [
+        {
+          "id": "ID-9"
+        }
+      ],
+      "title": "[nome]",
+      "order": 0,
+      "final": false,
+      "active": true,
+      "groupIds": [],
+      "updatedAtUTC": "2026-10-20T14:22:09.554Z",
+      "executionsCount": 15,
+      "executionsDateUTC": "2026-10-30T14:14:35.937Z",
+      "snapshotTitle": null,
+      "id": "ID-10",
+      "createdAtUTC": "2026-01-21T17:49:14.171Z"
+    },
+    {
+      "_t": "FlowchartBotModel",
+      "triggers": [
+        "[nome]",
+        "[nome]"
+      ],
+      "manualTriggers": [
+        "[nome]"
+      ],
+      "steps": [],
+      "lastSnapshotId": null,
+      "channels": [
+        {
+          "id": "ID-11"
+        },
+        {
+          "id": "ID-12"
+        },
+        {
+          "id": "ID-13"
+        }
+      ],
+      "title": "[nome]",
+      "order": 0,
+      "final": false,
+      "active": true,
+      "groupIds": [],
+      "updatedAtUTC": "2026-01-27T13:18:30.35Z",
+      "executionsCount": 2,
+      "executionsDateUTC": "2026-10-30T14:14:55.125Z",
+      "snapshotTitle": null,
+      "id": "ID-14",
+      "createdAtUTC": "2026-01-25T16:37:56.695Z"
+    },
+    {
+      "_t": "FlowchartBotModel",
+      "triggers": [
+        "[nome]",
+        "[nome]",
+        "[nome]"
+      ],
+      "manualTriggers": [
+        "[nome]",
+        "[nome]",
+        "[nome]"
+      ],
+      "steps": [],
+      "lastSnapshotId": "ID-15",
+      "channels": [
+        {
+          "id": "ID-16"
+        }
+      ],
+      "title": "[nome]",
+      "order": 0,
+      "final": false,
+      "active": true,
+      "groupIds": [],
+      "updatedAtUTC": "2026-10-20T14:22:10.681Z",
+      "executionsCount": 14,
+      "executionsDateUTC": "2026-10-30T13:52:14.109Z",
+      "snapshotTitle": null,
+      "id": "ID-17",
+      "createdAtUTC": "2026-01-25T21:21:37.792Z"
+    }
+  ]
+}

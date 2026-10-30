@@ -1,0 +1,23 @@
+[
+  {
+    "default": true,
+    "order": 0,
+    "groupIds": [],
+    "name": "[nome]",
+    "id": "ID-18"
+  },
+  {
+    "default": false,
+    "order": 1,
+    "groupIds": [],
+    "name": "[nome]",
+    "id": "ID-19"
+  },
+  {
+    "default": false,
+    "order": 2,
+    "groupIds": [],
+    "name": "[nome]",
+    "id": "ID-20"
+  }
+]

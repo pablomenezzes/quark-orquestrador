@@ -10,6 +10,10 @@ import { timingSafeEqual } from 'node:crypto';
 import { PRODUTOS_MONITOR, type MonitorRepo, type ProdutoMonitor } from './lib/monitor.js';
 import type { ExperimentosRepo } from './lib/experimentos.js';
 import { SeoInvalido, validarFiltros as validarSeo, type SeoRepo } from './lib/seo.js';
+import { OrganizacaoPendente, SemToken, type ServicoUmbler } from './lib/umbler/servico.js';
+import { ConfigInvalida } from './lib/umbler/config.js';
+import { UmblerErro } from './lib/umbler/cliente.js';
+import { FiltroInvalido, validarFiltros as validarUmbler } from './lib/umbler/painel.js';
 import { BI_PRODUTOS, BiNotFound, type BiFiltros, type BiProduto, type BiRepo } from './lib/bi.js';
 import { CONVERSAO_ORIGENS, CONVERSAO_TIPOS, MARCOS, PRODUTOS, REGRA_TIPOS, REGRA_URL_MODOS, STATUS_NEGOCIO, PainelInvalido, PainelNotFound, type ConversaoOrigem, type CriativoItem, type CriativoMapaPatch, type Marco, type NegociosFiltro, type PainelRepo, type Produto, type StatusNegocio } from './lib/painel-repo.js';
 
@@ -33,6 +37,8 @@ export type StudioOptions = {
   experimentos?: ExperimentosRepo | null;
   /** SEO: Search Console + GA4 + Pipedrive por marca e página, e as ações recomendadas. */
   seo?: SeoRepo | null;
+  /** Painel Umbler (resultados dos envios e fluxos; só leitura na Umbler, só na máquina local). */
+  umbler?: ServicoUmbler | null;
   /**
    * Modo publicado: exige login (cookie assinado), separa admin de editor, desliga o Studio de testes (formulários e envio) e libera qualquer Host.
    * Sem isto, o servidor é o local de sempre (só 127.0.0.1, sem login).
@@ -188,7 +194,7 @@ export function createStudioHandler(opts: StudioOptions): (req: IncomingMessage,
         return res.end();
       }
       // O Studio de testes (formulários e envio ao pipeline) só existe na máquina local.
-      if (path === '/studio' || path === '/attribution.js' || path.startsWith('/f/') || path.startsWith('/api/forms') || path.startsWith('/api/submit') || path === '/api/meta') return send(res, 404, { error: 'not_found' });
+      if (path === '/studio' || path === '/attribution.js' || path.startsWith('/f/') || path.startsWith('/api/forms') || path.startsWith('/api/submit') || path === '/api/meta' || path === '/umbler' || path.startsWith('/api/umbler/')) return send(res, 404, { error: 'not_found' });
       if (sessao) {
         const soAdmin = path === '/usuarios' || path.startsWith('/api/usuarios') || (path.startsWith('/api/painel/') && method !== 'GET');
         if (soAdmin && sessao.papel !== 'admin') {
@@ -345,6 +351,37 @@ export function createStudioHandler(opts: StudioOptions): (req: IncomingMessage,
       if (!eid) return send(res, 404, { error: 'not_found' });
       if (method !== 'PUT') return send(res, 405, { error: 'method_not_allowed' });
       return send(res, 200, await repo.atualizar(Number(eid[1]), await readJson(req)));
+    }
+
+    // Umbler: resultados dos envios e fluxos. Só GET na Umbler; as únicas escritas são o JSON de configuração e o cache local.
+    if (method === 'GET' && path === '/umbler') return sendFile(res, join(opts.publicDir, 'umbler.html'));
+    if (path.startsWith('/api/umbler/')) {
+      const u = opts.umbler;
+      if (!u) return send(res, 503, { error: 'umbler_nao_configurado', detail: 'O painel Umbler não está ligado neste servidor.' });
+      const sub = path.slice('/api/umbler/'.length);
+      const fresh = url.searchParams.get('fresh') === '1';
+      const q = url.searchParams;
+      const filtrosUmbler = () => validarUmbler({ de: q.get('de'), ate: q.get('ate'), canal: q.get('canal'), tipo: q.get('tipo'), modelo: q.get('modelo'), sessao: q.get('sessao'), escopo: q.get('escopo') });
+      if (method === 'GET' && sub === 'estado') return send(res, 200, { ...u.configurado(), geradoEm: Date.now() });
+      if (method === 'GET' && sub === 'config') return send(res, 200, u.config());
+      if (method === 'GET' && sub === 'catalogo') return send(res, 200, await u.catalogo(fresh));
+      if (method === 'GET' && sub === 'painel') return send(res, 200, await u.painel(filtrosUmbler(), fresh));
+      if (method === 'GET' && sub === 'csv') {
+        const f = filtrosUmbler();
+        const csv = await u.csv(f);
+        res.setHeader('content-disposition', `attachment; filename="umbler-${f.de}-a-${f.ate}.csv"`);
+        return send(res, 200, csv, 'text/csv; charset=utf-8');
+      }
+      if (method === 'GET' && sub === 'passos') {
+        const de = q.get('de') ?? '', ate = q.get('ate') ?? '';
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) throw new HttpError(400, 'periodo_invalido', { esperado: 'AAAA-MM-DD' });
+        return send(res, 200, await u.passos(q.get('bot') ?? '', de, ate, fresh));
+      }
+      if (method === 'PUT' && sub === 'config/fixar') { const b = await readJson(req); return send(res, 200, u.fixar(b?.tipo, b?.id, b?.nome, b?.fixado)); }
+      if (method === 'POST' && sub === 'config/preco') { const b = await readJson(req); return send(res, 200, u.preco(b?.desde, b?.preco)); }
+      if (method === 'PUT' && sub === 'config/amostra') { const b = await readJson(req); return send(res, 200, u.amostra(b?.valor)); }
+      if (method === 'PUT' && sub === 'config/organizacao') { const b = await readJson(req); return send(res, 200, u.escolherOrganizacao(b?.id)); }
+      return send(res, 404, { error: 'not_found' });
     }
 
     // BI: só leitura. O navegador escolhe a análise e os filtros; nunca manda SQL.
@@ -679,6 +716,10 @@ export function createStudioHandler(opts: StudioOptions): (req: IncomingMessage,
       if (e instanceof HttpError) return send(res, e.status, { error: e.message, ...e.extra });
       if (e instanceof StoreError) return send(res, 400, { error: e.message, issues: e.issues });
       if (e instanceof PainelNotFound || e instanceof BiNotFound) return send(res, 404, { error: 'nao_encontrado', detail: e.message });
+      if (e instanceof SemToken) return send(res, 503, { error: 'umbler_sem_token', detail: 'Falta UMBLER_TOKEN no .env.local. O painel só lê da Umbler; sem o token não há dados.' });
+      if (e instanceof OrganizacaoPendente) return send(res, 409, { error: 'organizacao_pendente', detail: e.message, organizacoes: e.organizacoes });
+      if (e instanceof ConfigInvalida || e instanceof FiltroInvalido) return send(res, 400, { error: 'invalido', detail: e.message });
+      if (e instanceof UmblerErro) return send(res, 502, { error: 'umbler', detail: e.message });
       if (e instanceof PainelInvalido) return send(res, 400, { error: 'invalido', detail: e.message });
       if (e instanceof AuthErro) return send(res, e.status, { error: 'auth', detail: e.message });
       if (e instanceof IntegracaoErro) return send(res, e.status === 503 ? 503 : e.status === 404 ? 502 : e.status, { error: e.status === 503 ? 'integracao_nao_configurada' : 'integracao', detail: e.message });

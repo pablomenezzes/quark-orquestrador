@@ -1,0 +1,92 @@
+{
+  "_t": "HumanOrganizationAgentModel",
+  "emailAddress": "[removido]",
+  "cellphone": null,
+  "messageEndChat": null,
+  "umblerAccountId": "ID-1",
+  "displayName": "[nome]",
+  "signature": null,
+  "profilePictureUrl": "[removido]",
+  "organizations": [
+    {
+      "_t": "OrganizationReferenceForHumanAgentModel",
+      "allowedSectors": {
+        "allSectorsEnable": true,
+        "sectors": []
+      },
+      "allowedChannels": {
+        "allChannelsEnable": true,
+        "channels": []
+      },
+      "allowedChannelsSession": {
+        "allChannelsSessionEnable": false,
+        "channelsSession": []
+      },
+      "allowedContactsBoard": {
+        "allContactsBoardsEnable": true,
+        "contactsBoards": []
+      },
+      "allowedQuickAnswers": [
+        "Create",
+        "Edit",
+        "Delete"
+      ],
+      "allowReports": false,
+      "allowedTemplates": false,
+      "allowedContacts": "OwnChannels",
+      "permissions": [
+        "Member",
+        "Operator",
+        "Admin"
+      ],
+      "pinnedChatsId": [],
+      "pinnedPipelinesId": [],
+      "permissionActions": [],
+      "iconUrl": null,
+      "active": false,
+      "name": "[nome]",
+      "id": "ID-2"
+    },
+    {
+      "_t": "OrganizationReferenceForHumanAgentModel",
+      "allowedSectors": {
+        "allSectorsEnable": true,
+        "sectors": []
+      },
+      "allowedChannels": {
+        "allChannelsEnable": true,
+        "channels": []
+      },
+      "allowedChannelsSession": {
+        "allChannelsSessionEnable": false,
+        "channelsSession": []
+      },
+      "allowedContactsBoard": {
+        "allContactsBoardsEnable": true,
+        "contactsBoards": []
+      },
+      "allowedQuickAnswers": [
+        "Create",
+        "Edit",
+        "Delete"
+      ],
+      "allowReports": false,
+      "allowedTemplates": false,
+      "allowedContacts": "OwnChannels",
+      "permissions": [
+        "Member",
+        "Operator",
+        "Admin"
+      ],
+      "pinnedChatsId": [],
+      "pinnedPipelinesId": [],
+      "permissionActions": [],
+      "iconUrl": "[removido]",
+      "active": true,
+      "name": "[nome]",
+      "id": "ID-3"
+    }
+  ],
+  "id": "ID-4",
+  "createdAtUTC": "2026-01-12T17:55:34.34Z"
+}

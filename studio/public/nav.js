@@ -10,6 +10,7 @@ const ITENS = [
   ['experimentos', 'Experimentos', '/experimentos'],
   ['bi', 'BI', '/bi'],
   ['seo', 'SEO', '/seo'],
+  ['umbler', 'Umbler', '/umbler'],
   ['painel', 'Painel de Dados', '/painel'],
   ['studio', 'Studio (testes)', '/studio'],
 ];
@@ -19,7 +20,7 @@ if (header) {
   const atual = header.dataset.pagina;
   const eu = await fetch('/api/me').then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
   const publico = eu.publico === true;
-  const itens = ITENS.filter(([id]) => !(publico && id === 'studio')).concat(publico && eu.papel === 'admin' ? [['usuarios', 'Usuários', '/usuarios']] : []);
+  const itens = ITENS.filter(([id]) => !(publico && (id === 'studio' || id === 'umbler'))).concat(publico && eu.papel === 'admin' ? [['usuarios', 'Usuários', '/usuarios']] : []);
   const nav = document.createElement('nav');
   nav.className = 'menu';
   nav.setAttribute('aria-label', 'Menu principal');

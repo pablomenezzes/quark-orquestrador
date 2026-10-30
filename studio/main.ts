@@ -21,6 +21,9 @@ import { PgExperimentosRepo } from './lib/experimentos.js';
 import { PgSeoRepo } from './lib/seo.js';
 import { SincroniaManual, githubConfigDoAmbiente } from './lib/sincronia-manual.js';
 import { ClickUpClient, Integracoes, SheetsClient, clickUpConfigDoAmbiente, sheetsConfigDoAmbiente } from './lib/integracoes.js';
+import { UmblerCliente } from './lib/umbler/cliente.js';
+import { CacheUmbler } from './lib/umbler/cache.js';
+import { ServicoUmbler } from './lib/umbler/servico.js';
 import { checkPortFree, formatReport, parseEnv, runPreflight } from './lib/preflight.js';
 import { createStudioServer, type SubmitFn } from './server.js';
 
@@ -93,6 +96,15 @@ if (painelUrl) {
   seoRepo = new PgSeoRepo(painelPool); // SEO: só lê as visões de analytics (GSC, GA4, Pipedrive)
 }
 
+// Umbler: leitura (GET) com cache de 15 min em .cache/umbler/. Sem UMBLER_TOKEN o painel sobe e avisa o que falta.
+const umblerToken = (process.env.UMBLER_TOKEN || process.env.UMBLER_API_TOKEN || process.env.UMBLER || '').trim().replace(/^Bearer\s+/i, '');
+const umbler = new ServicoUmbler({
+  leitor: umblerToken ? new UmblerCliente({ token: umblerToken }) : null,
+  cache: new CacheUmbler(join(root, '.cache', 'umbler'), Date.now, undefined, umblerToken),
+  configPath: join(root, 'studio', 'config', 'umbler-marketing.json'),
+  token: umblerToken,
+});
+
 const forms = new FormsStore(join(root, 'studio', 'forms'));
 
 const submit: SubmitFn = async (formId, mode, payload, ctx) => {
@@ -125,6 +137,7 @@ const server = createStudioServer({
   monitor: monitorRepo,
   experimentos: experimentosRepo,
   seo: seoRepo,
+  umbler,
   sincronia: (() => { const g = githubConfigDoAmbiente(process.env); return g ? new SincroniaManual(g) : null; })(),
   integracoes: experimentosRepo ? (() => { const s = sheetsConfigDoAmbiente(process.env), c = clickUpConfigDoAmbiente(process.env); return s || c ? new Integracoes(experimentosRepo, s ? new SheetsClient(s) : null, c ? new ClickUpClient(c) : null) : null; })() : null,
 });

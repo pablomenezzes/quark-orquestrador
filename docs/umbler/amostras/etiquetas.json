@@ -1,0 +1,42 @@
+{
+  "page": {
+    "totalItems": -1,
+    "skipped": 0,
+    "took": 3,
+    "maxTake": 250,
+    "searchEngine": "Pipeline",
+    "countsByGroup": null
+  },
+  "items": [
+    {
+      "emoji": null,
+      "color": "Kiwi",
+      "description": null,
+      "order": 3.765625,
+      "createdAtUTC": "2026-03-09T17:03:11.903Z",
+      "groupIds": [],
+      "name": "[nome]",
+      "id": "ID-21"
+    },
+    {
+      "emoji": null,
+      "color": "Kiwi",
+      "description": null,
+      "order": 4,
+      "createdAtUTC": "2026-01-27T15:48:43.724Z",
+      "groupIds": [],
+      "name": "[nome]",
+      "id": "ID-22"
+    },
+    {
+      "emoji": null,
+      "color": "Skyblue",
+      "description": null,
+      "order": 3.5,
+      "createdAtUTC": "2026-07-15T14:29:02.93Z",
+      "groupIds": [],
+      "name": "[nome]",
+      "id": "ID-23"
+    }
+  ]
+}
