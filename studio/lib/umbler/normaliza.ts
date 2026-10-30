@@ -93,6 +93,8 @@ export function normalizaOrganizacoes(raw: unknown): { id: string; nome: string 
 }
 
 /* ---------- sessões de envio ---------- */
+export type CustoLinha = { tipo: string | null; templateId: string | null; templateNome: string | null; count: number; credits: number };
+export type TemplateCatalogo = { id: string; nome: string; categoria: string | null; status: string | null };
 export type Parada = { motivo: string; n: number };
 export type Sessao = {
   id: string;
@@ -114,6 +116,8 @@ export type Sessao = {
   creditos: V;
   /** Motivos de parada dos fluxos (só em sessões de Bot); null = não informado. */
   paradas: Parada[] | null;
+  /** Linhas de cobrança da sessão (tipo, template, mensagens e créditos); null = custo não consultado ou sem registro. */
+  custoLinhas: CustoLinha[] | null;
 };
 
 const contaEstado = (lista: unknown, ...estados: string[]): number | null => {
@@ -187,7 +191,24 @@ export function normalizaSessao(raw: unknown): Sessao | null {
     falhas: falhasN != null ? ok(falhasN) : falta('A API não informou as falhas desta sessão.'),
     creditos: falta('Custo ainda não consultado.'),
     paradas,
+    custoLinhas: null,
   };
+}
+
+/** Linhas de cobrança do custo: base do custo por mensagem de cada template. */
+export function normalizaCustoLinhas(raw: unknown): CustoLinha[] {
+  const l = pick(raw, 'lines');
+  return (Array.isArray(l) ? l : [])
+    .map((x) => ({ tipo: texto(pick(x, 'creditType')), templateId: texto(pick(x, 'templateId')), templateNome: texto(pick(x, 'templateName')), count: numero(pick(x, 'count')) ?? 0, credits: numero(pick(x, 'credits')) ?? 0 }))
+    .filter((x) => x.count > 0);
+}
+export function normalizaTemplates(raw: unknown): TemplateCatalogo[] {
+  return itensDe(raw)
+    .map((t) => {
+      const id = texto(pick(t, 'id', 'Id'));
+      return id ? ({ id, nome: texto(pick(t, 'label', 'name')) ?? id, categoria: texto(pick(t, 'category')), status: texto(pick(t, 'status')) } as TemplateCatalogo) : null;
+    })
+    .filter((x): x is TemplateCatalogo => !!x);
 }
 
 /** Custo (GET /v1/bulk-send-session/{id}/costs/). */

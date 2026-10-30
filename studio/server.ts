@@ -366,6 +366,11 @@ export function createStudioHandler(opts: StudioOptions): (req: IncomingMessage,
       if (method === 'GET' && sub === 'config') return send(res, 200, { ...(await u.config()), origem: u.origemConfig });
       if (method === 'GET' && sub === 'catalogo') return send(res, 200, await u.catalogo(fresh));
       if (method === 'GET' && sub === 'painel') return send(res, 200, await u.painel(filtrosUmbler(), fresh));
+      if (method === 'GET' && sub === 'referencia') {
+        const pr = q.get('preco');
+        if (pr != null && pr !== '' && !(Number.isFinite(Number(pr)) && Number(pr) > 0 && Number(pr) <= 1000)) throw new HttpError(400, 'preco_invalido');
+        return send(res, 200, await u.referenciaCusto(filtrosUmbler(), fresh, pr ? Number(pr) : undefined));
+      }
       if (method === 'GET' && sub === 'meses') return send(res, 200, await u.mensal(q.get('escopo') === 'tudo' ? 'tudo' : 'marketing', Number(q.get('n') ?? 6), fresh));
       if (method === 'GET' && sub === 'csv') {
         const f = filtrosUmbler();

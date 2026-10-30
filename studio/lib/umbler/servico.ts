@@ -10,10 +10,10 @@ import {
   TIPOS_ITEM, type ConfigUmbler, type ItemFixado, type TipoItem,
 } from './config.js';
 import {
-  diaBR, itensDe, normalizaBots, normalizaCanais, normalizaCusto, normalizaEtiquetas, normalizaOrganizacoes, normalizaSessao, normalizaSetores, pick, temTotais,
-  type ItemCatalogo, type Sessao,
+  diaBR, itensDe, normalizaBots, normalizaCanais, normalizaCusto, normalizaCustoLinhas, normalizaEtiquetas, normalizaOrganizacoes, normalizaSessao, normalizaSetores, normalizaTemplates, pick, temTotais,
+  type CustoLinha, type ItemCatalogo, type Sessao,
 } from './normaliza.js';
-import { filtrar, gerarCsv, montarPainel, type Estimativa, type Filtros, type PainelUmbler, type Referencias, type Soma } from './painel.js';
+import { filtrar, gerarCsv, montarPainel, tabelaReferencia, type TabelaReferencia, type Estimativa, type Filtros, type PainelUmbler, type Referencias, type Soma } from './painel.js';
 
 export type Leitor = { get(rota: string, consulta?: Consulta): Promise<unknown> };
 
@@ -215,7 +215,7 @@ export class ServicoUmbler {
     return this.get(rota, consulta, fresh);
   }
 
-  async sessoes(f: Filtros, fresh = false): Promise<{ sessoes: Sessao[]; avisos: string[]; pendentes: number; refs: Referencias }> {
+  async sessoes(f: Filtros, fresh = false): Promise<{ sessoes: Sessao[]; avisos: string[]; pendentes: number; refs: Referencias; linhasRef: { id: string; linhas: CustoLinha[] }[] }> {
     const cfg = await this.config();
     const avisos: string[] = [];
     const inicio = this.agora();
@@ -260,7 +260,7 @@ export class ServicoUmbler {
       try {
         const c = await this.getComOrcamento(`/v1/bulk-send-session/${s.id}/costs/`, { organizationId: org }, fresh, estourou);
         if (c === PENDENTE) { pendentes++; final.push({ ...s, creditos: { v: null, m: 'Ainda não consultado: o limite de tempo da requisição acabou. A tela continua sozinha.' } }); continue; }
-        final.push({ ...s, creditos: normalizaCusto(c) });
+        final.push({ ...s, creditos: normalizaCusto(c), custoLinhas: normalizaCustoLinhas(c) });
       } catch (e) {
         falhaCusto++;
         primeiroErro ||= this.msg(e);
@@ -268,22 +268,23 @@ export class ServicoUmbler {
       }
     }
     if (falhaCusto) avisos.push(`A rota de custo falhou em ${falhaCusto} sessão(ões) (${primeiroErro}). O custo aparece como indisponível nelas.`);
-    const refs = await this.referencias(org, brutas, fresh, estourou, () => { pendentes++; });
+    const linhasRef: { id: string; linhas: CustoLinha[] }[] = [];
+    const refs = await this.referencias(org, brutas, fresh, estourou, () => { pendentes++; }, linhasRef);
     if (pendentes) avisos.push(`Carregamento parcial: ${pendentes} consulta(s) à Umbler ainda pendente(s). A tela pede o resto sozinha.`);
-    return { sessoes: final, avisos, pendentes, refs };
+    return { sessoes: final, avisos, pendentes, refs, linhasRef };
   }
 
   /**
    * Base da estimativa: créditos por envio das sessões MAIS RECENTES (de qualquer canal) que têm custo registrado, por tipo.
    * Olha no máximo 40 sessões e para quando acha 5 de cada tipo. Nunca entra no custo real.
    */
-  private async referencias(org: string, brutas: unknown[], fresh: boolean, estourou: () => boolean, pendente: () => void): Promise<Referencias> {
+  private async referencias(org: string, brutas: unknown[], fresh: boolean, estourou: () => boolean, pendente: () => void, linhasRef: { id: string; linhas: CustoLinha[] }[] = []): Promise<Referencias> {
     const acum: Record<'Template' | 'Bot', { cred: number; env: number; n: number }> = { Template: { cred: 0, env: 0, n: 0 }, Bot: { cred: 0, env: 0, n: 0 } };
     let vistas = 0;
     for (const b of brutas) {
-      if (vistas >= 40 || (acum.Template.n >= 5 && acum.Bot.n >= 5)) break;
+      if (vistas >= 40) break;
       const s0 = normalizaSessao(b);
-      if (!s0?.tipo || acum[s0.tipo].n >= 5) continue;
+      if (!s0?.tipo) continue;
       vistas++;
       try {
         const d = await this.getComOrcamento(`/v1/bulk-send-session/${s0.id}/`, { organizationId: org }, fresh, estourou);
@@ -294,8 +295,9 @@ export class ServicoUmbler {
         if (c === PENDENTE) { pendente(); continue; }
         const custo = normalizaCusto(c);
         if (custo.v == null || custo.v <= 0) continue;
+        linhasRef.push({ id: s0.id, linhas: normalizaCustoLinhas(c) });
         const a = acum[s0.tipo];
-        a.cred += custo.v; a.env += s.enviadas.v; a.n++;
+        if (a.n < 5) { a.cred += custo.v; a.env += s.enviadas.v; a.n++; } // a média usa as 5 mais recentes de cada tipo; as linhas de cobrança vão todas
       } catch { /* sem base desta sessão: segue */ }
     }
     const refs: Referencias = {};
@@ -318,6 +320,22 @@ export class ServicoUmbler {
     const p = montarPainel(await this.config(), sessoes, await this.nomesDeCanais(fresh), f, refs);
     p.avisos.push(...avisos);
     return { ...p, geradoEm: this.agora(), chamadas: this.chamadas - antes, pendentes };
+  }
+
+  /** Referência de custo por template e conta do cenário "todos os envios como marketing". `preco` (R$ por crédito) só simula; não grava. */
+  async referenciaCusto(f: Filtros, fresh = false, preco?: number | null): Promise<TabelaReferencia & { avisos: string[]; pendentes: number; geradoEm: number; precoConfig: number | null }> {
+    const { sessoes, avisos, pendentes, linhasRef } = await this.sessoes(f, fresh);
+    const cfg = await this.config();
+    const { id: org } = await this.organizacao(fresh);
+    let templates: ReturnType<typeof normalizaTemplates> = [];
+    try {
+      templates = normalizaTemplates(await this.paginado('/v1/templates/', { organizationId: org }, fresh));
+    } catch (e) {
+      avisos.push(`A lista de templates falhou (${this.msg(e)}): a categoria de cada template aparece como indisponível.`);
+    }
+    const alvo = filtrar(cfg, sessoes, f);
+    const t = tabelaReferencia(cfg, alvo, templates, linhasRef, f.de, f.ate, preco);
+    return { ...t, avisos, pendentes, geradoEm: this.agora(), precoConfig: (await import('./config.js')).precoVigente(cfg, f.ate) };
   }
 
   /** Resultado mês a mês (um mês = 1º ao último dia, ou até hoje no mês corrente), para comparar setembro, outubro etc. */

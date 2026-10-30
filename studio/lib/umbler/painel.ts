@@ -2,7 +2,7 @@
  * Agregações do painel Umbler. Funções puras sobre as sessões já normalizadas: nada aqui fala com a rede ou com o disco.
  * Regras: ausência é null com motivo; toda soma diz de quantas sessões veio (completude); abaixo da amostra mínima não ranqueia.
  */
-import { SEM_REGISTRO, falta, ok, type Parada, type Sessao, type V } from './normaliza.js';
+import { SEM_REGISTRO, falta, ok, type CustoLinha, type Parada, type Sessao, type TemplateCatalogo, type V } from './normaliza.js';
 import { precoVigente, pertenceAoMarketing, type ConfigUmbler } from './config.js';
 
 export type Filtros = {
@@ -268,4 +268,111 @@ export function gerarCsv(p: PainelUmbler): string {
     }),
   ];
   return `﻿${linhas.join('\r\n')}\r\n`;
+}
+
+
+/* ---------- referência de custo por template (cenário: tudo como marketing) ---------- */
+export type LinhaReferencia = {
+  id: string;
+  nome: string;
+  categoria: string | null;
+  status: string | null;
+  /** Mensagens e créditos observados nas cobranças reais da Umbler (linhas de tipo Template). */
+  mensagensObs: number;
+  creditosObs: number;
+  creditosPorMsgObs: number | null;
+  envios: number;
+  /** Créditos por mensagem usados na conta: o observado, se o template é de marketing e tem cobrança; senão a tarifa de referência de marketing. */
+  taxaUsada: number | null;
+  origem: 'observado (marketing)' | 'referência de marketing' | 'sem base';
+  creditosEst: number | null;
+};
+export type TabelaReferencia = {
+  de: string;
+  ate: string;
+  /** Tarifa de referência: créditos por mensagem de template de marketing, média ponderada das cobranças observadas. */
+  referenciaMarketing: { creditosPorMsg: number | null; mensagens: number; templates: number; origem: 'categoria marketing' | 'todos os templates cobrados' | 'sem cobrança observada' };
+  precoCredito: number | null;
+  linhas: LinhaReferencia[];
+  totais: { envios: number; enviosTemplate: number; enviosFluxo: number; enviosSemBase: number; creditos: number | null; reais: number | null; sessoes: number };
+};
+
+const ehMarketing = (c: string | null) => !!c && /market/i.test(c);
+
+export function tabelaReferencia(
+  cfg: ConfigUmbler,
+  sessoes: Sessao[],
+  templates: TemplateCatalogo[],
+  linhasExtras: { id: string; linhas: CustoLinha[] }[],
+  de: string,
+  ate: string,
+  precoOverride?: number | null,
+): TabelaReferencia {
+  // cobranças observadas por sessão (as do período mandam sobre as da amostra extra)
+  const porSessao = new Map<string, CustoLinha[]>();
+  for (const x of linhasExtras) porSessao.set(x.id, x.linhas);
+  for (const s of sessoes) if (s.custoLinhas) porSessao.set(s.id, s.custoLinhas);
+
+  const obs = new Map<string, { nome: string; msgs: number; cred: number }>();
+  for (const linhas of porSessao.values()) {
+    for (const l of linhas) {
+      if (l.tipo !== 'Template' || !l.templateId || l.count <= 0 || l.credits <= 0) continue;
+      const o = obs.get(l.templateId) ?? { nome: l.templateNome ?? l.templateId, msgs: 0, cred: 0 };
+      o.msgs += l.count; o.cred += l.credits;
+      obs.set(l.templateId, o);
+    }
+  }
+  const cat = new Map(templates.map((t) => [t.id, t]));
+
+  // tarifa de referência de marketing
+  const soma = (ids: string[]) => ids.reduce((a, id) => ({ m: a.m + obs.get(id)!.msgs, c: a.c + obs.get(id)!.cred }), { m: 0, c: 0 });
+  const mkt = [...obs.keys()].filter((id) => ehMarketing(cat.get(id)?.categoria ?? null));
+  const todos = [...obs.keys()];
+  let ref: TabelaReferencia['referenciaMarketing'];
+  if (mkt.length) { const t = soma(mkt); ref = { creditosPorMsg: t.c / t.m, mensagens: t.m, templates: mkt.length, origem: 'categoria marketing' }; }
+  else if (todos.length) { const t = soma(todos); ref = { creditosPorMsg: t.c / t.m, mensagens: t.m, templates: todos.length, origem: 'todos os templates cobrados' }; }
+  else ref = { creditosPorMsg: null, mensagens: 0, templates: 0, origem: 'sem cobrança observada' };
+
+  // envios do período por template (sessões de Template) e por fluxo
+  const envios = new Map<string, number>();
+  let enviosTemplate = 0, enviosFluxo = 0, enviosTplSemId = 0;
+  for (const s of sessoes) {
+    const n = s.enviadas.v ?? 0;
+    if (s.tipo === 'Bot') enviosFluxo += n;
+    else if (s.modeloId) { envios.set(s.modeloId, (envios.get(s.modeloId) ?? 0) + n); enviosTemplate += n; }
+    else enviosTplSemId += n;
+  }
+
+  const ids = new Set<string>([...obs.keys(), ...envios.keys(), ...templates.map((t) => t.id)]);
+  const linhas: LinhaReferencia[] = [...ids].map((id): LinhaReferencia => {
+    const o = obs.get(id);
+    const c = cat.get(id);
+    const nome = c?.nome ?? o?.nome ?? sessoes.find((s) => s.modeloId === id)?.modeloNome ?? id;
+    const obsRate = o ? o.cred / o.msgs : null;
+    const usaObs = obsRate != null && ehMarketing(c?.categoria ?? null);
+    const taxa = usaObs ? obsRate : ref.creditosPorMsg;
+    const nEnvios = envios.get(id) ?? 0;
+    return {
+      id, nome, categoria: c?.categoria ?? null, status: c?.status ?? null,
+      mensagensObs: o?.msgs ?? 0, creditosObs: o?.cred ?? 0, creditosPorMsgObs: obsRate,
+      envios: nEnvios, taxaUsada: taxa, origem: taxa == null ? 'sem base' : usaObs ? 'observado (marketing)' : 'referência de marketing',
+      creditosEst: taxa == null ? null : nEnvios * taxa,
+    };
+  }).sort((a, b) => b.envios - a.envios || b.mensagensObs - a.mensagensObs || a.nome.localeCompare(b.nome, 'pt-BR'));
+
+  // total do cenário "tudo como marketing": templates pelo seu ritmo, fluxos e templates sem ID pela tarifa de referência
+  const fora = enviosFluxo + enviosTplSemId;
+  const temRef = ref.creditosPorMsg != null;
+  const creditos = (() => {
+    if (!temRef && linhas.some((l) => l.envios > 0 && l.taxaUsada == null)) return null;
+    const dosTemplates = linhas.reduce((a, l) => a + (l.creditosEst ?? 0), 0);
+    return Math.round(dosTemplates + (temRef ? fora * ref.creditosPorMsg! : 0));
+  })();
+  const semBase = (!temRef ? fora + linhas.filter((l) => l.envios > 0 && l.taxaUsada == null).reduce((a, l) => a + l.envios, 0) : 0);
+  const preco = precoOverride !== undefined ? precoOverride : precoVigente(cfg, ate);
+  return {
+    de, ate, referenciaMarketing: ref, precoCredito: preco,
+    linhas: linhas.filter((l) => l.envios > 0 || l.mensagensObs > 0),
+    totais: { envios: enviosTemplate + enviosFluxo + enviosTplSemId, enviosTemplate, enviosFluxo, enviosSemBase: semBase, creditos, reais: creditos != null && preco != null ? creditos * preco : null, sessoes: sessoes.length },
+  };
 }

@@ -41,7 +41,7 @@ const guardar = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } 
 const S = {
   aba: 'painel',
   f: { de: iso(new Date(hoje.getFullYear(), hoje.getMonth(), 1)), ate: iso(hoje), canal: '', tipo: '', modelo: '', sessao: '', escopo: 'marketing' },
-  periodo: 'mes0', meses: null, passosAuto: '', painel: null, cat: null, erro: '', carregando: false, ordem: { col: 'dia', dir: -1 }, sel: null, passos: null, passosBot: '',
+  periodo: 'mes0', ref: null, precoSim: '', meses: null, passosAuto: '', painel: null, cat: null, erro: '', carregando: false, ordem: { col: 'dia', dir: -1 }, sel: null, passos: null, passosBot: '',
 };
 
 async function api(rota, opt = {}) {
@@ -321,6 +321,53 @@ function desenhaMeses() {
     <p class="muted" style="font-size:12px;margin:8px 0 0">*Estimativa só para sessões sem custo gravado na Umbler; não é dado da Umbler e não entra nas colunas reais. Atualizado em ${dh(m.geradoEm)} (cache de 15 min).</p></div>`;
 }
 
+/* ---------- referência de custo por template ---------- */
+const numBR = (txt) => { const n = Number(String(txt).replace(/\./g, '').replace(',', '.')); return Number.isFinite(n) && n > 0 ? n : null; };
+async function carregarRef(fresh = false) {
+  S.carregando = true; S.erro = ''; desenhar();
+  const url = (f) => `referencia?${qs(f)}${numBR(S.precoSim) ? `&preco=${numBR(S.precoSim)}` : ''}`;
+  try {
+    let r = await api(url(fresh ? { fresh: '1' } : {}));
+    S.ref = r;
+    for (let i = 0; r.pendentes > 0 && i < 60 && S.aba === 'ref'; i++) { S.carregando = false; desenhar(); r = await api(url({})); S.ref = r; }
+  } catch (e) { S.ref = null; S.erro = e.corpo?.error === 'organizacao_pendente' ? 'org' : e.message; S.orgs = e.corpo?.organizacoes; }
+  S.carregando = false; desenhar();
+}
+const fmtCred = (v) => (v == null ? nd('Sem base para calcular.') : nf.format(Math.round(v)));
+const fmtRs = (v, casas = 2) => (v == null ? nd('Sem preço do crédito ou sem créditos.') : new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: casas, maximumFractionDigits: Math.max(casas, 4) }).format(v));
+function desenhaRef() {
+  const r = S.ref;
+  if (!r) return '';
+  const p = r.precoCredito, ref = r.referenciaMarketing, t = r.totais;
+  const opts = opcoesPeriodo().map((o) => `<option value="${o[0]}"${o[0] === S.periodo ? ' selected' : ''}>${esc(o[1])}</option>`).join('') + `<option value="livre"${S.periodo === 'livre' ? ' selected' : ''}>Datas livres</option>`;
+  const barra = `<section class="card filtros"><label>Período <select id="f-periodo">${opts}</select></label>
+    <label class="chk"><input type="checkbox" id="f-escopo"${S.f.escopo === 'marketing' ? ' checked' : ''}> Só o que está fixado como Marketing</label>
+    <label>R$ por crédito (simulação) <input type="text" inputmode="decimal" id="r-preco" value="${esc(S.precoSim || (r.precoConfig != null ? String(r.precoConfig).replace('.', ',') : ''))}" placeholder="ex.: 0,0001" style="width:120px"></label>
+    <button class="btn" id="b-preco-ref">Recalcular</button><button class="btn" id="b-atualizar-ref">Atualizar agora</button></section>`;
+  const cartoes = `<div class="kpis">
+    ${cartao('Tarifa de referência (marketing)', `${fmtCred(ref.creditosPorMsg)}<span style="font-size:13px;font-weight:500"> créd./msg</span>`, ref.creditosPorMsg != null ? `${nf.format(ref.mensagens)} mensagens cobradas em ${nf.format(ref.templates)} template(s) · base: ${esc(ref.origem)}` : 'nenhuma cobrança de template encontrada')}
+    ${cartao('Referência em R$ por mensagem', fmtRs(ref.creditosPorMsg != null && p != null ? ref.creditosPorMsg * p : null, 4), p != null ? `a R$ ${new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 6 }).format(p)} por crédito` : 'informe o R$ por crédito')}
+    ${cartao('Envios no período', nf.format(t.envios), `${nf.format(t.enviosTemplate)} de templates · ${nf.format(t.enviosFluxo)} de fluxos · ${nf.format(t.sessoes)} sessões`)}
+    ${cartao('Total como marketing', `${fmtCred(t.creditos)}<span style="font-size:13px;font-weight:500"> créd.</span>`, `${fmtRs(t.reais)} <span class="muted">(estimativa)</span>`)}
+  </div>`;
+  const linhas = r.linhas.map((l) => `<tr><td>${esc(l.nome)}<small>${esc(l.status ?? '')}</small></td>
+    <td>${l.categoria ? esc(l.categoria) : nd('A Umbler não informou a categoria deste template.')}</td>
+    <td class="num">${l.mensagensObs ? nf.format(l.mensagensObs) : nd('Nenhuma cobrança deste template nas sessões consultadas.')}</td>
+    <td class="num">${l.creditosPorMsgObs != null ? nf.format(Math.round(l.creditosPorMsgObs)) : nd('Sem cobrança observada.')}</td>
+    <td class="num">${nf.format(l.envios)}</td>
+    <td class="num"><b>${fmtCred(l.taxaUsada)}</b><small>${esc(l.origem)}</small></td>
+    <td class="num">${fmtCred(l.creditosEst)}</td><td class="num">${fmtRs(l.creditosEst != null && p != null ? l.creditosEst * p : null)}</td></tr>`).join('');
+  return `${barra}
+  ${r.avisos.length ? `<div class="banner warn aviso"><ul>${r.avisos.map((a) => `<li>${esc(a)}</li>`).join('')}</ul></div>` : ''}
+  ${r.pendentes > 0 ? '<div class="banner warn aviso">Carregando o resto do período…</div>' : ''}
+  <div class="card2 est"><b>Cenário: todos os envios cobrados como marketing</b><span class="tag">ESTIMATIVA, NÃO É DADO DA UMBLER</span>
+    <p class="muted" style="font-size:12.5px;margin:4px 0 0">Cada template usa o seu custo observado quando é de categoria marketing; os demais (utilidade, sem categoria, sem cobrança) e os envios dos fluxos usam a tarifa de referência de marketing acima. Os créditos por mensagem vêm das cobranças reais da Umbler (linhas de tipo Template). O R$ é créditos x o preço por crédito do campo acima (só simula; o preço oficial fica em Configuração).</p></div>
+  ${cartoes}
+  <div class="secao"><h2>Referência por template</h2><span>${nf.format(r.linhas.length)} templates com envio ou cobrança no período e nas sessões consultadas</span></div>
+  <div class="card2 tabela-wrap"><table class="t" style="min-width:980px"><thead><tr><th>Template</th><th>Categoria</th><th>Mensagens cobradas</th><th>Créd./msg observado</th><th>Envios no período</th><th>Créd./msg usado</th><th>Créditos (marketing)</th><th>R$ (marketing)</th></tr></thead><tbody>${linhas || '<tr><td colspan="8" class="vazio">Nenhum template com envio ou cobrança.</td></tr>'}</tbody></table></div>
+  <p class="muted" style="font-size:12px">Atualizado em ${dh(r.geradoEm)} (cache de 15 min). Envios de fluxos entram só no total (a Umbler não diz quais templates cada fluxo disparou nas sessões sem cobrança).</p>`;
+}
+
 /* ---------- Configuração ---------- */
 function desenhaConfig() {
   const c = S.cat;
@@ -360,16 +407,18 @@ function desenhar() {
     return;
   }
   if (S.erro) { av.innerHTML += `<div class="banner danger" role="alert">${esc(S.erro)}</div>`; main.innerHTML = ''; return; }
-  main.innerHTML = S.aba === 'painel' ? desenhaPainel() : S.aba === 'meses' ? desenhaMeses() : desenhaConfig();
+  main.innerHTML = S.aba === 'painel' ? desenhaPainel() : S.aba === 'meses' ? desenhaMeses() : S.aba === 'ref' ? desenhaRef() : desenhaConfig();
 }
 
 document.addEventListener('click', async (ev) => {
   const t = ev.target;
   if (!(t instanceof Element)) return;
   const aba = t.closest('.aba');
-  if (aba) { S.aba = aba.dataset.aba; S.erro = ''; if (S.aba === 'painel') { if (!S.painel) await carregarPainel(); else desenhar(); if (!S.cat) carregarCatSilencioso(); } else if (S.aba === 'meses') await carregarMeses(); else await carregarConfig(); return; }
+  if (aba) { S.aba = aba.dataset.aba; S.erro = ''; if (S.aba === 'painel') { if (!S.painel) await carregarPainel(); else desenhar(); if (!S.cat) carregarCatSilencioso(); } else if (S.aba === 'meses') await carregarMeses(); else if (S.aba === 'ref') await carregarRef(); else await carregarConfig(); return; }
   if (t.id === 'b-atualizar') return void carregarPainel(true);
   if (t.id === 'b-atualizar-meses') return void carregarMeses(true);
+  if (t.id === 'b-atualizar-ref') return void carregarRef(true);
+  if (t.id === 'b-preco-ref') { S.precoSim = $('#r-preco').value.trim(); return void carregarRef(); }
   const trm = t.closest('tr[data-mes]');
   if (trm) { const ym = trm.dataset.mes; const o = opcoesPeriodo().find((x) => x[2].startsWith(ym)); if (o) aplicaPeriodo(o[0]); else { S.periodo = 'livre'; S.f.de = `${ym}-01`; S.f.ate = iso(new Date(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)), 0)); } S.aba = 'painel'; S.painel = null; return void carregarPainel(); }
   if (t.id === 'c-refresh') return void carregarConfig(true);
@@ -399,7 +448,7 @@ document.addEventListener('change', (ev) => {
   const t = ev.target;
   if (!(t instanceof Element)) return;
   if (t.classList.contains('m-chk')) { const li = t.closest('.lista-item'); li.querySelector('.m-fixar').disabled = (t.checked ? 1 : 0) === Number(li.dataset.salvo); return; }
-  if (t.id === 'f-periodo') { if (t.value === 'livre') S.periodo = 'livre'; else aplicaPeriodo(t.value); guardar('umbler.f', S.f); return void carregarPainel(); }
+  if (t.id === 'f-periodo') { if (t.value === 'livre') S.periodo = 'livre'; else aplicaPeriodo(t.value); guardar('umbler.f', S.f); return void (S.aba === 'ref' ? carregarRef() : carregarPainel()); }
   const mapa = { 'f-de': 'de', 'f-ate': 'ate', 'f-canal': 'canal', 'f-tipo': 'tipo', 'f-modelo': 'modelo', 'f-sessao': 'sessao' };
   if (mapa[t.id]) {
     S.f[mapa[t.id]] = t.value;
@@ -409,7 +458,7 @@ document.addEventListener('change', (ev) => {
     return void carregarPainel();
   }
   if (t.id === 'p-bot') { if (t.value) carregaPassos(t.value); return; }
-  if (t.id === 'f-escopo') { S.f.escopo = t.checked ? 'marketing' : 'tudo'; guardar('umbler.f', S.f); S.aba === 'meses' ? carregarMeses() : carregarPainel(); }
+  if (t.id === 'f-escopo') { S.f.escopo = t.checked ? 'marketing' : 'tudo'; guardar('umbler.f', S.f); S.aba === 'meses' ? carregarMeses() : S.aba === 'ref' ? carregarRef() : carregarPainel(); }
 });
 
 async function carregarCatSilencioso() { try { S.cat = await api('catalogo'); if (S.aba === 'painel') desenhar(); } catch { /* o painel já mostra o seu próprio erro */ } }

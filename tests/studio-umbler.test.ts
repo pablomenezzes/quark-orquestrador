@@ -719,3 +719,46 @@ describe('Umbler: estimativa, mês a mês e passos do fluxo', () => {
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });
+
+describe('Umbler: referência de custo por template (tudo como marketing)', () => {
+  const linhaTpl = (templateId: string, count: number, credits: number) => ({ tipo: 'Template', templateId, templateNome: templateId.toUpperCase(), count, credits });
+  const tpl = (id: string, nome: string, categoria: string) => ({ id, nome, categoria, status: 'APPROVED' });
+  const sessaoTpl = (id: string, modeloId: string, envios: number, linhas: ReturnType<typeof linhaTpl>[] | null) => ({ ...normalizaSessao(sess({ id, messagesSent: envios, totalSent: envios, template: { id: modeloId, label: modeloId } }))!, custoLinhas: linhas });
+
+  it('usa o observado nos templates de marketing e a tarifa de referência nos demais, fluxos e sem base', async () => {
+    const { tabelaReferencia } = await import('../studio/lib/umbler/painel');
+    const sessoes = [
+      sessaoTpl('s1', 'a', 100, [linhaTpl('a', 100, 390_000), linhaTpl('u', 10, 20_000)]), // a (marketing) 3.900/msg; u (utilidade) 2.000/msg
+      sessaoTpl('s2', 'u', 50, null), // utilidade sem cobrança nesta sessão
+      sessaoTpl('s3', 'n', 40, null), // template sem cobrança e fora do catálogo
+      { ...normalizaSessao(sess({ id: 'f1', type: 'Bot', messagesSent: 0, totalSent: 60, template: undefined, bot: { id: 'b', botName: 'F', triggerName: 'g' } }))!, custoLinhas: null },
+    ];
+    const t = tabelaReferencia(cfgBase(), sessoes, [tpl('a', 'Oferta A', 'MARKETING'), tpl('u', 'Aviso', 'UTILITY')], [], '2026-10-01', '2026-10-31');
+    expect(t.referenciaMarketing).toMatchObject({ creditosPorMsg: 3900, origem: 'categoria marketing', templates: 1 });
+    const por = Object.fromEntries(t.linhas.map((l) => [l.id, l]));
+    expect(por.a).toMatchObject({ creditosPorMsgObs: 3900, taxaUsada: 3900, origem: 'observado (marketing)', creditosEst: 390_000 });
+    expect(por.u).toMatchObject({ creditosPorMsgObs: 2000, taxaUsada: 3900, origem: 'referência de marketing', creditosEst: 50 * 3900 }); // utilidade é cobrada como marketing no cenário
+    expect(por.n).toMatchObject({ taxaUsada: 3900, creditosEst: 40 * 3900 });
+    // 100x3900 + 50x3900 + 40x3900 + 60 do fluxo x 3900
+    expect(t.totais).toMatchObject({ envios: 250, enviosTemplate: 190, enviosFluxo: 60, creditos: 250 * 3900, enviosSemBase: 0 });
+    expect(t.totais.reais).toBe(250 * 3900 * 0.5); // preço vigente do cfgBase = R$ 0,50
+    const sim = tabelaReferencia(cfgBase(), sessoes, [tpl('a', 'Oferta A', 'MARKETING'), tpl('u', 'Aviso', 'UTILITY')], [], '2026-10-01', '2026-10-31', 0.0001);
+    expect(sim.totais.reais).toBeCloseTo(250 * 3900 * 0.0001);
+  });
+
+  it('sem nenhuma cobrança observada não inventa tarifa: créditos e R$ ficam indisponíveis', async () => {
+    const { tabelaReferencia } = await import('../studio/lib/umbler/painel');
+    const t = tabelaReferencia(cfgBase(), [sessaoTpl('s1', 'a', 100, null)], [tpl('a', 'A', 'MARKETING')], [], '2026-10-01', '2026-10-31');
+    expect(t.referenciaMarketing.creditosPorMsg).toBeNull();
+    expect(t.totais.creditos).toBeNull();
+    expect(t.totais.reais).toBeNull();
+    expect(t.totais.enviosSemBase).toBe(100);
+  });
+
+  it('cobranças da amostra extra entram na tarifa, sem contar a mesma sessão duas vezes', async () => {
+    const { tabelaReferencia } = await import('../studio/lib/umbler/painel');
+    const sessoes = [sessaoTpl('s1', 'a', 10, [linhaTpl('a', 10, 10_000)])];
+    const t = tabelaReferencia(cfgBase(), sessoes, [tpl('a', 'A', 'MARKETING')], [{ id: 's1', linhas: [linhaTpl('a', 10, 10_000)] }, { id: 'x9', linhas: [linhaTpl('a', 10, 30_000)] }], '2026-10-01', '2026-10-31');
+    expect(t.referenciaMarketing).toMatchObject({ mensagens: 20, creditosPorMsg: 2000 }); // (10.000 + 30.000) / 20
+  });
+});
