@@ -196,7 +196,7 @@ export function createStudioHandler(opts: StudioOptions): (req: IncomingMessage,
       // O Studio de testes (formulários e envio ao pipeline) só existe na máquina local.
       if (path === '/studio' || path === '/attribution.js' || path.startsWith('/f/') || path.startsWith('/api/forms') || path.startsWith('/api/submit') || path === '/api/meta') return send(res, 404, { error: 'not_found' });
       if (sessao) {
-        const soAdmin = path === '/usuarios' || path.startsWith('/api/usuarios') || ((path.startsWith('/api/painel/') || path.startsWith('/api/umbler/config/')) && method !== 'GET');
+        const soAdmin = path === '/usuarios' || path.startsWith('/api/usuarios') || ((path.startsWith('/api/painel/') || path.startsWith('/api/umbler/config/') || path === '/api/umbler/importar') && method !== 'GET');
         if (soAdmin && sessao.papel !== 'admin') {
           if (path.startsWith('/api/')) return send(res, 403, { error: 'sem_permissao', detail: 'Só o admin pode fazer isso.' });
           res.writeHead(302, { location: '/', 'cache-control': 'no-store' });
@@ -366,6 +366,22 @@ export function createStudioHandler(opts: StudioOptions): (req: IncomingMessage,
       if (method === 'GET' && sub === 'config') return send(res, 200, { ...(await u.config()), origem: u.origemConfig });
       if (method === 'GET' && sub === 'catalogo') return send(res, 200, await u.catalogo(fresh));
       if (method === 'GET' && sub === 'painel') return send(res, 200, await u.painel(filtrosUmbler(), fresh));
+      if (method === 'GET' && sub === 'relatorio') {
+        const de = q.get('de') ?? '2026-07-01', ate = q.get('ate') ?? new Date().toISOString().slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate) || de > ate) throw new HttpError(400, 'periodo_invalido', { esperado: 'AAAA-MM-DD' });
+        const canalQ = q.get('canal');
+        if (canalQ && !/^[\w.\-:]{1,100}$/.test(canalQ)) throw new HttpError(400, 'canal_invalido');
+        const pr = q.get('preco');
+        if (pr && !(Number.isFinite(Number(pr)) && Number(pr) > 0 && Number(pr) <= 1000)) throw new HttpError(400, 'preco_invalido');
+        return send(res, 200, await u.relatorio(canalQ || null, de < '2026-07-01' ? '2026-07-01' : de, ate, pr ? Number(pr) : undefined));
+      }
+      // Importação: grava em ops.umbler_* (nenhuma escrita na Umbler). Só o admin na versão publicada (ver soAdmin).
+      if (method === 'POST' && sub === 'importar') {
+        const b = await readJson(req);
+        const canal = typeof b?.canal === 'string' && /^[\w.\-:]{1,100}$/.test(b.canal) ? b.canal : null;
+        return send(res, 200, await u.importar(canal));
+      }
+      if (method === 'GET' && sub === 'canal-padrao') return send(res, 200, (await u.canalPadrao()) ?? { id: null, nome: null });
       if (method === 'GET' && sub === 'referencia') {
         const pr = q.get('preco');
         if (pr != null && pr !== '' && !(Number.isFinite(Number(pr)) && Number(pr) > 0 && Number(pr) <= 1000)) throw new HttpError(400, 'preco_invalido');

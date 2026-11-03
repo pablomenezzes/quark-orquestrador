@@ -5,8 +5,11 @@
 import { UmblerErro, ocultarToken, type Consulta } from './cliente.js';
 import { CacheUmbler } from './cache.js';
 import type { ConfigStore } from './config-store.js';
+import type { Banco } from './banco.js';
+import { importarUmbler, type Progresso } from './importador.js';
+import { montarRelatorio, type Relatorio } from './relatorio.js';
 import {
-  ConfigInvalida, acrescentarPreco, definirAmostra, definirFixado, definirOrganizacao, pertenceAoMarketing,
+  ConfigInvalida, acrescentarPreco, definirAmostra, definirFixado, definirOrganizacao, pertenceAoMarketing, precoVigente,
   TIPOS_ITEM, type ConfigUmbler, type ItemFixado, type TipoItem,
 } from './config.js';
 import {
@@ -64,6 +67,8 @@ export class ServicoUmbler {
       leitor: Leitor | null;
       cache: CacheUmbler;
       store: ConfigStore;
+      /** Banco das informações importadas (ops.umbler_*). Sem ele, só o modo ao vivo funciona. */
+      banco?: Banco | null;
       token?: string;
       agora?: () => number;
       /** Tempo máximo (ms) de consultas à Umbler por requisição; o que sobrar fica para a próxima (o cache guarda o progresso). Sem valor = sem limite. */
@@ -320,6 +325,44 @@ export class ServicoUmbler {
     const p = montarPainel(await this.config(), sessoes, await this.nomesDeCanais(fresh), f, refs);
     p.avisos.push(...avisos);
     return { ...p, geradoEm: this.agora(), chamadas: this.chamadas - antes, pendentes };
+  }
+
+  /** Canal padrão do relatório: o que tem "Insights" no nome (QuarkRH Insights); senão o primeiro canal fixado. */
+  async canalPadrao(): Promise<{ id: string; nome: string } | null> {
+    const cat = await this.catalogo();
+    const c = cat.canais.itens.find((x) => /insights/i.test(x.nome) && x.presente) ?? cat.canais.itens.find((x) => x.fixado && x.presente);
+    return c ? { id: c.id, nome: c.nome } : null;
+  }
+
+  private bancoOuErro(): Banco {
+    if (!this.o.banco) throw new ConfigInvalida('O banco de dados da Umbler não está ligado neste servidor (falta PANEL_DB_URL).');
+    return this.o.banco;
+  }
+
+  /** Um passo da importação (jul/2026 em diante). A tela repete até `concluido`. */
+  async importar(canalId: string | null, de = '2026-07-01'): Promise<Progresso> {
+    const banco = this.bancoOuErro();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || de < '2026-07-01') throw new ConfigInvalida('A importação começa em 01/07/2026.');
+    const { id: org } = await this.organizacao();
+    const p = await importarUmbler(this.leitor(), banco, { org, de, canalId, orcamentoMs: this.o.orcamentoMs ?? 600_000, agora: this.o.agora });
+    this.chamadas += p.chamadas;
+    if (p.concluido) await banco.registrarImportacao(de, canalId, { sessoes: p.sessoes, conversas: p.conversas, chamadas: p.chamadas }, null);
+    return p;
+  }
+
+  /** Relatório mês a mês do canal, lido do banco (rápido; não consulta a Umbler). */
+  async relatorio(canalId: string | null, de: string, ate: string, preco?: number | null): Promise<Relatorio & { geradoEm: number; precoConfig: number | null; ultimaImportacao: string | null; canais: { id: string; nome: string }[] }> {
+    const banco = this.bancoOuErro();
+    const sessoes = await banco.sessoes('2026-07-01');
+    const nomes = new Map<string, string>();
+    for (const s of sessoes) if (s.canalId && s.canalNome) nomes.set(s.canalId, s.canalNome);
+    const canais = [...nomes].map(([id, nome]) => ({ id, nome })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+    const escolhido = canalId ?? canais.find((c) => /insights/i.test(c.nome))?.id ?? canais[0]?.id ?? null;
+    const cfg = await this.config();
+    const precoConfig = precoVigente(cfg, ate);
+    const mensagens = escolhido ? await banco.mensagens(escolhido, de, ate) : [];
+    const r = montarRelatorio({ canal: { id: escolhido ?? '', nome: escolhido ? (nomes.get(escolhido) ?? null) : null }, de, ate, sessoes, mensagens, templates: await banco.templates(), precoCredito: preco !== undefined ? preco : precoConfig });
+    return { ...r, geradoEm: this.agora(), precoConfig, ultimaImportacao: (await banco.ultimaImportacao())?.finalizadaEm ?? null, canais };
   }
 
   /** Referência de custo por template e conta do cenário "todos os envios como marketing". `preco` (R$ por crédito) só simula; não grava. */

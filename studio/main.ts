@@ -25,6 +25,7 @@ import { UmblerCliente } from './lib/umbler/cliente.js';
 import { CacheUmbler } from './lib/umbler/cache.js';
 import { ServicoUmbler } from './lib/umbler/servico.js';
 import { ArquivoConfigStore, PgConfigStore } from './lib/umbler/config-store.js';
+import { PgBanco } from './lib/umbler/banco.js';
 import { checkPortFree, formatReport, parseEnv, runPreflight } from './lib/preflight.js';
 import { createStudioServer, type SubmitFn } from './server.js';
 
@@ -104,6 +105,7 @@ const umbler = new ServicoUmbler({
   cache: new CacheUmbler(join(root, '.cache', 'umbler'), Date.now, undefined, umblerToken),
   // com PANEL_DB_URL a configuração mora no Supabase (a mesma da Vercel); sem ele, no arquivo versionado
   store: painelPool ? new PgConfigStore(painelPool) : new ArquivoConfigStore(join(root, 'studio', 'config', 'umbler-marketing.json')),
+  banco: painelPool ? new PgBanco(painelPool) : null,
   token: umblerToken,
 });
 
