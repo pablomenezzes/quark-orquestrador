@@ -5,6 +5,7 @@ import pg from 'pg';
 import { assertRoleUser, assertSafeDbTarget } from '../src/db/guard.js';
 import { SupabaseAuth } from '../studio/lib/auth.js';
 import { PgBiRepo } from '../studio/lib/bi.js';
+import { PgScorecardRepo } from '../studio/lib/scorecard.js';
 import { PgExperimentosRepo } from '../studio/lib/experimentos.js';
 import { PgMonitorRepo } from '../studio/lib/monitor.js';
 import { PgPainelRepo } from '../studio/lib/painel-repo.js';
@@ -58,6 +59,7 @@ function montar() {
     bi: new PgBiRepo(pool),
     monitor: new PgMonitorRepo(pool),
     experimentos,
+    scorecard: new PgScorecardRepo(pool),
     umbler,
     sincronia: (() => { const g = githubConfigDoAmbiente(process.env); return g ? new SincroniaManual(g) : null; })(),
     integracoes: new Integracoes(experimentos, sheetsCfg ? new SheetsClient(sheetsCfg) : null, clickCfg ? new ClickUpClient(clickCfg) : null, env('CRON_SECRET') || null),

@@ -14,6 +14,7 @@ import { OrganizacaoPendente, SemToken, type ServicoUmbler } from './lib/umbler/
 import { ConfigInvalida } from './lib/umbler/config.js';
 import { UmblerErro } from './lib/umbler/cliente.js';
 import { FiltroInvalido, validarFiltros as validarUmbler } from './lib/umbler/painel.js';
+import { PRODUTOS_SCORECARD, ScorecardInvalido, type ProdutoScorecard, type ScorecardRepo, type VisaoPeriodo } from './lib/scorecard.js';
 import { BI_PRODUTOS, BiNotFound, type BiFiltros, type BiProduto, type BiRepo } from './lib/bi.js';
 import { CONVERSAO_ORIGENS, CONVERSAO_TIPOS, MARCOS, PRODUTOS, REGRA_TIPOS, REGRA_URL_MODOS, STATUS_NEGOCIO, PainelInvalido, PainelNotFound, type ConversaoOrigem, type CriativoItem, type CriativoMapaPatch, type Marco, type NegociosFiltro, type PainelRepo, type Produto, type StatusNegocio } from './lib/painel-repo.js';
 
@@ -37,6 +38,8 @@ export type StudioOptions = {
   experimentos?: ExperimentosRepo | null;
   /** SEO: Search Console + GA4 + Pipedrive por marca e página, e as ações recomendadas. */
   seo?: SeoRepo | null;
+  /** Scorecard do BI (semanal de sábado a sexta, ou mensal; métricas padrão e as que o admin acrescenta). */
+  scorecard?: ScorecardRepo | null;
   /** Painel Umbler (resultados dos envios e fluxos; só leitura na Umbler, só na máquina local). */
   umbler?: ServicoUmbler | null;
   /**
@@ -196,7 +199,7 @@ export function createStudioHandler(opts: StudioOptions): (req: IncomingMessage,
       // O Studio de testes (formulários e envio ao pipeline) só existe na máquina local.
       if (path === '/studio' || path === '/attribution.js' || path.startsWith('/f/') || path.startsWith('/api/forms') || path.startsWith('/api/submit') || path === '/api/meta') return send(res, 404, { error: 'not_found' });
       if (sessao) {
-        const soAdmin = path === '/usuarios' || path.startsWith('/api/usuarios') || ((path.startsWith('/api/painel/') || path.startsWith('/api/umbler/config/') || path === '/api/umbler/importar') && method !== 'GET');
+        const soAdmin = path === '/usuarios' || path.startsWith('/api/usuarios') || ((path.startsWith('/api/painel/') || path.startsWith('/api/umbler/config/') || path === '/api/umbler/importar' || path.startsWith('/api/scorecard/')) && method !== 'GET');
         if (soAdmin && sessao.papel !== 'admin') {
           if (path.startsWith('/api/')) return send(res, 403, { error: 'sem_permissao', detail: 'Só o admin pode fazer isso.' });
           res.writeHead(302, { location: '/', 'cache-control': 'no-store' });
@@ -351,6 +354,32 @@ export function createStudioHandler(opts: StudioOptions): (req: IncomingMessage,
       if (!eid) return send(res, 404, { error: 'not_found' });
       if (method !== 'PUT') return send(res, 405, { error: 'method_not_allowed' });
       return send(res, 200, await repo.atualizar(Number(eid[1]), await readJson(req)));
+    }
+
+    // Scorecard do BI: só leitura das visões de analytics; as únicas escritas são as métricas que o admin acrescenta ou remove (ops.cfg_scorecard).
+    if (method === 'GET' && path === '/scorecard') return sendFile(res, join(opts.publicDir, 'scorecard.html'));
+    if (path === '/api/scorecard' || path.startsWith('/api/scorecard/')) {
+      const sc = opts.scorecard;
+      if (!sc) return send(res, 503, { error: 'scorecard_nao_configurado', detail: 'Falta PANEL_DB_URL no .env.local. Peça para gerar com: node scripts/set-role-password.mjs --role orq_panel --apply' });
+      try {
+        if (path === '/api/scorecard' && method === 'GET') {
+          const produto = (url.searchParams.get('produto') ?? 'rh') as ProdutoScorecard;
+          if (!(PRODUTOS_SCORECARD as readonly string[]).includes(produto)) throw new HttpError(400, 'produto_invalido', { validos: [...PRODUTOS_SCORECARD] });
+          const visao = (url.searchParams.get('visao') ?? 'semana') as VisaoPeriodo;
+          if (visao !== 'semana' && visao !== 'mes') throw new HttpError(400, 'visao_invalida', { validas: ['semana', 'mes'] });
+          const nq = url.searchParams.get('n') ?? '12';
+          if (!/^\d{1,2}$/.test(nq) || Number(nq) < 2 || Number(nq) > 52) throw new HttpError(400, 'n_invalido', { faixa: [2, 52] });
+          return send(res, 200, await sc.scorecard({ produto, visao, n: Number(nq) }));
+        }
+        if (path === '/api/scorecard/catalogo' && method === 'GET') return send(res, 200, await sc.catalogo());
+        if (path === '/api/scorecard/metricas' && method === 'POST') return send(res, 201, await sc.adicionar(await readJson(req)));
+        const del = /^\/api\/scorecard\/metricas\/(c_[a-z0-9_]{1,60})$/.exec(path);
+        if (del && method === 'DELETE') { await sc.remover(del[1]!); return send(res, 200, { ok: true }); }
+        return send(res, 404, { error: 'not_found' });
+      } catch (e) {
+        if (e instanceof ScorecardInvalido) return send(res, 400, { error: 'invalido', detail: e.message });
+        throw e;
+      }
     }
 
     // Umbler: resultados dos envios e fluxos. Só GET na Umbler; as únicas escritas são o JSON de configuração e o cache local.

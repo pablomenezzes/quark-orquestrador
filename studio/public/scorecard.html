@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Scorecard · Quark Dados</title>
+  <link rel="stylesheet" href="/s/studio.css">
+  <style>
+    .wrap { max-width: 1700px; margin: 0 auto; padding: 16px 20px 40px; }
+    .cab h1 { font-size: 24px; letter-spacing: -.01em; }
+    .cab p { margin: 4px 0 12px; color: var(--muted); font-size: 13px; max-width: 900px; }
+    .barra { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; padding: 12px 14px; margin-bottom: 12px; }
+    .barra label { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 3px; }
+    .barra select, .form input, .form select { padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 14px; max-width: 260px; }
+    .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+    .seg button { padding: 7px 14px; border: 0; background: var(--surface); color: var(--text); cursor: pointer; font-weight: 600; }
+    .seg button[aria-pressed='true'] { background: var(--accent); color: var(--accent-ink); }
+    .tabela-wrap { overflow: auto; max-height: 76vh; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+    table.sc { border-collapse: separate; border-spacing: 0; font-size: 12.5px; min-width: 100%; }
+    table.sc th, table.sc td { padding: 5px 9px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    table.sc thead th { position: sticky; top: 0; z-index: 3; background: var(--surface-2); text-align: right; font-weight: 700; color: var(--text); }
+    table.sc thead th.parcial { color: var(--warn); }
+    table.sc thead th small { display: block; font-weight: 400; color: var(--muted); font-size: 10.5px; }
+    table.sc td.ind, table.sc th.ind { position: sticky; left: 0; z-index: 2; background: var(--surface); text-align: left; min-width: 300px; max-width: 360px; overflow: hidden; text-overflow: ellipsis; border-right: 1px solid var(--border); }
+    table.sc thead th.ind { z-index: 4; background: var(--surface-2); }
+    table.sc td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    table.sc td.num.parcial { color: var(--muted); font-style: italic; }
+    table.sc tr.grupo td { background: var(--surface-2); font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); position: sticky; left: 0; }
+    table.sc tr.custom td.ind::before { content: '★ '; color: var(--accent); }
+    table.sc tr:hover td { background: var(--accent-soft); }
+    .x { border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 14px; padding: 0 4px; }
+    .x:hover { color: var(--danger); }
+    .nd { color: var(--muted); }
+    dialog { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); padding: 18px; max-width: 560px; width: calc(100% - 32px); }
+    dialog::backdrop { background: rgba(0,0,0,.5); }
+    .form { display: grid; gap: 10px; margin-top: 10px; }
+    .form label { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 3px; }
+    .form .linha2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .form input, .form select { max-width: none; width: 100%; }
+    .rod { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+    .aviso { margin: 0 0 8px; }
+    @media (max-width: 700px) { table.sc td.ind, table.sc th.ind { min-width: 200px; } }
+  </style>
+</head>
+<body>
+  <header class="top" data-pagina="scorecard"></header>
+  <div class="wrap">
+    <div class="cab">
+      <h1>Scorecard <span class="muted" style="font-weight:400">/ marketing, semana a semana</span></h1>
+      <p>Só leads de fonte de Marketing (Google Ads, Meta Ads, Orgânico e Social) e Tipo do Lead Marketing. Semanas de sábado a sexta, ou meses. Cada número cai no período pela data do próprio evento.</p>
+    </div>
+    <section class="card barra" aria-label="Filtros">
+      <label>Produto <select id="f-produto"><option value="rh">QuarkRH</option><option value="clinic">QuarkClinic</option></select></label>
+      <label>Visão <span class="seg" role="group" aria-label="Visão"><button id="v-semana" aria-pressed="true">Semanal (sáb a sex)</button><button id="v-mes" aria-pressed="false">Mensal</button></span></label>
+      <label>Períodos <select id="f-n"></select></label>
+      <button class="btn" id="b-add">+ Adicionar métrica</button>
+      <button class="btn" id="b-csv">Baixar CSV</button>
+      <span class="muted" id="status" style="font-size:12.5px"></span>
+    </section>
+    <div id="avisos"></div>
+    <div class="tabela-wrap"><table class="sc" id="tab"></table></div>
+  </div>
+
+  <dialog id="dlg">
+    <h2 style="font-size:16px">Adicionar métrica ao Scorecard</h2>
+    <p class="muted" style="font-size:12.5px;margin:4px 0 0">Escolha algo que já está calculado no banco. O navegador nunca manda SQL: você só escolhe nomes que existem.</p>
+    <div class="seg" style="margin-top:10px"><button id="t-coluna" aria-pressed="true">Coluna de uma visão do banco</button><button id="t-razao" aria-pressed="false">Razão entre duas métricas</button></div>
+    <div class="form" id="f-coluna">
+      <label>Nome na tabela <input id="c-rotulo" maxlength="80" placeholder="ex.: Cliques no site"></label>
+      <label>Visão do banco (analytics) <select id="c-visao"></select></label>
+      <div class="linha2"><label>Coluna de data <select id="c-data"></select></label><label>Coluna de valor <select id="c-valor"></select></label></div>
+      <div class="linha2"><label>Como juntar no período <select id="c-agg"><option value="soma">Somar</option><option value="media">Média</option><option value="contagem">Contar linhas</option><option value="maximo">Maior valor</option></select></label>
+        <label>Formato <select id="c-fmt"><option value="int">Número inteiro</option><option value="brl">R$ sem centavos</option><option value="brl2">R$ com centavos</option><option value="pct">Percentual</option><option value="dec">Decimal</option></select></label></div>
+      <label style="flex-direction:row;align-items:center;gap:6px;color:var(--text)"><input type="checkbox" id="c-prod" checked style="width:auto"> Filtrar pelo produto escolhido (quando a visão tem a coluna produto)</label>
+    </div>
+    <div class="form" id="f-razao" hidden>
+      <label>Nome na tabela <input id="r-rotulo" maxlength="80" placeholder="ex.: Leads por R$ investido"></label>
+      <div class="linha2"><label>A (numerador) <select id="r-a"></select></label><label>B (denominador) <select id="r-b"></select></label></div>
+      <label>Formato do resultado <select id="r-fmt"><option value="pct">Percentual</option><option value="brl2">R$ com centavos</option><option value="dec">Decimal</option><option value="int">Número inteiro</option></select></label>
+    </div>
+    <div id="dlg-erro" class="banner danger" hidden style="margin-top:8px"></div>
+    <div class="rod"><button class="btn" id="d-cancel">Cancelar</button><button class="btn primary" id="d-ok">Adicionar</button></div>
+  </dialog>
+  <script src="/s/nav.js" type="module"></script>
+  <script type="module" src="/s/scorecard.js"></script>
+</body>
+</html>
