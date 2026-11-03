@@ -12,6 +12,7 @@ import { ClickUpClient, Integracoes, SheetsClient, clickUpConfigDoAmbiente, shee
 import { UmblerCliente } from '../studio/lib/umbler/cliente.js';
 import { CacheUmbler } from '../studio/lib/umbler/cache.js';
 import { PgConfigStore } from '../studio/lib/umbler/config-store.js';
+import { PgBanco } from '../studio/lib/umbler/banco.js';
 import { ServicoUmbler } from '../studio/lib/umbler/servico.js';
 import { SincroniaManual, githubConfigDoAmbiente } from '../studio/lib/sincronia-manual.js';
 import { createStudioHandler } from '../studio/server.js';
@@ -41,6 +42,7 @@ function montar() {
     leitor: umblerToken ? new UmblerCliente({ token: umblerToken }) : null,
     cache: new CacheUmbler(join(tmpdir(), 'umbler-cache'), Date.now, undefined, umblerToken),
     store: new PgConfigStore(pool),
+    banco: new PgBanco(pool),
     token: umblerToken,
     orcamentoMs: 35_000, // a função tem 60 s; o resto do período vem nas próximas chamadas da tela
   });
