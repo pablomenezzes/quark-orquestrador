@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import { createStudioServer } from '../studio/server';
-import { PgSeoRepo, SeoInvalido, caminhoNormal, ctrEsperado, gerarAcoes, hostNormal, validarFiltros, type SeoConsulta, type SeoDados, type SeoFiltros, type SeoPagina, type SeoRepo } from '../studio/lib/seo';
+import { PgSeoRepo, SeoInvalido, caminhoNormal, consultaRelevante, ctrEsperado, gerarAcoes, hostNormal, validarFiltros, type SeoConsulta, type SeoDados, type SeoFiltros, type SeoPagina, type SeoRepo } from '../studio/lib/seo';
 
 const pagina = (o: Partial<SeoPagina>): SeoPagina => ({ host: 'quarkrh.com.br', pagina: '/p', impressoes: 0, cliques: 0, posicao: null, sessoes: 0, leads: 0, mql: 0, ganhos: 0, pipeline: 0, ...o });
 const consulta = (o: Partial<SeoConsulta>): SeoConsulta => ({ consulta: 'q', pagina: '/p', host: 'quarkrh.com.br', impressoes: 1000, cliques: 10, posicao: 6, potencial: 40, ...o });
@@ -33,6 +33,15 @@ describe('SEO: filtros e normalização', () => {
   });
 });
 
+describe('SEO: relevância das oportunidades', () => {
+  it('descarta busca com muita impressão que nunca vira clique (ex.: portal do governo) e mantém a que tem tração', () => {
+    expect(consultaRelevante({ impressoes: 495_186, cliques: 7, posicao: 8.2 })).toBe(false); // "e cac"
+    expect(consultaRelevante({ impressoes: 778_745, cliques: 2_834, posicao: 8 })).toBe(true); // "décimo terceiro salário"
+    expect(consultaRelevante({ impressoes: 500, cliques: 4, posicao: 5 })).toBe(false); // poucos cliques
+    expect(consultaRelevante({ impressoes: 200_000, cliques: 30, posicao: 5 })).toBe(false); // CTR irrisório para a posição
+  });
+});
+
 describe('SEO: ações recomendadas', () => {
   it('consulta nas posições 4 a 10 com potencial vira ação de CTR, com host, página e hipótese', () => {
     const a = gerarAcoes([], [consulta({ consulta: 'ponto eletrônico', pagina: '/ponto', posicao: 5.4, potencial: 80 })]);
@@ -54,6 +63,9 @@ describe('SEO: ações recomendadas', () => {
   it('demanda alta com posição média entre 6 e 15 vira ação de conteúdo e links', () => {
     const a = gerarAcoes([pagina({ pagina: '/guia', impressoes: 9000, cliques: 100, posicao: 9 })], []);
     expect(a[0]).toMatchObject({ tipo: 'Conteúdo e links internos', pagina: '/guia' });
+  });
+  it('"(sem pagina)" do GA4 nunca vira ação', () => {
+    expect(gerarAcoes([pagina({ pagina: '(sem pagina)', sessoes: 5000, leads: 1 }), pagina({ pagina: '/a', sessoes: 1000, leads: 50 })], [])).toEqual([]);
   });
   it('ids são únicos e estáveis entre chamadas', () => {
     const ps = [pagina({ pagina: '/guia', impressoes: 9000, posicao: 9 })];

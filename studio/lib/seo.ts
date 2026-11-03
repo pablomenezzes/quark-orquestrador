@@ -80,6 +80,15 @@ export function ctrEsperado(pos: number): number {
   return t[i - 1] ?? 0.005;
 }
 
+/**
+ * Oportunidade de verdade tem tração: a consulta já traz cliques e o CTR não é ridiculamente baixo para a posição. Sem isso o ranking por volume enche de
+ * buscas que nunca viram clique (ex.: "e cac", portal do governo: 495 mil impressões e 7 cliques em posição 8), que não se resolvem com título nem snippet.
+ */
+export const MIN_CLIQUES_OPORTUNIDADE = 10;
+export const FRACAO_CTR_MINIMA = 0.1;
+export const consultaRelevante = (c: Pick<SeoConsulta, 'cliques' | 'impressoes' | 'posicao'>): boolean =>
+  c.cliques >= MIN_CLIQUES_OPORTUNIDADE && c.cliques / c.impressoes >= ctrEsperado(c.posicao) * FRACAO_CTR_MINIMA;
+
 const par = (atual: number | null, anterior: number | null): Par => ({ atual, anterior });
 const razao = (a: number, b: number): number | null => (b > 0 ? a / b : null);
 
@@ -90,6 +99,7 @@ export function gerarAcoes(paginas: SeoPagina[], consultas: SeoConsulta[]): SeoA
   const nf = new Intl.NumberFormat('pt-BR');
   const pct = (v: number) => `${new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(v * 100)}%`;
   const usadas = new Set<string>();
+  paginas = paginas.filter((p) => !p.pagina.startsWith('(')); // "(sem pagina)" do GA4 não é uma página que dê para testar
 
   // 1) CTR abaixo do esperado em consultas nas posições 4 a 10
   for (const c of consultas.filter((x) => x.posicao >= 3.5 && x.posicao <= 10.5 && x.potencial >= 15).slice(0, 3)) {
@@ -263,7 +273,7 @@ export class PgSeoRepo implements SeoRepo {
       const im = Number(r.im), cl = Number(r.cl), pos = Number(r.px) / im;
       return { consulta: r.consulta, host: hostNormal(r.host), pagina: caminhoNormal(r.pagina), impressoes: im, cliques: cl, posicao: pos, potencial: Math.max(0, Math.round(im * ctrEsperado(pos) - cl)) };
     }).sort((a, b) => b.potencial - a.potencial);
-    const consultasTop = consultas.filter((c) => c.posicao >= 3 && c.posicao <= 20).slice(0, 30);
+    const consultasTop = consultas.filter((c) => c.posicao >= 3 && c.posicao <= 20 && consultaRelevante(c)).slice(0, 30);
 
     const ctr = (x: { cl: number; im: number }) => razao(x.cl, x.im);
     const posicao = (x: { px: number; im: number }) => razao(x.px, x.im);
