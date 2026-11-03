@@ -399,12 +399,12 @@ async function carregarRel() {
   S.carregando = false; desenhar();
 }
 /** Atualiza o banco a partir da Umbler: a mesma chamada se repete até terminar (cada uma cabe no tempo da requisição). */
-async function importarDados() {
+async function importarDados(reler = false) {
   S.importando = { texto: 'Preparando…', pct: 0 }; desenhar();
   try {
     const canal = S.relCanal || (await api('canal-padrao')).id;
     for (let i = 0; i < 400; i++) {
-      const p = await api('importar', { method: 'POST', body: { canal } });
+      const p = await api('importar', { method: 'POST', body: { canal, reler: reler && i === 0 } });
       const c = p.conversas;
       S.importando = { texto: p.fase === 'sessoes' ? `Lendo as sessões de envio: ${nf.format(p.sessoes.atualizadas)} atualizadas de ${nf.format(p.sessoes.total)}…` : p.fase === 'templates' ? 'Lendo os templates…' : `Lendo as conversas do canal: ${nf.format(c.sessoesFeitas)} de ${nf.format(c.sessoes)} sessões, ${nf.format(c.verificadas)} conversas nesta rodada, ${nf.format(c.mensagens)} mensagens de template…`, pct: p.concluido ? 100 : Math.min(95, p.fase === 'sessoes' ? 20 : p.fase === 'templates' ? 30 : 30 + (c.sessoes ? (c.sessoesFeitas / c.sessoes) * 65 : 0)) };
       desenhar();
@@ -415,11 +415,12 @@ async function importarDados() {
   } catch (e) { S.importando = null; S.erro = e.message; desenhar(); }
 }
 const pc = (a, b) => (b > 0 ? pct(a / b) : '—');
+const cel4 = (m) => `<td class="num">${nf.format(m.interesse)}<small>${pc(m.interesse, m.disparos)}</small></td><td class="num">${nf.format(m.semInteresse)}<small>${pc(m.semInteresse, m.disparos)}</small></td><td class="num">${nf.format(m.textoLivre)}<small>${pc(m.textoLivre, m.disparos)}</small></td><td class="num">${nf.format(Math.max(0, m.disparos - m.respondeu))}<small>${pc(Math.max(0, m.disparos - m.respondeu), m.disparos)}</small></td>`;
 function desenhaRel() {
   const r = S.rel;
   const imp = S.importando ? `<div class="card2"><b>Atualizando os dados da Umbler…</b><div class="prog"><i style="width:${S.importando.pct}%"></i></div><span class="muted" style="font-size:12.5px">${esc(S.importando.texto)}</span><p class="muted" style="font-size:12px;margin:6px 0 0">Pode levar alguns minutos na primeira vez. Não feche esta aba.</p></div>` : '';
   if (!r) return imp;
-  const t = r.total, vazio = !r.cobertura.sessoes;
+  const t = r.total, semBanco = !r.cobertura.sessoesCanal, vazio = !semBanco && !r.cobertura.sessoes && !r.cobertura.mensagens;
   const barra = `<section class="card filtros"><label>Canal <select id="r-canal">${r.canais.map((c) => `<option value="${esc(c.id)}"${c.id === r.canal.id ? ' selected' : ''}>${esc(c.nome)}</option>`).join('')}</select></label>
     <label>Período <select id="r-periodo">${opcoesPeriodoRel().map((o) => `<option value="${o[0]}"${o[0] === S.relPeriodo ? ' selected' : ''}>${esc(o[1])}</option>`).join('')}<option value="livre"${S.relPeriodo === 'livre' ? ' selected' : ''}>Escolher dias…</option></select></label>
     <label>De <input type="date" id="r-de" min="2026-07-01" max="${iso(hoje)}" value="${S.relDe}"></label>
@@ -427,31 +428,37 @@ function desenhaRel() {
     <label>R$ por mensagem de marketing <input type="text" inputmode="decimal" id="r-preco2" value="${esc(S.relPreco || '')}" placeholder="${r.precoPorMsg != null ? esc(new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 4 }).format(r.precoPorMsg)) : 'ex.: 0,32'}" style="width:120px"></label>
     <button class="btn" id="r-preco-ok">Recalcular</button>
     <button class="btn primary" id="r-importar" ${S.importando ? 'disabled' : ''}>Atualizar dados da Umbler</button>
+    <button class="btn" id="r-reler" ${S.importando ? 'disabled' : ''} title="Lê de novo todas as conversas do canal (demora alguns minutos)">Reler conversas</button>
     <span class="muted" style="font-size:12.5px">Dados de 01/07/2026 em diante, guardados no banco${r.ultimaImportacao ? `; última atualização ${dh(r.ultimaImportacao)}` : '; ainda não importados'}.</span></section>
     ${r.precoPorMsg == null && r.tarifa ? '<div class="banner warn aviso">Informe o <b>R$ por mensagem de marketing</b> (o preço de cada disparo) para ver o gasto em reais. Sem isso só aparece em créditos.</div>' : ''}`;
-  if (vazio) return `${barra}${imp}<div class="banner warn">Nenhum dado deste canal no banco ainda. Clique em <b>Atualizar dados da Umbler</b> para importar de julho/2026 até hoje.</div>`;
+  if (semBanco) return `${barra}${imp}<div class="banner warn">Nenhum dado deste canal no banco ainda. Clique em <b>Atualizar dados da Umbler</b> para importar de julho/2026 até hoje.</div>`;
+  if (vazio) return `${barra}${imp}<div class="banner">Este canal não teve nenhum disparo nem sessão de envio entre ${dmy(r.de)} e ${dmy(r.ate)}. Escolha outro período.</div>`;
   const cartoes = `<div class="kpis">
     ${cartao('Disparos de template', nf.format(t.disparos), `${nf.format(r.cobertura.sessoes)} sessões · ${nf.format(t.envios)} contatos entraram`)}
     ${cartao('Gasto estimado', `${val({ v: t.creditosEst, m: 'Sem tarifa de marketing: nenhuma cobrança registrada no banco.' }, (x) => nf.format(Math.round(x)))}<span style="font-size:13px;font-weight:500"> créd.</span>`, `${val({ v: t.reaisEst, m: 'Informe o R$ por mensagem de marketing.' }, (x) => fmtRs(x))} · ESTIMATIVA${r.precoPorMsg != null ? ` · a ${fmtRs(r.precoPorMsg, 4)} por mensagem` : ''}`)}
-    ${cartao('Responderam', `${nf.format(t.respondeu)} <span style="font-size:14px;font-weight:500">${pc(t.respondeu, t.disparos)}</span>`, 'mandaram mensagem em até 24 h do template')}
-    ${cartao('Clicaram em botão', `${nf.format(t.clicou)} <span style="font-size:14px;font-weight:500">${pc(t.clicou, t.disparos)}</span>`, `atendente entrou em ${nf.format(t.humano)} (${pc(t.humano, t.disparos)})`)}
+    ${cartao('Tem interesse', `${nf.format(t.interesse)} <span style="font-size:14px;font-weight:500">${pc(t.interesse, t.disparos)}</span>`, 'clicaram num botão de interesse (ex.: "Quero retomar com 20%OFF")')}
+    ${cartao('Não tem interesse', `${nf.format(t.semInteresse)} <span style="font-size:14px;font-weight:500">${pc(t.semInteresse, t.disparos)}</span>`, 'clicaram em "Não tenho interesse" ou similar')}
+    ${cartao('Respondeu em texto', `${nf.format(t.textoLivre)} <span style="font-size:14px;font-weight:500">${pc(t.textoLivre, t.disparos)}</span>`, `escreveram sem usar botão (não classificado) · atendente entrou em ${nf.format(t.humano)}`)}
+    ${cartao('Não respondeu', `${nf.format(Math.max(0, t.disparos - t.respondeu))} <span style="font-size:14px;font-weight:500">${pc(Math.max(0, t.disparos - t.respondeu), t.disparos)}</span>`, 'nenhuma mensagem em até 24 h do template')}
   </div>`;
   const aviso = r.cobertura.sessoesLidas < r.cobertura.sessoes ? `<div class="banner warn aviso" style="margin-top:12px">Conversas lidas em ${nf.format(r.cobertura.sessoesLidas)} de ${nf.format(r.cobertura.sessoes)} sessões deste canal. Os disparos e a interação só contam sessões lidas; clique em <b>Atualizar dados</b> para completar.</div>` : '';
   const linhaMet = (m, nome, cls) => `<tr class="${cls}"><td>${nome}</td><td class="num">${nf.format(m.sessoes)}</td><td class="num">${nf.format(m.envios)}</td><td class="num">${nf.format(m.disparos)}</td>
     <td class="num">${m.creditosEst != null ? nf.format(Math.round(m.creditosEst)) : nd('Sem tarifa de marketing.')}</td><td class="num">${m.reaisEst != null ? fmtRs(m.reaisEst) : nd('Informe o R$ por mensagem de marketing.')}</td>
-    <td class="num">${nf.format(m.respondeu)}<small>${pc(m.respondeu, m.disparos)}</small></td><td class="num">${nf.format(m.clicou)}<small>${pc(m.clicou, m.disparos)}</small></td><td class="num">${nf.format(m.humano)}<small>${pc(m.humano, m.disparos)}</small></td>
+    ${cel4(m)}
     <td class="num">${m.creditosRegistrados != null ? nf.format(m.creditosRegistrados) : nd('A Umbler não registrou custo para estas sessões.')}</td></tr>`;
-  const meses = r.meses.map((l) => linhaMet(l.total, esc(nomeMes(l.mes)), 'mes') + GRUPOS_REL.filter((g) => l.grupos[g].sessoes || l.grupos[g].disparos).map((g) => linhaMet(l.grupos[g], `&nbsp;&nbsp;${esc(g)}`, 'grp')).join('')).join('');
+  const meses = r.meses.map((l) => linhaMet(l.total, esc(nomeMes(l.mes)) + (l.total.sessoes === 0 && l.total.disparos > 0 ? '<small style="font-weight:400">sem sessão nova: acompanhamento de fluxos iniciados antes</small>' : ''), 'mes') + GRUPOS_REL.filter((g) => l.grupos[g].sessoes || l.grupos[g].disparos).map((g) => linhaMet(l.grupos[g], `&nbsp;&nbsp;${esc(g)}`, 'grp')).join('')).join('');
   const tpls = r.templates.map((x) => `<tr><td>${esc(x.nome)}<small>${esc(x.grupos.join(' · '))}</small></td><td>${x.categoria ? esc(x.categoria) : nd('Categoria não informada.')}</td><td class="num">${dmy(x.primeiro)} a ${dmy(x.ultimo)}</td>
     <td class="num">${nf.format(x.disparos)}</td><td class="num">${x.creditosEst != null ? nf.format(Math.round(x.creditosEst)) : nd('Sem tarifa.')}</td><td class="num">${x.reaisEst != null ? fmtRs(x.reaisEst) : nd('Informe o R$ por mensagem de marketing.')}</td>
-    <td class="num">${nf.format(x.respondeu)}<small>${pc(x.respondeu, x.disparos)}</small></td><td class="num">${nf.format(x.clicou)}<small>${pc(x.clicou, x.disparos)}</small></td><td class="num">${nf.format(x.humano)}<small>${pc(x.humano, x.disparos)}</small></td></tr>`).join('');
+    ${cel4(x)}</tr>`).join('');
   return `${barra}${imp}${cartoes}${aviso}
   <div class="secao"><h2>Mês a mês</h2><span>${esc(r.canal.nome ?? '')} · disparos do mês = mensagens de template enviadas no mês (inclui os envios de acompanhamento dos fluxos)</span></div>
-  <div class="card2 tabela-wrap"><table class="t" style="min-width:1000px"><thead><tr><th>Mês / tipo</th><th>Sessões</th><th>Contatos que entraram</th><th>Disparos</th><th>Gasto est. (créd.)</th><th>Gasto est. (R$)</th><th>Responderam</th><th>Clicaram</th><th>Atendente</th><th>Custo registrado (Umbler)</th></tr></thead><tbody>${meses}</tbody></table></div>
+  <div class="card2 tabela-wrap"><table class="t" style="min-width:1000px"><thead><tr><th>Mês / tipo</th><th title="Sessões de envio criadas neste mês">Sessões criadas no mês</th><th title="Contatos que entraram nas sessões criadas neste mês">Contatos que entraram</th><th title="Mensagens de template enviadas neste mês, de sessões de qualquer mês">Disparos</th><th>Gasto est. (créd.)</th><th>Gasto est. (R$)</th><th>Tem interesse</th><th>Não tem interesse</th><th>Respondeu em texto</th><th>Não respondeu</th><th>Custo registrado (Umbler)</th></tr></thead><tbody>${meses}</tbody></table></div>
   <div class="secao"><h2>Por template</h2><span>qual mensagem foi disparada e como os leads reagiram</span></div>
-  <div class="card2 tabela-wrap"><table class="t" style="min-width:1000px"><thead><tr><th>Template</th><th>Categoria</th><th>Período</th><th>Disparos</th><th>Gasto est. (créd.)</th><th>Gasto est. (R$)</th><th>Responderam</th><th>Clicaram</th><th>Atendente</th></tr></thead><tbody>${tpls || '<tr><td colspan="9" class="vazio">Nenhuma mensagem de template lida ainda.</td></tr>'}</table></div>
+  <div class="card2 tabela-wrap"><table class="t" style="min-width:1000px"><thead><tr><th>Template</th><th>Categoria</th><th>Período</th><th>Disparos</th><th>Gasto est. (créd.)</th><th>Gasto est. (R$)</th><th>Tem interesse</th><th>Não tem interesse</th><th>Respondeu em texto</th><th>Não respondeu</th></tr></thead><tbody>${tpls || '<tr><td colspan="10" class="vazio">Nenhuma mensagem de template lida ainda.</td></tr>'}</table></div>
+  <div class="secao"><h2>Qual botão (CTA) clicaram</h2><span>por template, com a classificação usada nos totais</span></div>
+  <div class="card2 tabela-wrap"><table class="t" style="min-width:640px"><thead><tr><th>Template</th><th>Botão clicado</th><th>Classificação</th><th>Cliques</th></tr></thead><tbody>${(r.ctas ?? []).map((c) => `<tr><td>${esc(c.template)}</td><td><b>${esc(c.cta)}</b></td><td><span class="pill ${c.classe === 'interesse' ? 'bom' : 'atencao'}">${c.classe === 'interesse' ? 'Tem interesse' : 'Não tem interesse'}</span></td><td class="num">${nf.format(c.cliques)}</td></tr>`).join('') || '<tr><td colspan="4" class="vazio">Nenhum clique em botão com rótulo guardado ainda. Clique em "Reler conversas" para recolher os botões das mensagens já importadas.</td></tr>'}</tbody></table></div>
   <div class="card2 est"><b>Como ler</b><span class="tag">ESTIMATIVA NO GASTO</span>
-    <p class="muted" style="font-size:12.5px;margin:6px 0 0"><b>Gasto estimado</b> = disparos x tarifa de marketing${r.tarifa ? ` (${nf.format(Math.round(r.tarifa.creditosPorMsg))} créditos por mensagem, média de ${nf.format(r.tarifa.mensagens)} mensagens cobradas pela Umbler em ${nf.format(r.tarifa.sessoes)} sessões)` : ' (ainda sem cobranças registradas para calcular)'}; todos os disparos são tratados como marketing. <b>Interesse:</b> <i>Responderam</i> = o lead mandou qualquer mensagem em até 24 h depois do template; <i>Clicaram</i> = respondeu por botão ou lista; <i>Atendente</i> = depois da resposta, uma pessoa escreveu. Nada de nome, telefone ou texto é guardado. O R$ é disparos x o <b>preço por mensagem de marketing</b> que você informa no topo (ex.: 0,32). A Umbler cobra em créditos e não documenta a unidade, por isso o preço de um crédito não é usado aqui.</p></div>`;
+    <p class="muted" style="font-size:12.5px;margin:6px 0 0"><b>Gasto estimado</b> = disparos x tarifa de marketing${r.tarifa ? ` (${nf.format(Math.round(r.tarifa.creditosPorMsg))} créditos por mensagem, média de ${nf.format(r.tarifa.mensagens)} mensagens cobradas pela Umbler em ${nf.format(r.tarifa.sessoes)} sessões)` : ' (ainda sem cobranças registradas para calcular)'}; todos os disparos são tratados como marketing. <b>Interesse:</b> em até 24 h depois de cada template: <i>Tem interesse</i> = clicou num botão que não é recusa (ex.: "Quero retomar com 20%OFF"); <i>Não tem interesse</i> = clicou em "Não tenho interesse" ou similar; <i>Respondeu em texto</i> = escreveu sem usar botão, e como o texto do lead não é lido nem guardado, fica sem classificar; <i>Não respondeu</i> = nenhuma mensagem do lead. Nada de nome, telefone ou texto é guardado. O R$ é disparos x o <b>preço por mensagem de marketing</b> que você informa no topo (ex.: 0,32). A Umbler cobra em créditos e não documenta a unidade, por isso o preço de um crédito não é usado aqui.</p></div>`;
 }
 
 /* ---------- Configuração ---------- */
@@ -505,6 +512,7 @@ document.addEventListener('click', async (ev) => {
   if (t.id === 'b-atualizar-meses') return void carregarMeses(true);
   if (t.id === 'b-atualizar-ref') return void carregarRef(true);
   if (t.id === 'r-importar') return void importarDados();
+  if (t.id === 'r-reler') { if (confirm('Reler todas as conversas deste canal? Leva alguns minutos e só faz leituras na Umbler.')) importarDados(true); return; }
   if (t.id === 'r-preco-ok') { S.relPreco = $('#r-preco2').value.trim(); guardar('umbler.rpreco', S.relPreco); return void carregarRel(); }
   if (t.id === 'b-preco-ref') { S.precoSim = $('#r-preco').value.trim(); return void carregarRef(); }
   const trm = t.closest('tr[data-mes]');

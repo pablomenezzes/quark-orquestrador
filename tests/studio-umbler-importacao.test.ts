@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { analisarMensagens, lerConversa } from '../studio/lib/umbler/mensagens';
 import { importarUmbler } from '../studio/lib/umbler/importador';
-import { montarRelatorio, tarifaMarketing, grupoDe } from '../studio/lib/umbler/relatorio';
+import { montarRelatorio, tarifaMarketing, grupoDe, classeDoCta } from '../studio/lib/umbler/relatorio';
 import { PgBanco, type Banco, type MensagemBanco, type SessaoBanco } from '../studio/lib/umbler/banco';
 import { normalizaCusto, normalizaCustoLinhas, type Sessao, type TemplateCatalogo } from '../studio/lib/umbler/normaliza';
 
@@ -42,7 +42,8 @@ describe('Umbler: interação depois do template (mensagens da conversa)', () =>
 
   it('não guarda texto, nome nem telefone: a saída só tem ID, template, horário e três indicadores', () => {
     const r = analisarMensagens([msg('a', 0, 'Bot', { templateId: 'tpl', content: 'Olá Maria 11 99999-0000', contactName: 'Maria' })]);
-    expect(Object.keys(r[0]!).sort()).toEqual(['clicou', 'enviadoEm', 'humano', 'id', 'respondeu', 'templateId']);
+    expect(Object.keys(r[0]!).sort()).toEqual(['clicou', 'cta', 'enviadoEm', 'humano', 'id', 'respondeu', 'templateId']);
+    expect(r[0]!.cta).toBeNull(); // sem clique em botão, nada de texto
     expect(JSON.stringify(r)).not.toMatch(/Maria|99999/);
   });
 
@@ -76,10 +77,11 @@ class BancoMem implements Banco {
   async gravarTemplates(t: TemplateCatalogo[]) { this.tpl = t; this.tplEm = new Date(this.agora()).toISOString(); }
   async templatesEm() { return this.tplEm; }
   async templates() { return this.tpl; }
-  async gravarMensagens(sessaoId: string, canalId: string | null, _bot: string | null, m: { id: string; templateId: string; dia: string; respondeu: boolean; clicou: boolean; humano: boolean }[]) {
-    for (const x of m) { const ex = this.msgs.get(x.id); this.msgs.set(x.id, { id: x.id, sessaoId: ex?.sessaoId ?? sessaoId, templateId: x.templateId, dia: x.dia, canalId, respondeu: (ex?.respondeu ?? false) || x.respondeu, clicou: (ex?.clicou ?? false) || x.clicou, humano: (ex?.humano ?? false) || x.humano }); }
+  async gravarMensagens(sessaoId: string, canalId: string | null, _bot: string | null, m: { id: string; templateId: string; dia: string; respondeu: boolean; clicou: boolean; humano: boolean; cta?: string | null }[]) {
+    for (const x of m) { const ex = this.msgs.get(x.id); this.msgs.set(x.id, { id: x.id, sessaoId: ex?.sessaoId ?? sessaoId, templateId: x.templateId, dia: x.dia, canalId, respondeu: (ex?.respondeu ?? false) || x.respondeu, clicou: (ex?.clicou ?? false) || x.clicou, humano: (ex?.humano ?? false) || x.humano, cta: ex?.cta ?? x.cta ?? null }); }
   }
   async atualizarScan(id: string, cursor: number, total: number | null, completo: boolean) { const s = this.sess.get(id)!; this.sess.set(id, { ...s, scanCursor: cursor, scanTotal: total ?? s.scanTotal, scanCompleto: completo, scanEm: completo ? new Date(this.agora()).toISOString() : s.scanEm }); }
+  async reiniciarScanCanal(canalId: string, desde: string) { let n = 0; for (const [id, s] of this.sess) if (s.canalId === canalId && s.dia >= desde) { this.sess.set(id, { ...s, scanCursor: 0, scanCompleto: false }); n++; } return n; }
   async reiniciarScan(id: string) { const s = this.sess.get(id)!; this.sess.set(id, { ...s, scanCursor: 0, scanCompleto: false }); }
   async mensagens(canalId: string, de: string, ate: string) { return [...this.msgs.values()].filter((m) => m.canalId === canalId && m.dia >= de && m.dia <= ate); }
   async registrarImportacao(...a: unknown[]) { this.imports.push(a); }
@@ -168,8 +170,8 @@ describe('Umbler: importação para o banco', () => {
 
   it('a mesma mensagem lida em duas sessões é contada uma vez (a primeira sessão fica com ela)', async () => {
     const banco = new BancoMem();
-    await banco.gravarMensagens('sA', 'c1', 'b', [{ id: 'm1', templateId: 't', dia: '2026-09-28', respondeu: false, clicou: false, humano: false }]);
-    await banco.gravarMensagens('sB', 'c1', 'b', [{ id: 'm1', templateId: 't', dia: '2026-09-28', respondeu: true, clicou: false, humano: false }]);
+    await banco.gravarMensagens('sA', 'c1', 'b', [{ id: 'm1', templateId: 't', dia: '2026-09-28', respondeu: false, clicou: false, humano: false, cta: null }]);
+    await banco.gravarMensagens('sB', 'c1', 'b', [{ id: 'm1', templateId: 't', dia: '2026-09-28', respondeu: true, clicou: false, humano: false, cta: null }]);
     expect(banco.msgs.size).toBe(1);
     expect(banco.msgs.get('m1')).toMatchObject({ sessaoId: 'sA', respondeu: true });
   });
@@ -177,7 +179,7 @@ describe('Umbler: importação para o banco', () => {
 
 describe('Umbler: relatório mês a mês', () => {
   const sessao = (o: Partial<SessaoBanco>): SessaoBanco => ({ id: 's', criadaEm: '2026-09-28T12:00:00Z', dia: '2026-09-28', tipo: 'Bot', canalId: 'c1', canalNome: 'QuarkRH Insights', botId: 'b', botNome: 'Geladeira Proposta', modeloId: null, modeloNome: null, modeloCategoria: null, titulo: 'x', enviadas: 10, lidas: null, falhas: 0, creditos: null, custoSituacao: 'sem_registro', linhasCusto: null, scanCursor: 10, scanTotal: 10, scanCompleto: true, scanEm: null, atualizadoEm: '', ...o });
-  const m = (id: string, sessaoId: string, dia: string, tpl: string, r = false, c = false, h = false): MensagemBanco => ({ id, sessaoId, templateId: tpl, dia, respondeu: r, clicou: c, humano: h, canalId: 'c1' });
+  const m = (id: string, sessaoId: string, dia: string, tpl: string, r = false, c = false, h = false, cta: string | null = null): MensagemBanco => ({ id, sessaoId, templateId: tpl, dia, respondeu: r, clicou: c, humano: h, canalId: 'c1', cta });
   const templates: TemplateCatalogo[] = [{ id: 'tG', nome: 'geladeira_1', categoria: 'MARKETING', status: 'APPROVED' }];
   const registrada = sessao({ id: 'ref', canalId: 'c9', custoSituacao: 'registrado', creditos: 7800, linhasCusto: [{ tipo: 'Template', templateId: 'x', templateNome: 'x', count: 2, credits: 7800 }] });
 
@@ -255,8 +257,8 @@ describe('Umbler: banco (SQL)', () => {
     let params: unknown[] = [];
     const b2 = new PgBanco({ query: async (_s: string, p?: unknown[]) => { params = p ?? []; return { rows: [] }; } } as never);
     await b2.gravarMensagens('s', 'c', 'b', [
-      { id: 'm', enviadoEm: '2026-09-28T12:00:00Z', templateId: 't', dia: '2026-09-28', respondeu: false, clicou: false, humano: false },
-      { id: 'm', enviadoEm: '2026-09-28T12:00:00Z', templateId: 't', dia: '2026-09-28', respondeu: true, clicou: false, humano: false },
+      { id: 'm', enviadoEm: '2026-09-28T12:00:00Z', templateId: 't', dia: '2026-09-28', respondeu: false, clicou: false, humano: false, cta: null },
+      { id: 'm', enviadoEm: '2026-09-28T12:00:00Z', templateId: 't', dia: '2026-09-28', respondeu: true, clicou: false, humano: false, cta: null },
     ]);
     expect(params[0]).toEqual(['m']);
     expect(params[7]).toEqual([true]);
@@ -278,5 +280,68 @@ describe('Umbler: banco (SQL)', () => {
     const raw = { totalCredits: 8000, lines: [{ creditType: 'Template', templateId: 't', templateName: 'T', count: 2, credits: 7800 }, { creditType: 'Message', templateId: null, templateName: null, count: 1, credits: 200 }, { creditType: 'Template', templateId: 'z', count: 0, credits: 0 }] };
     expect(normalizaCusto(raw).v).toBe(8000);
     expect(normalizaCustoLinhas(raw)).toHaveLength(2); // linha com count 0 sai
+  });
+});
+
+describe('Umbler: qual CTA o lead clicou (tem interesse / não tem interesse / não respondeu)', () => {
+  it('guarda só o texto do botão; texto livre do lead nunca é guardado', () => {
+    const r = analisarMensagens([
+      msg('t1', 0, 'Bot', { templateId: 'tpl' }), msg('c1', 1, 'Contact', { messageType: 'ButtonReply', content: 'Quero retomar com 20%OFF' }),
+      msg('t2', 48, 'Bot', { templateId: 'tpl' }), msg('c2', 49, 'Contact', { messageType: 'Text', content: 'Meu telefone é 11 99999-0000' }),
+      msg('t3', 100, 'Bot', { templateId: 'tpl' }), msg('c3', 101, 'Contact', { messageType: 'ButtonReply', content: 'x'.repeat(200) }),
+    ]);
+    const por = Object.fromEntries(r.map((x) => [x.id, x]));
+    expect(por.t1).toMatchObject({ clicou: true, cta: 'Quero retomar com 20%OFF' });
+    expect(por.t2).toMatchObject({ respondeu: true, clicou: false, cta: null });
+    expect(por.t3!.cta).toBeNull(); // rótulo gigante não é botão: descartado
+    expect(JSON.stringify(r)).not.toMatch(/99999|telefone/);
+  });
+
+  it('classifica o botão: recusa x interesse', () => {
+    for (const x of ['Não tenho interesse', 'nao quero receber', 'Sem interesse', 'Parar mensagens', 'Cancelar']) expect(classeDoCta(x), x).toBe('sem_interesse');
+    for (const x of ['Quero retomar com 20%OFF', 'Quero saber mais', 'Falar com um especialista', 'Sim, tenho interesse']) expect(classeDoCta(x), x).toBe('interesse');
+  });
+
+  it('relatório: interesse, sem interesse, resposta em texto e quem não respondeu, por mês e por template, com a tabela de CTAs', () => {
+    const sess = (o: object) => ({ id: 'g', criadaEm: '2026-09-28T12:00:00Z', dia: '2026-09-28', tipo: 'Bot' as const, canalId: 'c1', canalNome: 'I', botId: 'b', botNome: 'Geladeira', modeloId: null, modeloNome: null, modeloCategoria: null, titulo: 'x', enviadas: 5, lidas: null, falhas: 0, creditos: null, custoSituacao: 'sem_registro' as const, linhasCusto: null, scanCursor: 5, scanTotal: 5, scanCompleto: true, scanEm: null, atualizadoEm: '', ...o });
+    const mm = (id: string, r: boolean, c: boolean, cta: string | null) => ({ id, sessaoId: 'g', templateId: 'tG', dia: '2026-09-28', respondeu: r, clicou: c, humano: false, canalId: 'c1', cta });
+    const r = montarRelatorio({ canal: { id: 'c1', nome: 'I' }, de: '2026-07-01', ate: '2026-11-03', sessoes: [sess({})], templates: [{ id: 'tG', nome: 'geladeira_4', categoria: 'MARKETING', status: null }], precoCredito: null,
+      mensagens: [mm('1', true, true, 'Quero retomar com 20%OFF'), mm('2', true, true, 'Quero retomar com 20%OFF'), mm('3', true, true, 'Não tenho interesse'), mm('4', true, false, null), mm('5', false, false, null), mm('6', false, false, null)] });
+    expect(r.total).toMatchObject({ disparos: 6, respondeu: 4, interesse: 2, semInteresse: 1, textoLivre: 1 });
+    expect(r.total.disparos - r.total.respondeu).toBe(2); // não responderam
+    expect(r.templates[0]).toMatchObject({ interesse: 2, semInteresse: 1, textoLivre: 1 });
+    expect(r.ctas).toEqual([
+      { templateId: 'tG', template: 'geladeira_4', cta: 'Quero retomar com 20%OFF', classe: 'interesse', cliques: 2 },
+      { templateId: 'tG', template: 'geladeira_4', cta: 'Não tenho interesse', classe: 'sem_interesse', cliques: 1 },
+    ]);
+  });
+
+  it('o CTA vai ao banco e uma releitura sem CTA não apaga o que já está guardado; "reler" reinicia as conversas do canal', async () => {
+    const banco = new BancoMem();
+    await banco.gravarMensagens('s', 'c1', 'b', [{ id: 'm', templateId: 't', dia: '2026-09-28', respondeu: true, clicou: true, humano: false, cta: 'Quero saber mais' } as never]);
+    await banco.gravarMensagens('s', 'c1', 'b', [{ id: 'm', templateId: 't', dia: '2026-09-28', respondeu: true, clicou: true, humano: false, cta: null } as never]);
+    expect(banco.msgs.get('m')!.cta).toBe('Quero saber mais');
+    const sqls: string[] = [];
+    const b = new PgBanco({ query: async (sql: string) => { sqls.push(sql); return { rows: [], rowCount: 4 }; } } as never);
+    expect(await b.reiniciarScanCanal('c1', '2026-07-01')).toBe(4);
+    await b.gravarMensagens('s', 'c1', 'b', [{ id: 'm', enviadoEm: '2026-09-28T12:00:00Z', templateId: 't', dia: '2026-09-28', respondeu: true, clicou: true, humano: false, cta: 'Sim' }]);
+    expect(sqls.join(' ')).toMatch(/cta = coalesce\(ops\.umbler_mensagem\.cta, excluded\.cta\)/);
+    const mig = readFileSync('supabase/migrations/0036_umbler_cta.sql', 'utf8').replace(/--.*$/gm, '');
+    expect(mig.trim()).toBe('alter table ops.umbler_mensagem add column cta text;');
+  });
+});
+
+describe('Umbler: período filtra pelo dia da mensagem, não pelo da sessão (bug de outubro)', () => {
+  it('mês sem sessão nova mas com envios de acompanhamento mostra os disparos e os sinaliza', () => {
+    const s = { id: 'g', criadaEm: '2026-09-28T12:00:00Z', dia: '2026-09-28', tipo: 'Bot' as const, canalId: 'c1', canalNome: 'I', botId: 'b', botNome: 'Geladeira', modeloId: null, modeloNome: null, modeloCategoria: null, titulo: 'x', enviadas: 5, lidas: null, falhas: 0, creditos: null, custoSituacao: 'sem_registro' as const, linhasCusto: null, scanCursor: 5, scanTotal: 5, scanCompleto: true, scanEm: null, atualizadoEm: '' };
+    const mm = (id: string, dia: string) => ({ id, sessaoId: 'g', templateId: 'tG', dia, respondeu: true, clicou: false, humano: false, canalId: 'c1', cta: null });
+    const so = (de: string, ate: string) => montarRelatorio({ canal: { id: 'c1', nome: 'I' }, de, ate, sessoes: [s], mensagens: [mm('1', '2026-09-28'), mm('2', '2026-10-13'), mm('3', '2026-10-30')], templates: [], precoCredito: null });
+    const out = so('2026-10-01', '2026-10-31');
+    expect(out.total).toMatchObject({ sessoes: 0, envios: 0, disparos: 2, respondeu: 2 });
+    expect(out.cobertura).toMatchObject({ sessoes: 0, sessoesCanal: 1, mensagens: 2 });
+    expect(out.meses.map((x) => x.mes)).toEqual(['2026-10']);
+    expect(so('2026-10-13', '2026-10-13').total.disparos).toBe(1); // intervalo de um dia
+    expect(so('2026-09-01', '2026-09-30').total).toMatchObject({ sessoes: 1, disparos: 1 });
+    expect(so('2026-11-01', '2026-11-03').cobertura).toMatchObject({ sessoes: 0, mensagens: 0, sessoesCanal: 1 }); // período sem nada, mas o canal tem dados
   });
 });

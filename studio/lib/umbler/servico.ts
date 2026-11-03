@@ -340,11 +340,11 @@ export class ServicoUmbler {
   }
 
   /** Um passo da importação (jul/2026 em diante). A tela repete até `concluido`. */
-  async importar(canalId: string | null, de = '2026-07-01'): Promise<Progresso> {
+  async importar(canalId: string | null, de = '2026-07-01', reler = false): Promise<Progresso> {
     const banco = this.bancoOuErro();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || de < '2026-07-01') throw new ConfigInvalida('A importação começa em 01/07/2026.');
     const { id: org } = await this.organizacao();
-    const p = await importarUmbler(this.leitor(), banco, { org, de, canalId, orcamentoMs: this.o.orcamentoMs ?? 600_000, agora: this.o.agora });
+    const p = await importarUmbler(this.leitor(), banco, { org, de, canalId, orcamentoMs: this.o.orcamentoMs ?? 600_000, agora: this.o.agora, reler });
     this.chamadas += p.chamadas;
     if (p.concluido) await banco.registrarImportacao(de, canalId, { sessoes: p.sessoes, conversas: p.conversas, chamadas: p.chamadas }, null);
     return p;

@@ -32,7 +32,7 @@ export type SessaoBanco = {
   atualizadoEm: string;
 };
 
-export type MensagemBanco = { id: string; sessaoId: string; templateId: string | null; dia: string; respondeu: boolean; clicou: boolean; humano: boolean; canalId: string | null };
+export type MensagemBanco = { id: string; sessaoId: string; templateId: string | null; dia: string; respondeu: boolean; clicou: boolean; humano: boolean; canalId: string | null; cta: string | null };
 
 export interface Banco {
   sessoes(desde: string): Promise<SessaoBanco[]>;
@@ -43,6 +43,8 @@ export interface Banco {
   gravarMensagens(sessaoId: string, canalId: string | null, botId: string | null, m: (MensagemTemplate & { dia: string })[]): Promise<void>;
   atualizarScan(id: string, cursor: number, total: number | null, completo: boolean): Promise<void>;
   reiniciarScan(id: string): Promise<void>;
+  /** Marca todas as conversas do canal para serem lidas de novo (ex.: depois de passar a guardar o CTA). */
+  reiniciarScanCanal(canalId: string, desde: string): Promise<number>;
   mensagens(canalId: string, de: string, ate: string): Promise<MensagemBanco[]>;
   registrarImportacao(desde: string, canalId: string | null, resumo: unknown, erro: string | null): Promise<void>;
   ultimaImportacao(): Promise<{ finalizadaEm: string; resumo: unknown } | null>;
@@ -111,16 +113,16 @@ export class PgBanco implements Banco {
     const un = new Map<string, MensagemTemplate & { dia: string }>();
     for (const x of m) {
       const ex = un.get(x.id);
-      un.set(x.id, ex ? { ...ex, respondeu: ex.respondeu || x.respondeu, clicou: ex.clicou || x.clicou, humano: ex.humano || x.humano } : x);
+      un.set(x.id, ex ? { ...ex, respondeu: ex.respondeu || x.respondeu, clicou: ex.clicou || x.clicou, humano: ex.humano || x.humano, cta: ex.cta ?? x.cta } : x);
     }
     m = [...un.values()];
     await this.pool.query(
-      `insert into ops.umbler_mensagem (id, sessao_id, canal_id, bot_id, template_id, enviado_em, dia, respondeu_24h, clicou_24h, humano_24h, atualizado_em)
-       select u.id, $2, $3, $4, u.tpl, u.em, u.dia, u.resp, u.clic, u.hum, now()
-         from unnest($1::text[], $5::text[], $6::timestamptz[], $7::date[], $8::bool[], $9::bool[], $10::bool[]) as u(id, tpl, em, dia, resp, clic, hum)
+      `insert into ops.umbler_mensagem (id, sessao_id, canal_id, bot_id, template_id, enviado_em, dia, respondeu_24h, clicou_24h, humano_24h, cta, atualizado_em)
+       select u.id, $2, $3, $4, u.tpl, u.em, u.dia, u.resp, u.clic, u.hum, u.cta, now()
+         from unnest($1::text[], $5::text[], $6::timestamptz[], $7::date[], $8::bool[], $9::bool[], $10::bool[], $11::text[]) as u(id, tpl, em, dia, resp, clic, hum, cta)
        on conflict (id) do update set respondeu_24h = ops.umbler_mensagem.respondeu_24h or excluded.respondeu_24h,
-          clicou_24h = ops.umbler_mensagem.clicou_24h or excluded.clicou_24h, humano_24h = ops.umbler_mensagem.humano_24h or excluded.humano_24h, atualizado_em = now()`,
-      [m.map((x) => x.id), sessaoId, canalId, botId, m.map((x) => x.templateId), m.map((x) => x.enviadoEm), m.map((x) => x.dia), m.map((x) => x.respondeu), m.map((x) => x.clicou), m.map((x) => x.humano)],
+          clicou_24h = ops.umbler_mensagem.clicou_24h or excluded.clicou_24h, humano_24h = ops.umbler_mensagem.humano_24h or excluded.humano_24h, cta = coalesce(ops.umbler_mensagem.cta, excluded.cta), atualizado_em = now()`,
+      [m.map((x) => x.id), sessaoId, canalId, botId, m.map((x) => x.templateId), m.map((x) => x.enviadoEm), m.map((x) => x.dia), m.map((x) => x.respondeu), m.map((x) => x.clicou), m.map((x) => x.humano), m.map((x) => x.cta)],
     );
   }
 
@@ -134,12 +136,17 @@ export class PgBanco implements Banco {
     await this.pool.query(`update ops.umbler_sessao set scan_cursor=0, scan_completo=false where id=$1`, [id]);
   }
 
+  async reiniciarScanCanal(canalId: string, desde: string): Promise<number> {
+    const r = await this.pool.query(`update ops.umbler_sessao set scan_cursor=0, scan_completo=false where canal_id=$1 and dia >= $2::date`, [canalId, desde]);
+    return (r as { rowCount?: number | null }).rowCount ?? 0;
+  }
+
   async mensagens(canalId: string, de: string, ate: string): Promise<MensagemBanco[]> {
     const r = await this.pool.query(
-      `select id, sessao_id, template_id, dia, respondeu_24h, clicou_24h, humano_24h, canal_id from ops.umbler_mensagem where canal_id = $1 and dia between $2::date and $3::date`,
+      `select id, sessao_id, template_id, dia, respondeu_24h, clicou_24h, humano_24h, canal_id, cta from ops.umbler_mensagem where canal_id = $1 and dia between $2::date and $3::date`,
       [canalId, de, ate],
     );
-    return r.rows.map((x) => ({ id: x.id, sessaoId: x.sessao_id, templateId: x.template_id, dia: diaStr(x.dia), respondeu: x.respondeu_24h, clicou: x.clicou_24h, humano: x.humano_24h, canalId: x.canal_id }));
+    return r.rows.map((x) => ({ id: x.id, sessaoId: x.sessao_id, templateId: x.template_id, dia: diaStr(x.dia), respondeu: x.respondeu_24h, clicou: x.clicou_24h, humano: x.humano_24h, canalId: x.canal_id, cta: x.cta ?? null }));
   }
 
   async registrarImportacao(desde: string, canalId: string | null, resumo: unknown, erro: string | null): Promise<void> {

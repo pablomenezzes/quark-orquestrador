@@ -1,6 +1,6 @@
 /**
  * Importa a Umbler para o banco (ops.umbler_*) de 01/07/2026 em diante. Somente GET na Umbler; grava só no banco pelo papel orq_panel.
- * Imprime apenas contagens. Uso: npx tsx scripts/umbler-importar.ts [ID_DO_CANAL]   (sem argumento: o canal "Insights")
+ * Imprime apenas contagens. Uso: npx tsx scripts/umbler-importar.ts [ID_DO_CANAL] [--reler]   (sem canal: o canal "Insights"; --reler lê de novo todas as conversas)
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -29,10 +29,10 @@ const svc = new ServicoUmbler({
   orcamentoMs: 120_000,
 });
 try {
-  const canal = process.argv[2] ?? (await svc.canalPadrao())?.id ?? null;
+  const canal = process.argv.slice(2).find((a) => !a.startsWith('--')) ?? (await svc.canalPadrao())?.id ?? null;
   console.log(`canal da leitura de conversas: ${canal ?? 'nenhum'}`);
   for (let i = 1; i <= 200; i++) {
-    const p = await svc.importar(canal);
+    const p = await svc.importar(canal, undefined, i === 1 && process.argv.includes('--reler'));
     console.log(`rodada ${i}: fase=${p.fase} sessões ${p.sessoes.atualizadas}/${p.sessoes.total} | conversas: sessões ${p.conversas.sessoesFeitas}/${p.conversas.sessoes}, verificadas ${p.conversas.verificadas}, mensagens ${p.conversas.mensagens} | GETs ${p.chamadas}${p.avisos.length ? ` | avisos: ${p.avisos.length}` : ''}`);
     if (p.concluido) break;
   }

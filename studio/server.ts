@@ -381,7 +381,7 @@ export function createStudioHandler(opts: StudioOptions): (req: IncomingMessage,
       if (method === 'POST' && sub === 'importar') {
         const b = await readJson(req);
         const canal = typeof b?.canal === 'string' && /^[\w.\-:]{1,100}$/.test(b.canal) ? b.canal : null;
-        return send(res, 200, await u.importar(canal));
+        return send(res, 200, await u.importar(canal, undefined, b?.reler === true));
       }
       if (method === 'GET' && sub === 'canal-padrao') return send(res, 200, (await u.canalPadrao()) ?? { id: null, nome: null });
       if (method === 'GET' && sub === 'referencia') {

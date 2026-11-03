@@ -7,7 +7,7 @@
  */
 import type { Leitor } from './servico.js';
 import { diaBR, itensDe, normalizaCusto, normalizaCustoLinhas, normalizaSessao, normalizaTemplates, pick, type Sessao } from './normaliza.js';
-import { analisarMensagens, lerConversa } from './mensagens.js';
+import { analisarMensagens, lerConversa, type MensagemTemplate } from './mensagens.js';
 import type { Banco, SessaoBanco } from './banco.js';
 
 export type Progresso = {
@@ -23,7 +23,7 @@ const TAKE_SESSOES = 100;
 const TAKE_CHATS = 250;
 const DIA_MS = 86_400_000;
 
-export type ImportarOpts = { org: string; de: string; canalId: string | null; orcamentoMs: number; agora?: () => number; reescanearAteDias?: number };
+export type ImportarOpts = { org: string; de: string; canalId: string | null; orcamentoMs: number; agora?: () => number; reescanearAteDias?: number; /** Relê todas as conversas do canal (ex.: depois de passar a guardar o CTA). */ reler?: boolean };
 
 export async function importarUmbler(leitor: Leitor, banco: Banco, o: ImportarOpts): Promise<Progresso> {
   const agora = o.agora ?? Date.now;
@@ -94,6 +94,7 @@ export async function importarUmbler(leitor: Leitor, banco: Banco, o: ImportarOp
   /* ---------- C) conversas do canal escolhido ---------- */
   p.fase = 'conversas';
   if (!o.canalId) { p.fase = 'fim'; p.concluido = true; return p; }
+  if (o.reler) await banco.reiniciarScanCanal(o.canalId, o.de);
   const doCanal = (await banco.sessoes(o.de)).filter((s) => s.canalId === o.canalId);
   const limiteReescan = (o.reescanearAteDias ?? 45) * DIA_MS;
   const pendentes: SessaoBanco[] = [];
@@ -107,7 +108,7 @@ export async function importarUmbler(leitor: Leitor, banco: Banco, o: ImportarOp
     let cursor = s.scanCursor;
     let total: number | null = s.scanTotal;
     let completo = false;
-    const fila: { id: string; enviadoEm: string; templateId: string; respondeu: boolean; clicou: boolean; humano: boolean; dia: string }[] = [];
+    const fila: (MensagemTemplate & { dia: string })[] = [];
     const descarrega = async () => { if (fila.length) { await banco.gravarMensagens(s.id, s.canalId, s.botId, fila.splice(0)); } };
     for (;;) {
       if (estourou()) { await descarrega(); await banco.atualizarScan(s.id, cursor, total, false); return p; }
