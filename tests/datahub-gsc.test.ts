@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { generateKeyPairSync } from 'node:crypto';
 import type { FetchLike as FetchLikeGsc } from "../src/datahub/google/ga4";
-import { ATRASO_DIAS, GSC_PAGE_SIZE, GscClient, gscSitesFromEnv, hostECaminho, blocosMensais, mapGscConsultas, mapGscPaginas, relatorioGsc, type GscRow } from '../src/datahub/google/gsc';
+import { ATRASO_DIAS, GSC_PAGE_SIZE, GscClient, gscSitesFromEnv, hostECaminho, blocosMensais, mapGscConsultas, hostPermitido, mapGscPaginas, relatorioGsc, type GscRow } from '../src/datahub/google/gsc';
 import { intervaloGsc } from '../src/datahub/google/gsc-sync';
 
 const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs8', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } });
@@ -101,5 +101,19 @@ describe('GSC: cliente', () => {
     const c = new GscClient(cred, 'sc-domain:a.com', doFetch, async (ms) => { esperas.push(ms); });
     await expect(c.query({ ...relatorioGsc('gsc_pagina', '2026-10-01', '2026-10-01'), rowLimit: 10, startRow: 0 })).rejects.toThrow(/403.*PERMISSION_DENIED/);
     expect(esperas).toEqual([2000]);
+  });
+});
+
+describe('GSC: só a campanha dentro de quark.tec.br', () => {
+  it('os outros hosts do domínio (produto) ficam de fora; os demais domínios não mudam', () => {
+    expect(hostPermitido('campanha.quark.tec.br')).toBe(true);
+    for (const h of ['rh-colaborador.quark.tec.br', 'sign.quark.tec.br', 'quark.tec.br']) expect(hostPermitido(h)).toBe(false);
+    expect(hostPermitido('quarkrh.com.br')).toBe(true);
+    expect(hostPermitido('vagas.quarkrh.com.br')).toBe(true);
+  });
+  it('páginas e consultas desses hosts não são mapeadas', () => {
+    const rows = [linha(['2026-10-01', 'https://rh-colaborador.quark.tec.br/app'], 5, 50, 3), linha(['2026-10-01', 'https://campanha.quark.tec.br/x'], 5, 50, 3)];
+    expect(mapGscPaginas(rows).map((x) => x.host)).toEqual(['campanha.quark.tec.br']);
+    expect(mapGscConsultas([linha(['https://rh-colaborador.quark.tec.br/app', 'q'], 5, 50, 3), linha(['https://campanha.quark.tec.br/x', 'q'], 5, 50, 3)], '2026-10-01').map((x) => x.host)).toEqual(['campanha.quark.tec.br']);
   });
 });

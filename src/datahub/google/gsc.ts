@@ -119,6 +119,17 @@ export function hostECaminho(url: string): { host: string; pagina: string } {
   }
 }
 
+/**
+ * Dominios em que SO alguns hosts interessam ao SEO: o resto sao telas do produto (app do colaborador, assinatura...) e inflariam os cliques.
+ * quark.tec.br e um dominio inteiro no Search Console (o acesso vem por "sc-domain:quark.tec.br"), mas so a campanha e site de marketing (decisao do Pablo, 2026-11-03).
+ */
+export const SO_HOSTS: Record<string, string[]> = { 'quark.tec.br': ['campanha.quark.tec.br'] };
+export function hostPermitido(host: string): boolean {
+  const h = host.toLowerCase().replace(/^www\./, '');
+  for (const [dominio, permitidos] of Object.entries(SO_HOSTS)) if (h === dominio || h.endsWith(`.${dominio}`)) return permitidos.includes(h);
+  return true;
+}
+
 export interface GscPaginaDia { dia: string; host: string; pagina: string; cliques: number; impressoes: number; pos_x_imp: number }
 export interface GscConsultaDia extends GscPaginaDia { consulta: string }
 
@@ -140,7 +151,7 @@ function somar<T extends GscPaginaDia>(linhas: T[], chave: (l: T) => string): T[
 }
 
 export function mapGscPaginas(rows: GscRow[]): GscPaginaDia[] {
-  const l = rows.filter((r) => r.keys[1]!.length <= MAX_PAGINA).map((r) => ({ dia: r.keys[0]!, ...hostECaminho(r.keys[1]!), cliques: Math.round(r.clicks), impressoes: Math.round(r.impressions), pos_x_imp: arred(r.position * r.impressions) }));
+  const l = rows.filter((r) => r.keys[1]!.length <= MAX_PAGINA).map((r) => ({ dia: r.keys[0]!, ...hostECaminho(r.keys[1]!), cliques: Math.round(r.clicks), impressoes: Math.round(r.impressions), pos_x_imp: arred(r.position * r.impressions) })).filter((x) => hostPermitido(x.host));
   return somar(l, (x) => [x.dia, x.host, x.pagina].join('\u0001'));
 }
 
@@ -149,7 +160,8 @@ export function mapGscConsultas(rows: GscRow[], mes: string): GscConsultaDia[] {
   const l = rows
     .filter((r) => r.impressions >= MIN_IMPRESSOES_CONSULTA || r.clicks > 0)
     .filter((r) => r.keys[1]!.length <= MAX_CONSULTA && r.keys[0]!.length <= MAX_PAGINA)
-    .map((r) => ({ dia: mes, ...hostECaminho(r.keys[0]!), consulta: r.keys[1]!, cliques: Math.round(r.clicks), impressoes: Math.round(r.impressions), pos_x_imp: arred(r.position * r.impressions) }));
+    .map((r) => ({ dia: mes, ...hostECaminho(r.keys[0]!), consulta: r.keys[1]!, cliques: Math.round(r.clicks), impressoes: Math.round(r.impressions), pos_x_imp: arred(r.position * r.impressions) }))
+    .filter((x) => hostPermitido(x.host));
   return somar(l, (x) => [x.dia, x.host, x.pagina, x.consulta].join(''));
 }
 
