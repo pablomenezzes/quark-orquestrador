@@ -351,7 +351,7 @@ export class ServicoUmbler {
   }
 
   /** Relatório mês a mês do canal, lido do banco (rápido; não consulta a Umbler). */
-  async relatorio(canalId: string | null, de: string, ate: string, preco?: number | null): Promise<Relatorio & { geradoEm: number; precoConfig: number | null; ultimaImportacao: string | null; canais: { id: string; nome: string }[] }> {
+  async relatorio(canalId: string | null, de: string, ate: string, preco?: number | null, precoPorMsg?: number | null): Promise<Relatorio & { geradoEm: number; precoConfig: number | null; ultimaImportacao: string | null; canais: { id: string; nome: string }[] }> {
     const banco = this.bancoOuErro();
     const sessoes = await banco.sessoes('2026-07-01');
     const nomes = new Map<string, string>();
@@ -361,7 +361,7 @@ export class ServicoUmbler {
     const cfg = await this.config();
     const precoConfig = precoVigente(cfg, ate);
     const mensagens = escolhido ? await banco.mensagens(escolhido, de, ate) : [];
-    const r = montarRelatorio({ canal: { id: escolhido ?? '', nome: escolhido ? (nomes.get(escolhido) ?? null) : null }, de, ate, sessoes, mensagens, templates: await banco.templates(), precoCredito: preco !== undefined ? preco : precoConfig });
+    const r = montarRelatorio({ canal: { id: escolhido ?? '', nome: escolhido ? (nomes.get(escolhido) ?? null) : null }, de, ate, sessoes, mensagens, templates: await banco.templates(), precoCredito: preco !== undefined ? preco : precoConfig, precoPorMsg });
     return { ...r, geradoEm: this.agora(), precoConfig, ultimaImportacao: (await banco.ultimaImportacao())?.finalizadaEm ?? null, canais };
   }
 

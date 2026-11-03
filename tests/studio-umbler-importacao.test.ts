@@ -211,6 +211,21 @@ describe('Umbler: relatório mês a mês', () => {
     expect(r.cobertura).toMatchObject({ sessoes: 2, sessoesLidas: 2, mensagens: 4 });
   });
 
+  it('R$ por mensagem informado vale direto: 1 disparo a R$ 0,3217 custa R$ 0,3217, e o preço do crédito não multiplica por 3.900 por engano', () => {
+    const sessoes = [sessao({ id: 'gel' }), registrada];
+    const base = { canal: { id: 'c1', nome: null }, de: '2026-07-01', ate: '2026-11-03', sessoes, mensagens: [m('1', 'gel', '2026-08-10', 'tG')], templates };
+    const r = montarRelatorio({ ...base, precoCredito: null, precoPorMsg: 0.3217 });
+    expect(r.total.reaisEst).toBeCloseTo(0.3217);
+    expect(r.precoPorMsg).toBe(0.3217);
+    expect(r.templates[0]!.reaisEst).toBeCloseTo(0.3217);
+    // sem tarifa registrada, ainda dá para calcular o R$ pelo preço por mensagem
+    const semTarifa = montarRelatorio({ ...base, sessoes: [sessao({ id: 'gel' })], precoCredito: null, precoPorMsg: 0.3217 });
+    expect(semTarifa.total.creditosEst).toBeNull();
+    expect(semTarifa.total.reaisEst).toBeCloseTo(0.3217);
+    // o preço do crédito continua funcionando: 3.900 créditos x 0,0001 = R$ 0,39 por mensagem
+    expect(montarRelatorio({ ...base, precoCredito: 0.0001 }).precoPorMsg).toBeCloseTo(0.39);
+  });
+
   it('sem tarifa não inventa gasto; sem preço do crédito não inventa R$; sessão sem leitura de conversas aparece na cobertura', () => {
     const r = montarRelatorio({ canal: { id: 'c1', nome: null }, de: '2026-07-01', ate: '2026-11-03', sessoes: [sessao({ scanCompleto: false })], mensagens: [m('1', 's', '2026-09-28', 'tG')], templates, precoCredito: null });
     expect(r.tarifa).toBeNull();

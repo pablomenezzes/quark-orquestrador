@@ -373,7 +373,9 @@ export function createStudioHandler(opts: StudioOptions): (req: IncomingMessage,
         if (canalQ && !/^[\w.\-:]{1,100}$/.test(canalQ)) throw new HttpError(400, 'canal_invalido');
         const pr = q.get('preco');
         if (pr && !(Number.isFinite(Number(pr)) && Number(pr) > 0 && Number(pr) <= 1000)) throw new HttpError(400, 'preco_invalido');
-        return send(res, 200, await u.relatorio(canalQ || null, de < '2026-07-01' ? '2026-07-01' : de, ate, pr ? Number(pr) : undefined));
+        const pm = q.get('preco_msg');
+        if (pm && !(Number.isFinite(Number(pm)) && Number(pm) > 0 && Number(pm) <= 100)) throw new HttpError(400, 'preco_msg_invalido');
+        return send(res, 200, await u.relatorio(canalQ || null, de < '2026-07-01' ? '2026-07-01' : de, ate, pr ? Number(pr) : undefined, pm ? Number(pm) : undefined));
       }
       // Importação: grava em ops.umbler_* (nenhuma escrita na Umbler). Só o admin na versão publicada (ver soAdmin).
       if (method === 'POST' && sub === 'importar') {

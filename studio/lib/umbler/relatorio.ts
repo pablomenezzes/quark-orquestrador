@@ -37,6 +37,8 @@ export type Relatorio = {
   ate: string;
   tarifa: { creditosPorMsg: number; mensagens: number; sessoes: number } | null;
   precoCredito: number | null;
+  /** R$ por mensagem de marketing usado na conta (informado, ou derivado do preço do crédito x tarifa). */
+  precoPorMsg: number | null;
   meses: LinhaMes[];
   templates: LinhaTemplate[];
   total: Metricas;
@@ -67,6 +69,8 @@ export function montarRelatorio(args: {
   mensagens: MensagemBanco[];
   templates: TemplateCatalogo[];
   precoCredito: number | null;
+  /** R$ por mensagem de marketing, informado direto; tem prioridade sobre o preço do crédito. */
+  precoPorMsg?: number | null;
 }): Relatorio {
   const { canal, de, ate } = args;
   const tarifa = tarifaMarketing(args.sessoes);
@@ -115,17 +119,18 @@ export function montarRelatorio(args: {
 
   // gasto estimado: todas as mensagens de template cobradas como marketing
   const est = (disparos: number) => (tarifa ? disparos * tarifa.creditosPorMsg : null);
-  const rs = (cred: number | null) => (cred != null && args.precoCredito != null ? cred * args.precoCredito : null);
-  const fecha = (x: Metricas) => { x.creditosEst = est(x.disparos); x.reaisEst = rs(x.creditosEst); };
+  const porMsg = args.precoPorMsg ?? (tarifa && args.precoCredito != null ? tarifa.creditosPorMsg * args.precoCredito : null);
+  const rs = (disparos: number) => (porMsg != null ? disparos * porMsg : null);
+  const fecha = (x: Metricas) => { x.creditosEst = est(x.disparos); x.reaisEst = rs(x.disparos); };
   const lista = [...meses.values()].sort((a, b) => a.mes.localeCompare(b.mes));
   for (const l of lista) { fecha(l.total); for (const g of GRUPOS) fecha(l.grupos[g]); }
-  for (const t of tpl.values()) { t.creditosEst = est(t.disparos); t.reaisEst = rs(t.creditosEst); }
+  for (const t of tpl.values()) { t.creditosEst = est(t.disparos); t.reaisEst = rs(t.disparos); }
   const total = vazia();
   for (const l of lista) soma(total, l.total);
   fecha(total);
 
   return {
-    canal, de, ate, tarifa, precoCredito: args.precoCredito, meses: lista,
+    canal, de, ate, tarifa, precoCredito: args.precoCredito, precoPorMsg: porMsg, meses: lista,
     templates: [...tpl.values()].sort((a, b) => b.disparos - a.disparos),
     total,
     cobertura: { sessoes: doCanal.length, sessoesLidas: doCanal.filter((s) => s.scanCompleto).length, conversasLidas: doCanal.reduce((a, s) => a + s.scanCursor, 0), mensagens: msgsTotal },
