@@ -8,6 +8,7 @@ import { PgBiRepo } from '../studio/lib/bi.js';
 import { PgScorecardRepo } from '../studio/lib/scorecard.js';
 import { PgExperimentosRepo } from '../studio/lib/experimentos.js';
 import { PgMonitorRepo } from '../studio/lib/monitor.js';
+import { PgSeoRepo } from '../studio/lib/seo.js';
 import { PgPainelRepo } from '../studio/lib/painel-repo.js';
 import { ClickUpClient, Integracoes, SheetsClient, clickUpConfigDoAmbiente, sheetsConfigDoAmbiente } from '../studio/lib/integracoes.js';
 import { UmblerCliente } from '../studio/lib/umbler/cliente.js';
@@ -19,7 +20,7 @@ import { SincroniaManual, githubConfigDoAmbiente } from '../studio/lib/sincronia
 import { createStudioHandler } from '../studio/server.js';
 
 /**
- * Quark Dados publicado (Monitor, Experimentos, BI, Painel de Dados e Usuários), atrás de login. Região gru1 (vercel.json).
+ * Quark Dados publicado (Monitor, Experimentos, BI, SEO, Painel de Dados e Usuários), atrás de login. Região gru1 (vercel.json).
  *
  * Só usa o papel de leitura do painel (PANEL_DB_URL, usuário orq_panel): nunca o `postgres`, nunca o papel de ingestão. O Studio de testes
  * (formulários e envio ao pipeline) não existe aqui: o servidor, no modo publicado, responde 404 a essas rotas.
@@ -59,6 +60,7 @@ function montar() {
     bi: new PgBiRepo(pool),
     monitor: new PgMonitorRepo(pool),
     experimentos,
+    seo: new PgSeoRepo(pool),
     scorecard: new PgScorecardRepo(pool),
     umbler,
     sincronia: (() => { const g = githubConfigDoAmbiente(process.env); return g ? new SincroniaManual(g) : null; })(),

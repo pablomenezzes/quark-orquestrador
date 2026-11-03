@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
@@ -116,5 +116,14 @@ describe('GET /api/seo', () => {
     const r = await fetch(`${baseSem}/api/seo?marca=rh&de=2026-10-01&ate=2026-10-28`);
     expect(r.status).toBe(503);
     expect((await r.json()).error).toBe('seo_nao_configurado');
+  });
+});
+
+describe('SEO: ligado nos dois pontos de entrada', () => {
+  // o site publicado (api/studio.ts) monta os repositórios sozinho: sem isto a aba SEO publicada responde "Falta PANEL_DB_URL" (visto em 2026-11-03)
+  it.each(['../studio/main.ts', '../api/studio.ts'])('%s cria o PgSeoRepo e o entrega ao servidor', (f) => {
+    const fonte = readFileSync(new URL(f, import.meta.url), 'utf8');
+    expect(fonte).toMatch(/new PgSeoRepo\(/);
+    expect(fonte).toMatch(/\sseo(:|,)/);
   });
 });
