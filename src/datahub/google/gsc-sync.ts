@@ -25,10 +25,10 @@ export class GscStore {
       const c = rows.slice(i, i + CHUNK);
       await this.q.query(
         `insert into mkt.gsc_pagina_dia (marca, dia, host, pagina, cliques, impressoes, pos_x_imp)
-         select '${this.marca}', * from unnest($1::date[], $2::text[], $3::text[], $4::int[], $5::int[], $6::numeric[])
+         select * from unnest($7::text[], $1::date[], $2::text[], $3::text[], $4::int[], $5::int[], $6::numeric[])
          on conflict (marca, dia, host, pagina) do update set cliques = excluded.cliques, impressoes = excluded.impressoes,
            pos_x_imp = excluded.pos_x_imp, atualizado_em = now()`,
-        [c.map((r) => r.dia), c.map((r) => r.host), c.map((r) => r.pagina), c.map((r) => r.cliques), c.map((r) => r.impressoes), c.map((r) => r.pos_x_imp)],
+        [c.map((r) => r.dia), c.map((r) => r.host), c.map((r) => r.pagina), c.map((r) => r.cliques), c.map((r) => r.impressoes), c.map((r) => r.pos_x_imp), c.map((r) => r.marca)],
       );
     }
   }
@@ -38,10 +38,10 @@ export class GscStore {
       const c = rows.slice(i, i + CHUNK);
       await this.q.query(
         `insert into mkt.gsc_consulta_dia (marca, dia, host, pagina, consulta, cliques, impressoes, pos_x_imp)
-         select '${this.marca}', * from unnest($1::date[], $2::text[], $3::text[], $4::text[], $5::int[], $6::int[], $7::numeric[])
+         select * from unnest($8::text[], $1::date[], $2::text[], $3::text[], $4::text[], $5::int[], $6::int[], $7::numeric[])
          on conflict (marca, dia, host, pagina, consulta) do update set cliques = excluded.cliques, impressoes = excluded.impressoes,
            pos_x_imp = excluded.pos_x_imp, atualizado_em = now()`,
-        [c.map((r) => r.dia), c.map((r) => r.host), c.map((r) => r.pagina), c.map((r) => r.consulta), c.map((r) => r.cliques), c.map((r) => r.impressoes), c.map((r) => r.pos_x_imp)],
+        [c.map((r) => r.dia), c.map((r) => r.host), c.map((r) => r.pagina), c.map((r) => r.consulta), c.map((r) => r.cliques), c.map((r) => r.impressoes), c.map((r) => r.pos_x_imp), c.map((r) => r.marca)],
       );
     }
   }
@@ -102,11 +102,11 @@ export async function syncGscEntidade(
       lidos += rows.length;
       if (opts.apply) {
         if (entidade === 'gsc_pagina') {
-          const m = mapGscPaginas(rows);
+          const m = mapGscPaginas(rows, store.marca);
           await store.paginas(m);
           gravados += m.length;
         } else {
-          const m = mapGscConsultas(rows, b.inicio);
+          const m = mapGscConsultas(rows, b.inicio, store.marca);
           await store.consultas(m);
           gravados += m.length;
         }

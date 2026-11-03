@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { generateKeyPairSync } from 'node:crypto';
 import type { FetchLike as FetchLikeGsc } from "../src/datahub/google/ga4";
-import { ATRASO_DIAS, GSC_PAGE_SIZE, GscClient, gscSitesFromEnv, hostECaminho, blocosMensais, mapGscConsultas, hostPermitido, mapGscPaginas, relatorioGsc, type GscRow } from '../src/datahub/google/gsc';
+import { ATRASO_DIAS, GSC_PAGE_SIZE, GscClient, gscSitesFromEnv, hostECaminho, blocosMensais, mapGscConsultas, hostPermitido, marcaDaPagina, mapGscPaginas, relatorioGsc, type GscRow } from '../src/datahub/google/gsc';
 import { intervaloGsc } from '../src/datahub/google/gsc-sync';
 
 const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs8', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } });
@@ -34,7 +34,7 @@ describe('GSC: mapeamento', () => {
       linha(['2026-10-01', 'https://a.com/p?x=1'], 10, 100, 4),
       linha(['2026-10-01', 'https://a.com/p?x=2'], 5, 300, 8),
     ]);
-    expect(r).toEqual([{ dia: '2026-10-01', host: 'a.com', pagina: '/p', cliques: 15, impressoes: 400, pos_x_imp: 2800 }]);
+    expect(r).toEqual([{ marca: 'rh', dia: '2026-10-01', host: 'a.com', pagina: '/p', cliques: 15, impressoes: 400, pos_x_imp: 2800 }]);
     expect(r[0]!.pos_x_imp / r[0]!.impressoes).toBe(7);
   });
   it('consultas: agregadas por mês; com menos de 10 impressões no mês e sem clique ficam de fora', () => {
@@ -110,6 +110,21 @@ describe('GSC: só a campanha dentro de quark.tec.br', () => {
     for (const h of ['rh-colaborador.quark.tec.br', 'sign.quark.tec.br', 'quark.tec.br']) expect(hostPermitido(h)).toBe(false);
     expect(hostPermitido('quarkrh.com.br')).toBe(true);
     expect(hostPermitido('vagas.quarkrh.com.br')).toBe(true);
+  });
+  it('cada landing page da campanha vai para a marca dela: clínica pelo caminho, o resto é do RH', () => {
+    const m = (p: string) => marcaDaPagina('campanha.quark.tec.br', p, 'rh');
+    expect(m('/quarkclinic-ebook-como-abrir-um-consultorio-em-2024')).toBe('clinic');
+    expect(m('/quarkclinic-calculadora-de-no-show')).toBe('clinic');
+    expect(m('/ebook-cid-11')).toBe('clinic');
+    expect(m('/quarkrh-calendario-2026')).toBe('rh');
+    expect(m('/checklist-de-admissao-e-demissao')).toBe('rh');
+    expect(m('/certificacao-gptw')).toBe('rh');
+    expect(marcaDaPagina('quarkclinic.com.br', '/quarkrh-x', 'clinic')).toBe('clinic'); // fora da campanha vale a marca da propriedade
+  });
+  it('páginas e consultas da campanha saem com a marca certa', () => {
+    const r = mapGscPaginas([linha(['2026-10-01', 'https://campanha.quark.tec.br/quarkclinic-ebook'], 1, 20, 4), linha(['2026-10-01', 'https://campanha.quark.tec.br/quarkrh-kit-nr1'], 1, 20, 4)], 'rh');
+    expect(r.map((x) => [x.marca, x.pagina])).toEqual([['clinic', '/quarkclinic-ebook'], ['rh', '/quarkrh-kit-nr1']]);
+    expect(mapGscConsultas([linha(['https://campanha.quark.tec.br/ebook-cid-11', 'cid 11'], 1, 20, 4)], '2026-10-01', 'rh')[0]!.marca).toBe('clinic');
   });
   it('páginas e consultas desses hosts não são mapeadas', () => {
     const rows = [linha(['2026-10-01', 'https://rh-colaborador.quark.tec.br/app'], 5, 50, 3), linha(['2026-10-01', 'https://campanha.quark.tec.br/x'], 5, 50, 3)];
